@@ -104,6 +104,13 @@ const deleteLine = (id: string): string => `/user-schedule-delete ${JSON.stringi
 const editLine = (id: string, prompt: string): string =>
   `/user-schedule-edit ${JSON.stringify({ id, prompt })}`;
 const steerLine = (id: string): string => `/user-schedule-steer-now ${JSON.stringify({ id })}`;
+/**
+ * 插话投递对账窗口。
+ *
+ * 略大于宿主侧的确认预算（`DELIVERY_CONFIRM_TIMEOUT_MS = 2000`），给命令往返与
+ * 投影帧留余量。窗口结束行若仍在 → 判「未确认，已保留」。
+ */
+const STEER_CONFIRM_WINDOW_MS = 2600;
 const pauseLine = (id: string): string => `/user-schedule-pause ${JSON.stringify({ id })}`;
 const resumeLine = (uid: string): string => `/user-schedule-resume ${JSON.stringify({ uid })}`;
 
@@ -196,6 +203,67 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
   const [steering, setSteering] = useState<ReadonlySet<string>>(new Set());
   const [steerDone, setSteerDone] = useState<ReadonlySet<string>>(new Set());
   const [steerErr, setSteerErr] = useState<ReadonlyMap<string, string>>(new Map());
+  /**
+   * 投递未确认的 id（宿主 `onUnconfirmed='keep'` 时提醒被留在 active）。
+   *
+   * 客户端拿不到业务失败码（`callCommand` 只有 admission 的 `matched`），
+   * 所以靠投影对账推断：标记已发送后开一个观察窗，行若仍在 → 判「未确认」。
+   * 这样即便核心/宿主的行为再变，用户看到的提示也与「行还在」这一事实一致。
+   */
+  const [steerUnconfirmed, setSteerUnconfirmed] = useState<ReadonlySet<string>>(new Set());
+
+  /**
+   * 投递结果对账（观察窗）。
+   *
+   * 插话成功后行应当随投影更新消失；若观察窗结束仍在，说明宿主判定「未确认」
+   * 并保留了条目（`onUnconfirmed='keep'`）—— 此时给出明确提示，而不是静默。
+   * 窗口略大于宿主侧 2s 确认预算，留出命令往返与投影帧的余量。
+   *
+   * 反向也对：若行确实消失了，清掉 done 态（否则同一 id 将来复用时按钮会误显示
+   * 「已发送」）。
+   */
+  useEffect(() => {
+    const live = projection?.schedules;
+    if (live === undefined) return;
+    const present = new Set(live.filter((item) => item.status !== 'paused').map((item) => item.id));
+    setSteerDone((current) => {
+      if (current.size === 0) return current;
+      let changed = false;
+      const next = new Set(current);
+      for (const id of current) {
+        if (!present.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [projection]);
+
+  useEffect(() => {
+    if (steerDone.size === 0) return undefined;
+    const timer = window.setTimeout(() => {
+      const live = projection?.schedules;
+      if (live === undefined) return;
+      const present = new Set(live.filter((item) => item.status !== 'paused').map((item) => item.id));
+      setSteerUnconfirmed((current) => {
+        let changed = false;
+        const next = new Set(current);
+        for (const id of steerDone) {
+          // 仍在投影里 → 宿主保留了条目 = 未确认送达
+          if (present.has(id) && !next.has(id)) {
+            next.add(id);
+            changed = true;
+          }
+          // 已消失 → 送达成功，清掉可能存在的旧提示
+          if (!present.has(id) && next.delete(id)) changed = true;
+        }
+        return changed ? next : current;
+      });
+    }, STEER_CONFIRM_WINDOW_MS);
+    return () => window.clearTimeout(timer);
+  }, [steerDone, projection]);
+
   // 暂停 / 恢复
   const [pausing, setPausing] = useState<ReadonlySet<string>>(new Set());
   const [resuming, setResuming] = useState<ReadonlySet<string>>(new Set());
@@ -304,6 +372,13 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
    * - 不要求已到点：与 QueueDock 一致，排队中的内容随时可提前送达；成功后出列。
    * - 命令返回 success → 记入 steerDone（短暂展示已发送），server 真实 fold 会自然移除 row。
    * - 返回 error → 在行内展示具体原因（every 暂不支持 / 其他）。
+   *
+   * **投递未确认**（宿主确认失败且 `onUnconfirmed='keep'`）时条目**留在** active，
+   * 投影不变，行自然继续显示 —— 这正是我们要的：不消失就不会丢。
+   * 但 `callCommand` 只暴露 `matched`（admission 语义，见 command-outcome.ts），
+   * 业务失败到不了这里，因此客户端无法直接知道「未确认」。改用一个**观察窗**：
+   * 标记已发送后若行在窗口内仍在投影中，就按「未确认」处理 —— 撤掉 done 态、
+   * 给出明确提示而非静默（这次的教训正是「静默」最伤人）。
    */
   const handleSteer = (item: ClientSchedule): void => {
     const id = item.id;
@@ -340,6 +415,29 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
           return next;
         });
       });
+  };
+
+  /**
+   * 重试投递：清掉「未确认」提示与 done 态，再走一次 `handleSteer`。
+   *
+   * 之所以能重试：宿主在未确认时**不写 dispatch**，条目仍在 active，插话是幂等的
+   * 再投递（不会双触发 —— 只有确认成功才出列）。
+   */
+  const handleSteerRetry = (item: ClientSchedule): void => {
+    const id = item.id;
+    setSteerUnconfirmed((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    setSteerDone((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    handleSteer(item);
   };
 
   const handlePause = (item: ClientSchedule): void => {
@@ -489,6 +587,18 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
           <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
             <span className="ss-dock-steer-err">{steerErr.get(item.id) ?? pauseErr.get(item.id)}</span>
+          )}
+          {/*
+            投递未确认：条目已被宿主保留（未写 dispatch），行仍在台上。
+            这里明说「可重试」并提供按钮 —— 旧实现在这种情况下会静默丢失。
+          */}
+          {steerUnconfirmed.has(item.id) && (
+            <span className="ss-dock-steer-warn" role="status">
+              <span>{t.steerUnconfirmed}</span>
+              <button type="button" className="ss-dock-steer-retry" onClick={() => handleSteerRetry(item)}>
+                {t.steerRetry}
+              </button>
+            </span>
           )}
         </div>
         {/* 图标：编辑 → 暂停/恢复 → 删除 → 插话（暂停保留槽位宽度） */}

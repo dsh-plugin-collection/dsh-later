@@ -98,7 +98,13 @@ class FakeSession {
   }
 }
 
-/** 假 Agent：message 收集 + 简易 runMaintenance/whenIdle/steer。 */
+/**
+ * 假 Agent：message 收集 + 简易 runMaintenance/whenIdle/steer。
+ *
+ * 投递会写入一条 `user/message`，因为宿主侧的**送达确认**正是核对该事件
+ * （见 src/delivery.ts）。不 echo 的假 agent 会让确认判定失败——那是假件失真，
+ * 不是实现缺陷；这里保持与真实核心一致的行为。
+ */
 class FakeAgent {
   constructor(session) {
     this.id = 'agent-runtime';
@@ -107,12 +113,22 @@ class FakeAgent {
     this.busy = false;
     this.steered = [];
   }
+  #echo(message) {
+    this.session.append('user/message', {
+      content: message.content,
+      source: { kind: 'user' },
+      role: 'user',
+      id: message.id,
+    });
+  }
   followup(message) {
     this.messages.push(message);
+    this.#echo(message);
   }
   steer(message) {
     // 与 dsh-agent-loop 一致：busy 时也可投（排在下一个 step boundary），不 throw。
     this.steered.push(message);
+    this.#echo(message);
   }
   async whenIdle() {}
   async runMaintenance(job) {
@@ -134,6 +150,21 @@ function fakeCtx(agent) {
   };
 }
 
+/**
+ * 默认插话投递设置（与 schema 默认一致）：followup + 确认开 + 未确认保留。
+ *
+ * 显式传参而非让 runtime 内部兜底：设置由 index 的 settings scope 提供，
+ * runtime 通过闭包读取，测试里必须给出同形状的值。
+ */
+function settingsOf(over = {}) {
+  return {
+    steerDelivery: 'followup',
+    confirmDelivery: true,
+    onUnconfirmed: 'keep',
+    ...over,
+  };
+}
+
 test('runtime：到期一次性提醒被派发并注入用户消息', async () => {
   const target = Date.now() + 300;
   const record = S_AT('s1', new Date(target).toISOString());
@@ -152,7 +183,7 @@ test('runtime：到期一次性提醒被派发并注入用户消息', async () =
     },
   ]);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   runtime.requestDrive();
   // 等待目标时间 + 派发余量
   await new Promise((r) => setTimeout(r, target - Date.now() + 800));
@@ -187,7 +218,7 @@ test('runtime：nothing 到期时不注入、不写 dispatch', async () => {
     },
   ]);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   runtime.requestDrive();
   await new Promise((r) => setTimeout(r, 200));
   await runtime.dispose();
@@ -218,7 +249,7 @@ test('runtime：P1-5 积压多条一次性合并为一条批次注入', async ()
     ]),
   );
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   runtime.requestDrive();
   await new Promise((r) => setTimeout(r, 400));
   await runtime.dispose();
@@ -261,14 +292,15 @@ test('steer：busy agent（in-flight 插话主场景）插话成功且写 dispat
   const agent = new FakeAgent(session);
   // 模拟 auto-driver 正忙：runMaintenance 会 throw，旧实现在此必然 internal_error
   agent.busy = true;
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   const result = await runtime.steerById('s1');
 
   assert.deepEqual(result, { ok: true, id: 's1', steered: true });
-  // 消息以「立即消费」形态投给 agent（steer 收集，不是 followup）
-  assert.equal(agent.steered.length, 1);
-  assert.equal(agent.messages.length, 0);
-  assert.match(agent.steered[0].content[0].text, /\[SCHEDULE REMINDER\]/);
+  // 默认投递方式为 followup（独立成轮）：与 next-step 是两条队列，
+  // 结构上避开 turn/start 抢 claim 导致的静默丢失。
+  assert.equal(agent.messages.length, 1);
+  assert.equal(agent.steered.length, 0);
+  assert.match(agent.messages[0].content[0].text, /\[SCHEDULE REMINDER\]/);
   // dispatch 已落日志 → fold 后不再 active（无双触发）
   const dispatch = session.events.filter((e) => e.type === 'schedule/change' && e.data.operation === 'dispatch');
   assert.equal(dispatch.length, 1);
@@ -281,12 +313,12 @@ test('steer：未到点也允许插话（QueueDock「插话发送」语义），
   const future = new Date(Date.now() + 60000).toISOString();
   const session = sessionWithDueAt('s1', future);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   const result = await runtime.steerById('s1');
 
   assert.deepEqual(result, { ok: true, id: 's1', steered: true });
-  assert.equal(agent.steered.length, 1);
-  assert.equal(agent.messages.length, 0);
+  assert.equal(agent.messages.length, 1);
+  assert.equal(agent.steered.length, 0);
   // dispatch 已落日志 → 到点后不会再 fire 一次（无双触发）
   const dispatch = session.events.filter((e) => e.type === 'schedule/change' && e.data.operation === 'dispatch');
   assert.equal(dispatch.length, 1);
@@ -298,12 +330,13 @@ test('steer：未到点也允许插话（QueueDock「插话发送」语义），
 test('steer：不存在的 id 拒绝', async () => {
   const session = sessionWithDueAt('s1', new Date(Date.now() - 5000).toISOString());
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   const result = await runtime.steerById('ghost');
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'schedule_not_found');
   assert.equal(agent.steered.length, 0);
+  assert.equal(agent.messages.length, 0);
   await runtime.dispose();
 });
 
@@ -326,7 +359,7 @@ test('暂停项插话：从 sidecar 取材投递，成功后清掉留档', async
   freshOwnershipDir();
   const session = new FakeSessionWithId([]);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
 
   // 造一条暂停留档（等价于用 /later 建好再暂停后的状态）
   recordPaused(SID_STEER_PAUSED, {
@@ -343,15 +376,26 @@ test('暂停项插话：从 sidecar 取材投递，成功后清掉留档', async
 
   const result = await runtime.steerById('uid-paused-1');
   assert.deepEqual(result, { ok: true, id: 'uid-paused-1', steered: true });
-  // 以「立即消费」形态投给 agent（steer，不是 followup）
-  assert.equal(agent.steered.length, 1);
-  assert.equal(agent.messages.length, 0);
+  // 默认 followup 投递（与日志路径同一策略，两条路径语义不分叉）
+  assert.equal(agent.messages.length, 1);
+  assert.equal(agent.steered.length, 0);
   // context 形态 → 走注入防护 framing
-  assert.match(agent.steered[0].content[0].text, /\[SCHEDULE REMINDER\]/);
+  assert.match(agent.messages[0].content[0].text, /\[SCHEDULE REMINDER\]/);
   // 投递成功即出列
   assert.equal(getPaused(SID_STEER_PAUSED, 'uid-paused-1'), undefined, '留档应被清掉');
-  // 不写会话事件（与删除暂停项同理：该 id 不在日志里，补写会让 fold 抛错）
-  assert.equal(session.events.length, 0, '不得写会话事件');
+  // 关键：**不得补写 schedule/change**（该 id 不在日志里，补写会让 fold 抛错），
+  // 也不得写 dispatch —— 暂停项的出列靠清留档，而非日志标记。
+  assert.equal(
+    session.events.filter((e) => e.type === 'schedule/change').length,
+    0,
+    '不得写 schedule/change',
+  );
+  // 只应出现「投递消息」本身（送达确认正是核对它）。
+  assert.deepEqual(
+    session.events.map((e) => e.type),
+    ['user/message'],
+    '暂停项插话只产生投递消息本身',
+  );
   await runtime.dispose();
 });
 
@@ -359,7 +403,7 @@ test('暂停项插话：delivery=user 时以本人身份代发', async () => {
   freshOwnershipDir();
   const session = new FakeSessionWithId([]);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   recordPaused(SID_STEER_PAUSED, {
     uid: 'uid-paused-2',
     prompt: '关火',
@@ -373,10 +417,10 @@ test('暂停项插话：delivery=user 时以本人身份代发', async () => {
   });
   const result = await runtime.steerById('uid-paused-2');
   assert.deepEqual(result, { ok: true, id: 'uid-paused-2', steered: true });
-  assert.equal(agent.steered.length, 1);
+  assert.equal(agent.messages.length, 1);
   // user 形态：原样内容，不加 reminder framing
-  assert.equal(agent.steered[0].content[0].text, '关火');
-  assert.equal(agent.steered[0].source?.kind, 'user');
+  assert.equal(agent.messages[0].content[0].text, '关火');
+  assert.equal(agent.messages[0].source?.kind, 'user');
   assert.equal(getPaused(SID_STEER_PAUSED, 'uid-paused-2'), undefined);
   await runtime.dispose();
 });
@@ -385,7 +429,7 @@ test('暂停项插话：不存在的 id 仍走日志路径并返回 schedule_not
   freshOwnershipDir();
   const session = new FakeSessionWithId([]);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   const result = await runtime.steerById('ghost');
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'schedule_not_found');
@@ -413,7 +457,7 @@ test('回归：插话接受 wire 的 uid（而非只认日志 scheduleId）', as
   const due = new Date(Date.now() - 5000).toISOString();
   const session = new FakeSessionUid(sessionWithDueAt('schedule-1', due).events);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
 
   // 模拟 create 时写入的 sidecar 所有权：日志 id=schedule-1，uid=U1
   recordOwnership(SID_STEER_UID, 'schedule-1', 'context', 'uid-U1');
@@ -421,7 +465,7 @@ test('回归：插话接受 wire 的 uid（而非只认日志 scheduleId）', as
   // GUI 传的是 uid
   const result = await runtime.steerById('uid-U1');
   assert.deepEqual(result, { ok: true, id: 'uid-U1', steered: true }, '按 uid 插话应成功');
-  assert.equal(agent.steered.length, 1);
+  assert.equal(agent.messages.length, 1);
   // dispatch 落在真正的日志 id 上
   const dispatch = session.events.filter((e) => e.type === 'schedule/change' && e.data.operation === 'dispatch');
   assert.equal(dispatch.length, 1);
@@ -434,7 +478,7 @@ test('插话：直接传日志 scheduleId 仍然可用（向后兼容）', async
   const due = new Date(Date.now() - 5000).toISOString();
   const session = new FakeSessionUid(sessionWithDueAt('schedule-1', due).events);
   const agent = new FakeAgent(session);
-  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent);
+  const runtime = new UserScheduleRuntime(fakeCtx(agent), agent, settingsOf);
   const result = await runtime.steerById('schedule-1');
   assert.deepEqual(result, { ok: true, id: 'schedule-1', steered: true });
   await runtime.dispose();

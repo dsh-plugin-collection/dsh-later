@@ -29,7 +29,17 @@ export interface SchedulerSettings {
     readonly maxSchedules: number;
     readonly allowLongPrompts: boolean;
     readonly maxPromptChars: number;
+    /** 插话投递方式（见 SchedulerSettingsSchema.steerDelivery）。 */
+    readonly steerDelivery: UserScheduleSteerDelivery;
+    /** 是否核对投递是否真正送达。 */
+    readonly confirmDelivery: boolean;
+    /** 投递未确认时：保留可重试 / 丢弃。 */
+    readonly onUnconfirmed: UserScheduleOnUnconfirmed;
 }
+/** 插话投递方式。 */
+export type UserScheduleSteerDelivery = 'followup' | 'steer';
+/** 投递未确认时的处理。 */
+export type UserScheduleOnUnconfirmed = 'keep' | 'discard';
 export declare function apply(ctx: Context, config?: {
     maxSchedules?: number;
 }): void;

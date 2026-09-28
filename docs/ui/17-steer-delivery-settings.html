@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 插话投递 schema + UI 草案</title>
+<style>
+  :root {
+    --bg: #151517;
+    --panel: #1c1c1f;
+    --panel-2: #232327;
+    --line: rgba(255,255,255,.09);
+    --line-2: rgba(255,255,255,.14);
+    --fg: #f9fafb;
+    --fg-2: #adb2b8;
+    --fg-3: #7c8188;
+    --warn: #e8b25c;
+    --warn-bg: rgba(232,178,92,.10);
+    --danger: #e5726b;
+    --brand: #f9fafb;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 96px;
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; letter-spacing: .2px; }
+  .sub { color: var(--fg-3); font-size: 13px; margin-bottom: 28px; }
+  h2 {
+    font-size: 13px; font-weight: 600; color: var(--fg-2);
+    margin: 34px 0 12px; letter-spacing: .6px; text-transform: uppercase;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; overflow: hidden;
+  }
+  .card-hd {
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-weight: 600; color: var(--fg);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-hd .pill {
+    font-size: 11px; font-weight: 500; color: var(--fg-3);
+    border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 8px;
+  }
+
+  /* ---- 设置行 ---- */
+  .field { padding: 15px 18px; border-bottom: 1px solid var(--line); }
+  .field:last-child { border-bottom: 0; }
+  .field-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+  .field-label { font-size: 13px; font-weight: 500; color: var(--fg); }
+  .field-hint { font-size: 12px; color: var(--fg-3); margin-top: 3px; line-height: 1.55; max-width: 400px; }
+  .field-ctl { flex: 0 0 auto; }
+
+  .divider-label {
+    padding: 11px 18px; background: var(--panel-2);
+    font-size: 11px; font-weight: 600; letter-spacing: .7px;
+    text-transform: uppercase; color: var(--fg-3);
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* ---- 原生感控件 ---- */
+  select.mock {
+    appearance: none; -webkit-appearance: none;
+    background: var(--panel-2) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'><path d='M3.5 5.25 7 8.75l3.5-3.5' stroke='%23adb2b8' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 9px center;
+    color: var(--fg); border: 1px solid var(--line-2);
+    border-radius: 8px; padding: 6px 30px 6px 11px;
+    font-size: 13px; font-family: inherit; cursor: pointer; min-width: 196px;
+  }
+  select.mock:focus { outline: 2px solid rgba(249,250,251,.22); outline-offset: 1px; }
+
+  .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; pointer-events: none; }
+  .track {
+    width: 38px; height: 22px; border-radius: 999px;
+    background: rgba(255,255,255,.14); position: relative;
+    transition: background .16s ease;
+  }
+  .track::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #e6e8ea; transition: transform .16s ease;
+  }
+  .switch input:checked + .track { background: rgba(249,250,251,.82); }
+  .switch input:checked + .track::after { transform: translateX(16px); background: #1c1c1f; }
+  .switch input:focus-visible + .track { outline: 2px solid rgba(249,250,251,.28); outline-offset: 2px; }
+  .switch .sw-txt { font-size: 13px; color: var(--fg-2); min-width: 18px; }
+
+  /* ---- 风险/说明条 ---- */
+  .note {
+    margin-top: 9px; padding: 8px 11px; border-radius: 8px;
+    font-size: 12px; line-height: 1.6;
+    background: var(--warn-bg); color: var(--warn);
+    border: 1px solid rgba(232,178,92,.24);
+  }
+  .note.warn-danger { background: rgba(229,114,107,.10); color: var(--danger); border-color: rgba(229,114,107,.26); }
+  .note.neutral { background: rgba(255,255,255,.04); color: var(--fg-3); border-color: var(--line); }
+  .note code { font-family: var(--mono); font-size: 11px; }
+
+  .readonly { font-size: 12px; color: var(--fg-3); display: flex; align-items: center; gap: 7px; }
+  .readonly .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); flex: 0 0 auto; }
+  .ro-box {
+    border: 1px dashed var(--line-2); border-radius: 8px;
+    padding: 6px 11px; font-size: 12px; color: var(--fg-3);
+    background: rgba(255,255,255,.02);
+  }
+
+  /* ---- Dock 行 ---- */
+  .dock {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px;
+  }
+  .srow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 11px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--panel-2);
+    transition: opacity .22s ease, transform .22s ease;
+  }
+  .srow + .srow { margin-top: 8px; }
+  .srow-time { font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+  .srow-sep { color: var(--fg-3); font-size: 12px; }
+  .srow-rem { font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+  .srow-prompt { flex: 1; font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srow-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+  .ibtn {
+    background: transparent; border: 1px solid transparent; color: var(--fg-2);
+    border-radius: 7px; padding: 3px 8px; font-size: 12px; font-family: inherit; cursor: pointer;
+    transition: background .14s ease, color .14s ease, border-color .14s ease;
+  }
+  .ibtn:hover { background: rgba(255,255,255,.08); color: var(--fg); border-color: var(--line-2); }
+  .ibtn.primary:hover { background: rgba(249,250,251,.92); color: #1c1c1f; }
+  .srow.vanishing { opacity: 0; transform: translateY(-4px); }
+  .srow.back { animation: rowback .3s ease; }
+  @keyframes rowback { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  .rnote {
+    margin-top: 8px; padding: 8px 11px; border-radius: 8px;
+    background: var(--warn-bg); border: 1px solid rgba(232,178,92,.24);
+    color: var(--warn); font-size: 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .rnote .spacer { flex: 1; }
+  .rnote button {
+    background: rgba(232,178,92,.16); border: 1px solid rgba(232,178,92,.34);
+    color: var(--warn); border-radius: 6px; padding: 2px 10px;
+    font-size: 12px; font-family: inherit; cursor: pointer;
+  }
+  .rnote button:hover { background: rgba(232,178,92,.26); }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; align-items: center; }
+  .cbtn {
+    background: var(--panel-2); border: 1px solid var(--line-2); color: var(--fg-2);
+    border-radius: 8px; padding: 5px 11px; font-size: 12px; font-family: inherit; cursor: pointer;
+  }
+  .cbtn:hover { color: var(--fg); border-color: rgba(255,255,255,.24); }
+  .legend { font-size: 12px; color: var(--fg-3); }
+
+  /* ---- schema 代码 ---- */
+  pre.code {
+    background: #101012; border: 1px solid var(--line); border-radius: 12px;
+    padding: 15px 17px; overflow-x: auto; margin: 0;
+    font-family: var(--mono); font-size: 12px; line-height: 1.65; color: #d7dae0;
+  }
+  pre.code .k { color: #c4a2f0; }
+  pre.code .s { color: #9ed49a; }
+  pre.code .c { color: #6c7076; font-style: italic; }
+  pre.code .n { color: #e8b25c; }
+  pre.code .f { color: #79b8ff; }
+
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .tbl th, .tbl td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tbl th { color: var(--fg-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .tbl td { color: var(--fg-2); }
+  .tbl td:first-child { color: var(--fg); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .open-q { font-size: 12.5px; color: var(--fg-2); }
+  .open-q li { margin-bottom: 7px; }
+  .open-q b { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>插话投递 · Schema + UI 草案</h1>
+  <div class="sub">dsh-later · 可交互预览（非真实插件，仅还原交互与视觉）。改动范围限定在插件内。</div>
+
+  <h2>1 · 设置卡片 UI</h2>
+  <div class="card">
+    <div class="card-hd">定时提醒 <span class="pill">插件配置</span></div>
+
+    <!-- 已有字段（折叠示意） -->
+    <div class="field">
+      <div class="field-top">
+        <div>
+          <div class="field-label">显示输入框右侧定时按钮</div>
+          <div class="field-hint">仅影响 GUI 显隐；提醒触发与 dock 不受影响。</div>
+        </div>
+        <div class="field-ctl">
+          <label class="switch"><input type="checkbox" checked /><span class="track"></span><span class="sw-txt">开</span></label>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-top">
+        <div>
+          <div class="field-label">单会话任务上限</div>
+          <div class="field-hint">超出后拒绝新建提醒。</div>
+        </div>
+        <div class="field-ctl">
+          <select class="mock"><option>100</option><option>50</option><option>200</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider-label">插话投递</div>
+
+    <!-- 投递方式 -->
+    <div class="field">
+      <div class="field-top">
+        <div>
+          <div class="field-label">投递方式</div>
+          <div class="field-hint" id="deliveryHint">独立成一轮，等价于正常发送；不会与回合启动竞争。</div>
+        </div>
+        <div class="field-ctl">
+          <select class="mock" id="delivery">
+            <option value="followup" selected>followup（推荐）</option>
+            <option value="steer">steer（快速，可能被吞）</option>
+          </select>
+        </div>
+      </div>
+      <div class="note warn-danger" id="deliveryNote" style="display:none"></div>
+    </div>
+
+    <!-- 投递确认 -->
+    <div class="field">
+      <div class="field-top">
+        <div>
+          <div class="field-label">投递确认</div>
+          <div class="field-hint">投递后核对会话日志，确认消息真正进入请求。关闭则不再核对，也不保证送达。</div>
+        </div>
+        <div class="field-ctl">
+          <label class="switch"><input type="checkbox" id="confirm" checked /><span class="track"></span><span class="sw-txt" id="confirmTxt">开</span></label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 未确认时 -->
+    <div class="field" id="unconfirmedField">
+      <div class="field-top">
+        <div>
+          <div class="field-label">未确认时</div>
+          <div class="field-hint">留档等待重试，并明确提示。</div>
+        </div>
+        <div class="field-ctl">
+          <select class="mock">
+            <option selected>保留条目可重试（推荐）</option>
+            <option>丢弃</option>
+          </select>
+        </div>
+      </div>
+      <div class="note neutral" id="discardNote" style="display:none">
+        选择「丢弃」后，未确认的提醒会按旧语义移出列表 —— <b>静默丢失将重新变得可能</b>。
+      </div>
+    </div>
+
+    <!-- C 只读 -->
+    <div class="field">
+      <div class="field-top">
+        <div>
+          <div class="field-label">核心能力</div>
+          <div class="field-hint">核心若提供 steer 回执，此处的可靠性选项将不再必要。</div>
+        </div>
+        <div class="field-ctl">
+          <div class="ro-box readonly"><span class="dot"></span>当前核心：不支持可靠投递</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>2 · 投递结果交互（乐观消失 + 失败回滚）</h2>
+  <div class="dock">
+    <div class="srow" id="row1">
+      <span class="srow-time">18:50</span><span class="srow-sep">|</span>
+      <span class="srow-rem">剩 05:21</span>
+      <span class="srow-prompt">插话修复验证AI</span>
+      <span class="srow-btns">
+        <button class="ibtn">编辑</button>
+        <button class="ibtn">暂停</button>
+        <button class="ibtn">删除</button>
+        <button class="ibtn primary" id="steerBtn">插话发送</button>
+      </span>
+    </div>
+    <div id="rollbackHost"></div>
+  </div>
+
+  <div class="controls">
+    <span class="legend">模拟：</span>
+    <button class="cbtn" data-outcome="ok">投递成功</button>
+    <button class="cbtn" data-outcome="fail">投递未确认（回滚）</button>
+    <button class="cbtn" id="resetBtn">重置</button>
+    <span class="legend" id="stateTxt"></span>
+  </div>
+
+  <h2>3 · Settings Schema</h2>
+  <pre class="code"><span class="c">/** 插话投递：入哪个队列。 */</span>
+<span class="f">steerDelivery</span>: s.<span class="f">union</span>([
+  s.<span class="f">const</span>(<span class="s">'followup'</span>),   <span class="c">// next-turn：独立成轮，竞态在结构上不存在（默认）</span>
+  s.<span class="f">const</span>(<span class="s">'steer'</span>),      <span class="c">// next-step：更快，但撞 turn/start 会被 claim 吞掉</span>
+]).<span class="f">default</span>(<span class="s">'followup'</span>),
+
+<span class="c">/** 投递后核对日志中是否出现该 message id。 */</span>
+<span class="f">confirmDelivery</span>: s.<span class="f">boolean</span>().<span class="f">default</span>(<span class="n">true</span>),
+
+<span class="c">/** 未确认时：保留可重试 / 丢弃。 */</span>
+<span class="f">onUnconfirmed</span>: s.<span class="f">union</span>([
+  s.<span class="f">const</span>(<span class="s">'keep'</span>),
+  s.<span class="f">const</span>(<span class="s">'discard'</span>),
+]).<span class="f">default</span>(<span class="s">'keep'</span>),</pre>
+
+  <h2>4 · 实现要点</h2>
+  <div class="card">
+    <table class="tbl">
+      <tr><th>项</th><th>做法</th></tr>
+      <tr><td>投递</td><td>按 <code>steerDelivery</code> 分派到 <code>agent.followup</code> / <code>agent.steer</code></td></tr>
+      <tr><td>确认</td><td>append 后读<b>会话日志</b>核对 message id；不监听 <code>inbox/claimed</code>、<code>request/header</code>（避免与核心时序隐性耦合）</td></tr>
+      <tr><td>幂等</td><td>未确认且 <code>onUnconfirmed='keep'</code> 时<b>不写 dispatch</b>，条目留在 active 可重试</td></tr>
+      <tr><td>暂停项</td><td><code>steerPausedById</code> 同步受这三项控制</td></tr>
+      <tr><td>范围</td><td>全部在插件内；不碰 DSH 核心</td></tr>
+    </table>
+  </div>
+
+  <h2>5 · 待确认</h2>
+  <div class="card">
+    <div class="field open-q">
+      <ol>
+        <li><b>确认超时阈值</b> —— 草案取 <b>2s</b>（正常核对毫秒级，超时即判未确认）。</li>
+        <li><b>是否暴露 <code>inject</code></b> —— 草案<b>不暴露</b>（不唤醒 + 更易丢）。</li>
+        <li><b>是否保留「丢弃」选项</b> —— 草案<b>保留</b>，遵循「把权衡诚实交给用户」。</li>
+      </ol>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var delivery = document.getElementById('delivery');
+  var deliveryHint = document.getElementById('deliveryHint');
+  var deliveryNote = document.getElementById('deliveryNote');
+  var confirmEl = document.getElementById('confirm');
+  var confirmTxt = document.getElementById('confirmTxt');
+  var discardNote = document.getElementById('discardNote');
+
+  function syncDelivery() {
+    var isSteer = delivery.value === 'steer';
+    deliveryHint.textContent = isSteer
+      ? '插入当前回合的下一个 step 边界，更快。'
+      : '独立成一轮，等价于正常发送；不会与回合启动竞争。';
+    if (!isSteer) { deliveryNote.style.display = 'none'; return; }
+    deliveryNote.style.display = '';
+    deliveryNote.textContent = confirmEl.checked
+      ? '⚠ 撞上回合启动时可能被吞掉；已开启投递确认，未送达会保留条目并可重试。'
+      : '⚠ 撞上回合启动时可能被吞掉，且不会保留条目（投递确认已关闭）。';
+  }
+
+  function syncConfirm() {
+    confirmTxt.textContent = confirmEl.checked ? '开' : '关';
+    syncDelivery();
+  }
+
+  delivery.addEventListener('change', syncDelivery);
+  confirmEl.addEventListener('change', syncConfirm);
+
+  // 「未确认时」下拉：选中「丢弃」时给出警示
+  var unconfirmedSelect = document.querySelector('#unconfirmedField select');
+  unconfirmedSelect.addEventListener('change', function () {
+    discardNote.style.display = unconfirmedSelect.selectedIndex === 1 ? '' : 'none';
+  });
+
+  // ---- dock 行：投递 -> 乐观消失 -> 成功 / 回滚 ----
+  var row = document.getElementById('row1');
+  var host = document.getElementById('rollbackHost');
+  var stateTxt = document.getElementById('stateTxt');
+  var outcome = 'ok';
+  var busy = false;
+
+  document.querySelectorAll('.cbtn[data-outcome]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      outcome = b.dataset.outcome;
+      document.querySelectorAll('.cbtn[data-outcome]').forEach(function (x) {
+        x.style.borderColor = x === b ? 'rgba(255,255,255,.4)' : '';
+        x.style.color = x === b ? 'var(--fg)' : '';
+      });
+    });
+  });
+
+  function reset() {
+    row.classList.remove('vanishing');
+    row.style.display = '';
+    host.innerHTML = '';
+    stateTxt.textContent = '';
+  }
+  document.getElementById('resetBtn').addEventListener('click', reset);
+
+  document.getElementById('steerBtn').addEventListener('click', function () {
+    if (busy) return;
+    busy = true;
+    host.innerHTML = '';
+    stateTxt.textContent = '';
+    row.classList.add('vanishing');           // 乐观消失
+    setTimeout(function () {
+      row.style.display = 'none';
+      if (outcome === 'ok') {
+        stateTxt.textContent = '已投递（条目移出列表）';
+      } else {
+        // 回滚：条目放回 + 明确提示
+        row.style.display = '';
+        row.classList.remove('vanishing');
+        row.classList.add('back');
+        setTimeout(function () { row.classList.remove('back'); }, 320);
+        var n = document.createElement('div');
+        n.className = 'rnote';
+        n.innerHTML = '<span>⚠ 投递未确认，提醒已保留，可重试</span><span class="spacer"></span>';
+        var retry = document.createElement('button');
+        retry.textContent = '重试';
+        retry.addEventListener('click', function () {
+          host.innerHTML = '';
+          stateTxt.textContent = '已重试（模拟成功）';
+          row.classList.add('vanishing');
+          setTimeout(function () { row.style.display = 'none'; }, 240);
+        });
+        n.appendChild(retry);
+        host.appendChild(n);
+        stateTxt.textContent = '未确认 → 已回滚';
+      }
+      busy = false;
+    }, 420);
+  });
+
+  syncDelivery();
+})();
+</script>
+</body>
+</html>

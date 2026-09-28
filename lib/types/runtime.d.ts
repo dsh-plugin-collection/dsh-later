@@ -19,6 +19,13 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ScheduleRecord, OneShotScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
 import type { UserScheduleDelivery } from './domain.js';
+import type { DeliveryMode } from './delivery.js';
+/** runtime 关心的设置子集（插话投递策略）。 */
+export interface SteerDeliverySettings {
+    readonly steerDelivery: DeliveryMode;
+    readonly confirmDelivery: boolean;
+    readonly onUnconfirmed: 'keep' | 'discard';
+}
 /** 一次「用户提醒决策」：一批同形态到期一次性、或一批到期固定间隔、或下一次等待目标。
  *
  * P1-5：one-shot 从单条改为**同投递形态的批次**——网页关闭期间积压的多条
@@ -45,6 +52,14 @@ export declare function dueUserDecision(active: readonly ScheduleRecord[], now: 
 export declare class UserScheduleRuntime {
     private readonly ctx;
     private readonly agent;
+    /**
+     * 读取当前生效设置（每次调用按需取值，与工具/命令同源）。
+     *
+     * 注入而非直接读 ctx.settings：settings 的注册在 index 的 `ctx.inject(['settings'])`
+     * 回调里完成，runtime 拿不到那个 scope；把它做成闭包注入，保证「设置 UI 改了立刻生效」
+     * 这一既有语义（`applies: 'live'`）在插话路径上同样成立。
+     */
+    private readonly getSettings;
     private readonly stop;
     private resolveStop;
     private timer;
@@ -55,7 +70,7 @@ export declare class UserScheduleRuntime {
     private failures;
     private idleWait;
     private disposal;
-    constructor(ctx: Context, agent: Agent);
+    constructor(ctx: Context, agent: Agent, getSettings: () => SteerDeliverySettings);
     /** 是否仍为活动 root agent。 */
     private isLive;
     /** 发起一次重算（合并多个触发为一次）。 */
@@ -95,6 +110,20 @@ export declare class UserScheduleRuntime {
         code: string;
         message: string;
     }>;
+    /**
+     * 按配置把消息投进队列。
+     *
+     * `followup`（默认）入 `next-turn`：与 `next-step` 是两条独立队列，
+     * `claim('next-step', …)` 不触碰它，**结构上不存在**与 `turn/start` 竞争的窗口。
+     * `steer` 入 `next-step`，更快但会在撞上回合启动时被吞（见 delivery.ts 注释）。
+     */
+    private deliver;
+    /**
+     * 核对投递是否真正进入会话日志。
+     *
+     * 关闭确认时直接返回 true（fire-and-forget，保持旧语义）。
+     */
+    private verifyDelivery;
     /** 执行一次用户提醒决策与派发。 */
     private driveOnce;
     /**

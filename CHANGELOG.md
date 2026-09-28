@@ -4,6 +4,32 @@
 
 ## 未发布
 
+- **fix** 「插话发送」会**静默丢失**：提醒从列表消失，消息却没送达模型。
+  - 根因：`agent.steer()` 入 `next-step`，语义是「下一个 step 边界消费」。
+    若插话恰好撞上 `turn/start`，核心 `inbox.claim('next-step', …)` 会把**整批**
+    取走交给一个**请求上下文已定**的 step —— 消息落进 surface，却不进实际请求。
+  - 实测时序（会话日志，毫秒级）：
+    ```
+    t+0ms   agent/inbox/spliced  → 插入 next-step
+    t+1ms   turn/start           → turn 17 开始（同一毫秒）
+    t+1ms   agent/inbox/spliced  → removedCount:1, inserted:[]  ← 被 claim 吞掉
+    t+17ms  request/header       → 请求已按旧上下文构造
+    ```
+    该轮模型回复与提醒内容无关，确认它从未读到这条消息。
+  - **并有第二个独立缺陷**：旧实现在 `steer()` 之后**无条件**写 `dispatch`，
+    把提醒移出 active。投递失败 = 提醒永久消失且**不可重试** ——
+    虚假的成功信号掩盖了真实的投递失败。
+  - 修复一（默认投递方式 `followup`）：入 `next-turn`，与 `next-step` 是两条独立
+    队列，`claim('next-step', …)` 不触碰它，**竞态在结构上不存在**；语义等价于
+    「正常发送」（独立成轮）。可在设置里改回 `steer`。
+  - 修复二（投递确认，默认开）：投递后**读会话日志**核对 message id 是否真的落盘。
+    未确认且「未确认时 = 保留条目」时**不写 dispatch**，提醒留在列表中可重试，
+    并在行内明确提示 —— 不再静默。
+  - 未确认处理可选「丢弃」（恢复旧语义）；选择时 UI 明示「静默丢失将重新变得可能」。
+  - 确认机制**只依赖已持久化的日志格式**，不监听 `inbox/claimed` / `request/header`
+    等核心运行时事件，避免与核心内部时序隐性耦合。
+  - 设置 UI：新增「插话投递」三项目；选 `steer` 时常驻显示风险提示，且文案随
+    「投递确认」开关切换口径（关确认时明说不会保留条目）。
 - **fix** 「插话发送」对普通（非暂停）提醒报 `schedule_not_found`。
   - 根因：GUI 传的是**投影里的 id**，而它「稳定 uid 优先」
     （`wireItemOf`：`id: uid ?? record.id`）；日志记录却用 `schedule-N`。

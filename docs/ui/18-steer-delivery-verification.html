@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 插话投递修复 实机验收截图</title>
+<style>
+  :root { --bg:#151517; --panel:#1c1c1f; --line:rgba(255,255,255,.09); --fg:#f9fafb; --fg2:#adb2b8; --fg3:#7c8188; --ok:#7ec699; --warn:#e8b25c; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:32px 20px 80px; background:var(--bg); color:var(--fg);
+    font:14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 6px; }
+  .sub { color:var(--fg3); font-size:13px; margin-bottom:26px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:26px; }
+  .hd { padding:13px 17px; border-bottom:1px solid var(--line); font-size:13px; font-weight:600; display:flex; align-items:center; gap:9px; }
+  .num { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:6px;
+    background:rgba(255,255,255,.09); font-size:11px; color:var(--fg2); flex:0 0 auto; }
+  .card img { display:block; width:100%; height:auto; }
+  .note { padding:12px 17px; border-top:1px solid var(--line); font-size:12.5px; color:var(--fg2); }
+  .note b { color:var(--fg); font-weight:600; }
+  .hl { color:var(--ok); }
+  .wr { color:var(--warn); }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px;
+    background:rgba(255,255,255,.06); padding:1px 5px; border-radius:4px; }
+  pre { margin:0; padding:13px 17px; background:#101012; border-top:1px solid var(--line);
+    overflow-x:auto; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; line-height:1.6; color:#d7dae0; }
+  .kv { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .kv th,.kv td { text-align:left; padding:8px 17px; border-top:1px solid var(--line); }
+  .kv th { color:var(--fg3); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.5px; width:34%; }
+  .kv td { color:var(--fg2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>插话投递修复 · 实机验收截图</h1>
+  <div class="sub">2026-09-24 · 宿主重启于 13:30 之后 · 全部在 <code>127.0.0.1:3080</code> 真实 GUI 上操作</div>
+
+  <div class="card">
+    <div class="hd"><span class="num">1</span>设置页 · 三项新配置（投递方式 = steer，确认开启）</div>
+    <img src="screenshots/later-05-fields.png" alt="设置页三项配置" />
+    <div class="note">
+      <b>插话投递方式</b> = 「插入当前回合（更快）」← 选 steer 时风险提示<span class="wr">常驻</span>出现：
+      「⚠ 撞上回合启动时可能被吞掉；已开启投递确认，未送达会保留条目并可重试。」<br>
+      <b>投递确认</b> = 「开启」（注意此处已修正为 开启/关闭，不再是 显示/隐藏）。<br>
+      <b>未确认时</b> = 「保留条目可重试（推荐）」。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><span class="num">2</span>风险文案随「投递确认」切换口径</div>
+    <img src="screenshots/later-02-confirm-off.png" alt="确认关闭后的风险文案" />
+    <div class="note">
+      把「投递确认」改为<b>关闭</b>后，同一处提示立刻改口径：
+      「⚠ 撞上回合启动时可能被吞掉，<span class="wr">且不会保留条目（投递确认已关闭）</span>。」<br>
+      这样「选项的后果」与「当前配置」始终对齐，不留「选了更快的就行」的错觉。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><span class="num">3</span>插话送达成功（对话记录 + dock 同框）</div>
+    <img src="screenshots/later-06-dock-before.png" alt="插话送达成功" />
+    <div class="note">
+      从上到下依次是：<code>later · 将于 9/24 周四 15:04（约 10 分钟后）「截图验证E」</code> →
+      <code>user-schedule-steer-now · {"ok":true,"steered":true}</code> →
+      <b class="hl">用户气泡「截图验证E」</b>（这就是插话真正送达的内容）→
+      下一条新提醒 <code>「截图验证F」</code>，以及输入框下方 dock 中的
+      <code>15:06 | 剩 02:52 | 截图验证F</code>。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><span class="num">4</span>会话日志证据（毫秒级时序）</div>
+    <pre>t+ 0ms  seq 815  command/run            ← user-schedule-steer-now
+t+ 2ms  seq 816  agent/inbox/spliced     ← 入队（followup → next-turn）
+t+ 3ms  seq 817  turn/start              ← 与插话撞在同一毫秒
+t+ 4ms  seq 818  agent/inbox/spliced     ← 【无 removedCount】旧实现此处被 claim 吞掉
+t+26ms  seq 820  user/message  「投递验证C」  ← 消息真的落盘
+t+41ms  seq 822  schedule/change:dispatch ← 确认之后才出列
+t+49ms  seq 823  command/done  {"ok":true,"steered":true}</pre>
+    <div class="note">
+      <b>关键对比</b>：昨天（<code>steer</code>，失败）在同一位置是
+      <code>agent/inbox/spliced → removedCount:1, inserted:[]</code> —— 消息被
+      <code>claim('next-step')</code> 取走却进不了实际请求。<br>
+      今天（<code>followup</code>）该移除<b class="hl">不再出现</b>，因为 <code>next-turn</code>
+      与 <code>next-step</code> 是两条独立队列，<b>竞态在结构上不存在</b>。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><span class="num">5</span>本轮实机发现并修掉的文案 bug</div>
+    <table class="kv">
+      <tr><th>现象</th><td>「投递确认」下拉显示为 <b>显示 / 隐藏</b>（应为 开启 / 关闭）</td></tr>
+      <tr><th>原因</th><td>所有布尔字段共用 <code>optionOn/optionOff</code>，而那对文案是为 <code>showButton</code>（显隐开关）写的</td></tr>
+      <tr><th>为何测试没抓到</th><td>属<b>文案语义错配</b>，不是逻辑错误 —— 单测 / 类型检查 / 构建全绿</td></tr>
+      <tr><th>修复</th><td>每个布尔字段带自己的 <code>onKey/offKey</code>；加回归测试锁住</td></tr>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>

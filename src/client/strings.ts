@@ -42,6 +42,9 @@ const zh = {
   steerAlreadySent: '已插话',
   steerFailed: '插话失败：{message}',
   steerUnsupportedKind: '周期提醒暂不支持插话',
+  /** 投递未确认（宿主保留条目，可重试） */
+  steerUnconfirmed: '投递未确认，提醒已保留，可重试',
+  steerRetry: '重试',
   /** 暂停 / 恢复（仅 after；原地冻结进度条） */
   pauseTask: '暂停提醒',
   resumeTask: '恢复提醒',
@@ -121,6 +124,9 @@ const en: { [K in keyof typeof zh]: string } = {
   steerAlreadySent: 'Steered',
   steerFailed: 'Steer failed: {message}',
   steerUnsupportedKind: 'Recurring reminders can\'t be steered',
+  /** Delivery unconfirmed (host kept the item; retryable) */
+  steerUnconfirmed: 'Delivery unconfirmed — reminder kept, you can retry',
+  steerRetry: 'Retry',
   pauseTask: 'Pause reminder',
   resumeTask: 'Resume reminder',
   pausedLabel: 'Paused',

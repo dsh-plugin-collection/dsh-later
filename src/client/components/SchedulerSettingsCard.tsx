@@ -31,22 +31,74 @@ export interface SchedulerSettings {
   lunchStart?: string;
   lunchEnd?: string;
   eveningEnd?: string;
+  steerDelivery?: 'followup' | 'steer';
+  confirmDelivery?: boolean;
+  onUnconfirmed?: 'keep' | 'discard';
 }
 
 /** 字段元数据（顺序固定，便于稳定渲染）。 */
 type FieldDef =
-  | { readonly kind: 'boolean'; readonly key: 'showButton'; readonly labelKey: string; readonly hintKey?: string; readonly defaultValue: boolean }
+  | {
+      readonly kind: 'boolean';
+      readonly key: 'showButton' | 'confirmDelivery';
+      readonly labelKey: string;
+      readonly hintKey?: string;
+      readonly defaultValue: boolean;
+      /**
+       * 该布尔字段自己的「开 / 关」选项文案 key。
+       *
+       * 不能所有布尔共用一对文案：`showButton` 是「显示 / 隐藏」（它是显隐开关），
+       * 而 `confirmDelivery` 是「开 / 关」（它是功能开关）。共用会让「投递确认」
+       * 显示成「显示 / 隐藏」，意思完全不对 —— 实测在设置页发现。
+       */
+      readonly onKey: string;
+      readonly offKey: string;
+    }
   | { readonly kind: 'number'; readonly key: 'maxSchedules'; readonly labelKey: string; readonly hintKey: string; readonly defaultValue: number }
-  | { readonly kind: 'time'; readonly key: 'workStart' | 'workEnd' | 'lunchStart' | 'lunchEnd' | 'eveningEnd'; readonly labelKey: string; readonly hintKey?: string };
+  | { readonly kind: 'time'; readonly key: 'workStart' | 'workEnd' | 'lunchStart' | 'lunchEnd' | 'eveningEnd'; readonly labelKey: string; readonly hintKey?: string }
+  | { readonly kind: 'enum'; readonly key: 'steerDelivery' | 'onUnconfirmed'; readonly labelKey: string; readonly hintKey?: string; readonly options: readonly string[]; readonly defaultValue: string };
 
 const FIELDS: readonly FieldDef[] = [
-  { kind: 'boolean', key: 'showButton', labelKey: 'showButtonLabel', hintKey: 'showButtonHint', defaultValue: true },
+  {
+    kind: 'boolean',
+    key: 'showButton',
+    labelKey: 'showButtonLabel',
+    hintKey: 'showButtonHint',
+    defaultValue: true,
+    onKey: 'optionOn',
+    offKey: 'optionOff',
+  },
   { kind: 'number', key: 'maxSchedules', labelKey: 'maxSchedulesLabel', hintKey: 'maxSchedulesHint', defaultValue: 100 },
   { kind: 'time', key: 'workStart', labelKey: 'workStartLabel', hintKey: 'smartWindowHint' },
   { kind: 'time', key: 'workEnd', labelKey: 'workEndLabel' },
   { kind: 'time', key: 'lunchStart', labelKey: 'lunchStartLabel' },
   { kind: 'time', key: 'lunchEnd', labelKey: 'lunchEndLabel' },
   { kind: 'time', key: 'eveningEnd', labelKey: 'eveningEndLabel' },
+  {
+    kind: 'enum',
+    key: 'steerDelivery',
+    labelKey: 'steerDeliveryLabel',
+    hintKey: 'steerDeliveryHint',
+    options: ['followup', 'steer'],
+    defaultValue: 'followup',
+  },
+  {
+    kind: 'boolean',
+    key: 'confirmDelivery',
+    labelKey: 'confirmDeliveryLabel',
+    hintKey: 'confirmDeliveryHint',
+    defaultValue: true,
+    onKey: 'optionEnabled',
+    offKey: 'optionDisabled',
+  },
+  {
+    kind: 'enum',
+    key: 'onUnconfirmed',
+    labelKey: 'onUnconfirmedLabel',
+    hintKey: 'onUnconfirmedHint',
+    options: ['keep', 'discard'],
+    defaultValue: 'keep',
+  },
 ] as const;
 
 /** 单字段的 pending 编辑意图：`{value, reset:true}` 表示点击 reset 等待保存。 */
@@ -137,6 +189,10 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
       const v = value[field.key];
       return v === false ? 'false' : 'true';
     }
+    if (field.kind === 'enum') {
+      const v = value[field.key];
+      return typeof v === 'string' ? v : field.defaultValue;
+    }
     const v = value[field.key];
     return v ?? '';
   };
@@ -150,6 +206,10 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
     if (field.kind === 'boolean') {
       const v = base[field.key];
       return v === false ? 'false' : 'true';
+    }
+    if (field.kind === 'enum') {
+      const v = base[field.key];
+      return typeof v === 'string' ? v : field.defaultValue;
     }
     const v = base[field.key];
     return v ?? '';
@@ -165,6 +225,7 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
       return null;
     }
     if (field.kind === 'boolean') return null; // 取值恒为 'true'/'false'，无需校验
+    if (field.kind === 'enum') return field.options.includes(raw) ? null : t('invalidLabel');
     if (raw.trim().length === 0) return null; // 空 = unset
     if (!isValidHhmm(raw)) return t('invalidTimeLabel');
     return null;
@@ -211,8 +272,7 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
             ? Number(p.value)
             : field?.kind === 'boolean'
               ? p.value === 'true'
-              : p.value;
-        await scope.set(key as keyof SchedulerSettings, coerced as never);
+              : p.value;        await scope.set(key as keyof SchedulerSettings, coerced as never);
       }
       setPending({});
     } catch {
@@ -230,6 +290,13 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
   };
   const anyInvalid = FIELDS.some((field) => invalidField(field) !== null);
   const saveDisabled = !dirty || saving || !writable || anyInvalid;
+
+  /**
+   * 「投递确认」当前是否开启（pending 优先于已保存）—— 决定 steer 风险文案的口径。
+   * 默认 true（与 schema 一致：未设置即为开）。
+   */
+  const confirmEnabled =
+    (pending.confirmDelivery?.value ?? (value.confirmDelivery === false ? 'false' : 'true')) !== 'false';
 
   return (
     <li className={open ? 'ss-card ss-cardOpen' : 'ss-card'}>
@@ -291,8 +358,23 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
                     disabled={!writable || saving}
                     onChange={(event) => handleFieldEdit(field, event.target.value)}
                   >
-                    <option value="true">{t('optionOn')}</option>
-                    <option value="false">{t('optionOff')}</option>
+                    <option value="true">{t(field.onKey)}</option>
+                    <option value="false">{t(field.offKey)}</option>
+                  </select>
+                ) : field.kind === 'enum' ? (
+                  <select
+                    id={fieldId}
+                    className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
+                    aria-invalid={invalid !== null || undefined}
+                    value={displayValue(field)}
+                    disabled={!writable || saving}
+                    onChange={(event) => handleFieldEdit(field, event.target.value)}
+                  >
+                    {field.options.map((option) => (
+                      <option value={option} key={option}>
+                        {t(`${field.key}Option_${option}`)}
+                      </option>
+                    ))}
                   </select>
                 ) : (
                   <input
@@ -310,6 +392,21 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
                 {invalid !== null || (hintKey !== undefined && t(hintKey).length > 0) ? (
                   <p className={invalid !== null ? 'ss-card-invalid' : 'ss-hint'}>
                     {invalid !== null ? invalid : t(hintKey as string)}
+                  </p>
+                ) : null}
+                {/*
+                  steer 的风险警示：选中时**常驻**显示（非 tooltip），且文案随
+                  「投递确认」开关变化 —— 让「选项的后果」与「当前配置」始终对齐。
+                  若确认已关，则明说不会保留条目，避免留下「选了更快的就行」的错觉。
+                */}
+                {field.key === 'steerDelivery' && displayValue(field) === 'steer' ? (
+                  <p className="ss-card-risk" role="status">
+                    {confirmEnabled ? t('steerRiskGuarded') : t('steerRiskUnguarded')}
+                  </p>
+                ) : null}
+                {field.key === 'onUnconfirmed' && displayValue(field) === 'discard' ? (
+                  <p className="ss-card-risk" role="status">
+                    {t('discardRisk')}
                   </p>
                 ) : null}
               </div>
