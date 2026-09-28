@@ -169,7 +169,20 @@ test('peerRangeFor：commands 额外并上 0.0.1-rc.1，其余仅内核代次', 
   }
 });
 
-test('package.json peer/dev 与 KERNEL_GENERATIONS 矩阵一致', () => {
+/**
+ * peer 与 dev 的**意图不同**，守卫也据此分开：
+ *
+ *  - `peerDependencies` = 声明「支持哪些代次」→ 必须等于 KERNEL_GENERATIONS 拼出的
+ *    完整范围，由 `scripts/sync-peer-matrix.mjs` 单一事实来源生成。
+ *  - `devDependencies` = 本地编译/测试**实际跑在哪一代** → 必须是**某一个具体代次**，
+ *    且该代次在已验证列表里。
+ *
+ * 为什么 dev 不再跟随完整范围：范围串会让 npm 解析到**满足条件的最老可用版本**
+ * （实测解析到 0.1.2-rc.1），于是测试环境与真实运行环境（0.1.5-rc.3）长期脱节 ——
+ * 之前 peer 缺口漏掉正是这个原因。dev 固定在**已验证的最新代次**，才能让 tsc 与
+ * 测试在接近运行时的 API 面上执行，提前暴露漂移。
+ */
+test('peerDependencies 与 KERNEL_GENERATIONS 完整范围一致', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   for (const { packageName, range } of peerMatrixEntries()) {
     assert.equal(
@@ -177,15 +190,47 @@ test('package.json peer/dev 与 KERNEL_GENERATIONS 矩阵一致', () => {
       range,
       `peerDependencies.${packageName} 与 KERNEL_GENERATIONS 不同步——改 upstream-compat 后跑 scripts/sync-peer-matrix.mjs`,
     );
-    assert.equal(
-      pkg.devDependencies?.[packageName],
-      range,
-      `devDependencies.${packageName} 与 KERNEL_GENERATIONS 不同步`,
-    );
   }
   for (const name of KERNEL_SCOPED_PACKAGES) {
     assert.ok(name.startsWith('@deepseek-ai/'), name);
   }
+});
+
+test('devDependencies 固定到某个已验证代次（不与 peer 范围混同）', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const generationIds = KERNEL_GENERATIONS.map((g) => g.id);
+  const latest = generationIds[generationIds.length - 1];
+  const pinned = [];
+
+  for (const name of KERNEL_SCOPED_PACKAGES) {
+    const dev = pkg.devDependencies?.[name];
+    assert.ok(dev !== undefined, `devDependencies.${name} 缺失`);
+    // 必须是精确版本（可带 ^ 前缀），不能是范围串
+    assert.doesNotMatch(dev, /\|\|/, `devDependencies.${name} 不应是范围串（当前 ${dev}）`);
+    const version = dev.replace(/^[\^~]/, '');
+    assert.ok(
+      generationIds.includes(version),
+      `devDependencies.${name} = ${dev} 不在已验证代次 [${generationIds.join(', ')}] 内`,
+    );
+    pinned.push(version);
+  }
+
+  // 全部 kernel-scoped 包应固定在同一代次（混代次会让类型面自相矛盾）
+  assert.equal(
+    new Set(pinned).size,
+    1,
+    `devDependencies 代次不一致：${JSON.stringify(pinned)}`,
+  );
+  // 且应是最新已验证代次 —— 让本地尽可能贴近运行时
+  assert.equal(pinned[0], latest, `devDependencies 应固定到最新已验证代次 ${latest}（当前 ${pinned[0]}）`);
+});
+
+test('dev 与运行时代次的对齐说明（防止再次悄悄脱节）', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const dev = pkg.devDependencies['@deepseek-ai/dsh-agent'].replace(/^[\^~]/, '');
+  // 这条断言记录「本地开发用的代次」；升级依赖时同步更新此常量，
+  // 使代次变更在 diff 中显式可见，而不是被 install 悄悄改掉。
+  assert.equal(dev, '0.1.5-rc.1', 'devDependency 代次变更需同时更新本断言');
 });
 
 test('readOwnEvents：legacy 读 .events，modern 优先 ownEvents()', () => {

@@ -26,13 +26,38 @@ const { peerMatrixEntries, KERNEL_GENERATIONS } = await import(
 const entries = peerMatrixEntries();
 const changed = [];
 
+/** 最新已验证代次（devDependencies 固定到它 —— 见下方说明）。 */
+const latestGeneration = KERNEL_GENERATIONS[KERNEL_GENERATIONS.length - 1].id;
+
 for (const { packageName, range } of entries) {
-  for (const field of ['peerDependencies', 'devDependencies']) {
-    if (!(field in pkg)) continue;
-    const prev = pkg[field][packageName];
+  // peerDependencies = 声明支持范围 → 与 KERNEL_GENERATIONS 拼出的完整范围一致。
+  if ('peerDependencies' in pkg) {
+    const prev = pkg.peerDependencies[packageName];
     if (prev !== range) {
-      pkg[field][packageName] = range;
-      changed.push(`${field}.${packageName}: ${prev ?? '(absent)'} → ${range}`);
+      pkg.peerDependencies[packageName] = range;
+      changed.push(`peerDependencies.${packageName}: ${prev ?? '(absent)'} → ${range}`);
+    }
+  }
+
+  /**
+   * devDependencies = 本地实际编译/测试所跑的代次 → **固定到最新已验证代次**，
+   * 而不是完整范围串。
+   *
+   * 为什么不能沿用范围串：npm/pnpm 会解析到「满足范围的最老可用版本」（实测解析到
+   * 0.1.2-rc.1），导致测试环境长期落后于真实运行环境（0.1.5-rc.3），API 漂移无法
+   * 在本地暴露 —— 此前的 peer 缺口正是这样漏掉的。
+   *
+   * 只在该字段**已是范围串**（即历史遗留）或缺失时才改写，避免把有意固定的具体
+   * 版本冲掉；若已是具体版本则保留，由人来决定何时升代次（并在测试里显式登记）。
+   */
+  if ('devDependencies' in pkg) {
+    const prev = pkg.devDependencies[packageName];
+    const isRangeString = typeof prev === 'string' && prev.includes('||');
+    if (prev === undefined || isRangeString) {
+      pkg.devDependencies[packageName] = latestGeneration;
+      changed.push(
+        `devDependencies.${packageName}: ${prev ?? '(absent)'} → ${latestGeneration}（固定到最新已验证代次）`,
+      );
     }
   }
 }
