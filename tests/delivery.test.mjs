@@ -119,6 +119,53 @@ test('delivery：hasMessageInLog 能按 message id 命中日志', () => {
   assert.equal(hasMessageInLog(session, 'm2'), false);
 });
 
+/**
+ * 跨内核代次的 Session 形状（docs/verification.md 的双轨）：
+ *  - 0.1.1-rc.2：`.events` 数组 + `header.seedLength`，**无** `ownEvents()`
+ *  - 0.1.2-rc.1 起（含 0.1.5 / 0.1.7）：`ownEvents()` + `inheritedEventCount`
+ *
+ * 送达确认是新增的读日志路径，必须与 fold 一样走 `readOwnEvents` 兼容层。
+ * 若哪天有人直接读 `session.events`，0.1.2+ 上会读到空数组而**误判未确认**
+ * —— 表现为插话永远提示「未确认」，是很隐蔽的退化。
+ */
+test('delivery：0.1.1 legacy 形状（.events，无 ownEvents）也能确认', () => {
+  const legacy = {
+    header: { id: 's-legacy', seedLength: 0 },
+    events: [
+      { type: 'user/message', seq: 0, time: 0, data: { content: [], source: { kind: 'user' }, role: 'user', id: 'm-legacy' } },
+    ],
+  };
+  assert.equal(hasMessageInLog(legacy, 'm-legacy'), true);
+  assert.equal(hasMessageInLog(legacy, 'm-other'), false);
+});
+
+test('delivery：0.1.2+ 形状（ownEvents()）确认，且不依赖 .events', () => {
+  const log = [
+    { type: 'user/message', seq: 0, time: 0, data: { content: [], source: { kind: 'user' }, role: 'user', id: 'm-modern' } },
+  ];
+  const modern = {
+    header: { id: 's-modern' },
+    inheritedEventCount: 0,
+    ownEvents: () => log,
+  };
+  assert.equal(hasMessageInLog(modern, 'm-modern'), true);
+  assert.equal(hasMessageInLog(modern, 'm-other'), false);
+
+  // fork 出的会话：ownEvents() 只给 live 段，继承前缀不在其中 —— 确认只看 live 段
+  const forked = { header: { id: 's-fork' }, inheritedEventCount: 2, ownEvents: () => log };
+  assert.equal(hasMessageInLog(forked, 'm-modern'), true);
+});
+
+test('delivery：读日志抛错时按「未确认」处理（不敢写 dispatch）', () => {
+  const broken = {
+    header: { id: 's-broken' },
+    ownEvents() {
+      throw new Error('storage unavailable');
+    },
+  };
+  assert.equal(hasMessageInLog(broken, 'anything'), false);
+});
+
 test('delivery：messageIdOf 对缺失 id 返回空串', () => {
   assert.equal(messageIdOf({ id: 'x' }), 'x');
   assert.equal(messageIdOf({}), '');

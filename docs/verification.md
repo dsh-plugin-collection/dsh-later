@@ -16,6 +16,28 @@
   - `KERNEL_GENERATIONS` 是 peer 代次的唯一事实来源；改完跑
     `node scripts/sync-peer-matrix.mjs` 重写 package.json，再 `npm test`。
   - 护栏：`tests/upstream-compat.test.mjs`（两代形状一致 + peer/dev 同步 + seedLength 回归）。
+- **插话投递改动的跨代核对（2026-09-28，静态比对 4 代产物）**：新增的投递/确认路径逐项确认
+  在其声明支持的两代内可用，并额外核对到**尚未声明**的更新代次。
+  - 方法：从 npm 拉取 `0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.3 / 0.1.7-rc.2` 四代 tarball 解包比对
+    （而非只跑本地 devDependency 的单一版本——本地只有 `0.1.2-rc.1`）。
+  - 结论：改动依赖的 4 个 API 在**四代全部存在且契约一致**：
+    `agent.followup` / `agent.steer`（四代 doc comment 逐字相同）、
+    `sessions.flush(session)`、`createUserMessage` / `boundContextSummary`。
+    Session 形状仍是两轨：`0.1.1-rc.2` 为 `.events`+`seedLength`，`≥0.1.2-rc.1` 为
+    `ownEvents()`+`inheritedEventCount` —— 与 `KERNEL_GENERATIONS` 的二元模型吻合，
+    **无需新增代次**。
+  - 送达确认走 `readOwnEvents` 兼容层（非直接读 `session.events`）；已加护栏
+    `tests/delivery.test.mjs` 的三个形状用例，并反向验证：把 `readOwnEvents` 换回
+    直接读 `.events` 后，`0.1.2+` 用例立即失败。
+  - 设置枚举用 `s.union([s.const(...)])`，`schemastery@3.18.2` 具备该 API；实测非法值
+    **抛错而非静默回落**，故 `getSettings` 的 `try/catch`（回落 `startSettings`）+
+    逐字段精确比对（只认 `'steer'`/`'discard'`）是必要的双重保险。
+  - ⚠️ **仍未处理**：peer 枚举只到 `^0.1.2-rc.1`，而实际运行的宿主已是 `0.1.5-rc.3`、
+    上游最新已到 `0.1.7-rc.2`。按本文档既定规则「上游每发布新 rc 代次就要补一个枚举项」，
+    这几代尚未补。当前本地开发经 profile symlink 加载，peer 不参与解析所以无感；
+    **但真实 `npm install` 时 `0.1.5-rc.3` 不满足声明范围**（`semver.satisfies` 默认
+    预发布语义下为 false，仅 `includePrerelease` 才 true）。补枚举需在
+    `KERNEL_GENERATIONS` 追加代次并跑 `node scripts/sync-peer-matrix.mjs`。
 
 ## 验收对照（v1.0.0）
 
