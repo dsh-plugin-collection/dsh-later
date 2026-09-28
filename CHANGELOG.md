@@ -4,6 +4,19 @@
 
 ## 未发布
 
+- **fix** 补 `0.1.5` 内核代次的 peer 声明：此前只声明 `^0.1.1-rc.2 || ^0.1.2-rc.1`，
+  而实际运行的宿主早已是 `0.1.5-rc.3` —— 在真实 `npm install` 下**不满足声明范围**
+  （`semver.satisfies` 默认预发布语义为 false）。本地经 profile symlink 加载，
+  peer 不参与解析，所以一直没暴露。
+  - 实测确认 `0.1.5-rc.1/rc.2/rc.3` 可支持：隔离安装后 15/15 host 模块导入通过，
+    且 `apply()` 以最小假 ctx 实例化成功；与原有 `0.1.2-rc.1` 的注册顺序逐项相同。
+  - **未跟进 `0.1.7`**：该代有破坏性变更，实测 15 个模块中 4 个因缺符号失败 ——
+    `allocateScheduleId` 导出被删（插件 5 处调用）、`renderEveryReminderBatchFraming`
+    改名为 `renderRecurringReminderBatchFraming`、`createAfterScheduleRecord` 等
+    新增必填 `title` 参数。适配是独立工作项，不能靠加一行 peer 蒙混过去。
+  - 代次守卫测试改为数据驱动（原先硬编码两代），并加强：`peerRange` 下界必须恰为该
+    代次本身（不借用更早下界），代次表严格递增。
+
 - **fix** 「插话发送」会**静默丢失**：提醒从列表消失，消息却没送达模型。
   - 根因：`agent.steer()` 入 `next-step`，语义是「下一个 step 边界消费」。
     若插话恰好撞上 `turn/start`，核心 `inbox.claim('next-step', …)` 会把**整批**

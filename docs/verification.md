@@ -32,12 +32,48 @@
   - 设置枚举用 `s.union([s.const(...)])`，`schemastery@3.18.2` 具备该 API；实测非法值
     **抛错而非静默回落**，故 `getSettings` 的 `try/catch`（回落 `startSettings`）+
     逐字段精确比对（只认 `'steer'`/`'discard'`）是必要的双重保险。
-  - ⚠️ **仍未处理**：peer 枚举只到 `^0.1.2-rc.1`，而实际运行的宿主已是 `0.1.5-rc.3`、
-    上游最新已到 `0.1.7-rc.2`。按本文档既定规则「上游每发布新 rc 代次就要补一个枚举项」，
-    这几代尚未补。当前本地开发经 profile symlink 加载，peer 不参与解析所以无感；
-    **但真实 `npm install` 时 `0.1.5-rc.3` 不满足声明范围**（`semver.satisfies` 默认
-    预发布语义下为 false，仅 `includePrerelease` 才 true）。补枚举需在
-    `KERNEL_GENERATIONS` 追加代次并跑 `node scripts/sync-peer-matrix.mjs`。
+  - ⚠️ **peer 代次缺口已实测定位（2026-09-28）**：peer 枚举只到 `^0.1.2-rc.1`，实际运行的
+    宿主已是 `0.1.5-rc.3`。为决定「补哪些代次」做了实测，结论是**不能一次补到最新**：
+
+    | 代次 | host 入口链接 | 结论 |
+    |---|---|---|
+    | `0.1.5-rc.1` / `rc.2` / `rc.3` | 15/15 模块导入通过 | ✅ **可补** |
+    | `0.1.7-rc.1` | 导出仍含 `allocateScheduleId` | ✅ 可补 |
+    | `0.1.7-rc.2` | **11/15 失败** | ❌ **破坏性，不可补** |
+
+    方法：在隔离目录按代次 `npm install` 内核作用域包（`--ignore-scripts`，各代 9 个包 +
+    cordis），把 `lib/` 拷入后逐个 `import()` 全部 15 个 host 模块。
+
+  - **`0.1.7-rc.2` 的三处破坏性变更**（均已读实现确认，非猜测）：
+    1. `allocateScheduleId` —— **导出被删除**，且该代无等价替代（id 分配移入
+       `ScheduleService.create`）。插件在 `user-tools.ts` 有 5 处调用。
+       边界精确：`0.1.7-rc.1` 仍导出（`export { …, allocateScheduleId, … }`），
+       `0.1.7-rc.2` 起消失。
+    2. `renderEveryReminderBatchFraming` → 重命名为
+       `renderRecurringReminderBatchFraming`（**函数体逐字相同**，纯改名）。
+       插件在 `runtime.ts:615` 调用。
+    3. `createAfterScheduleRecord(id, prompt, afterSeconds, now)` →
+       增加必填第 5 参 `title`，缺失即 `ScheduleInputError: title is required`。
+       `createAtScheduleRecord` / `createEveryScheduleRecord` 同批变更。
+  - 因此**本轮只补 `0.1.5` 代次**（`rc.1`），把声明范围推进到与当前宿主一致；
+    `0.1.7` 需要单独的适配工作（改名 + 补 `title` + 自实现 id 分配），作为后续事项，
+    不在本次范围内。
+
+  - **`0.1.5-rc.1` 的落地验证（2026-09-28 实测）**：
+    - 隔离目录安装内核作用域包（各代 9 包 + cordis，`--ignore-scripts`）后，
+      **host 入口链接**：15/15 模块 `import()` 通过。
+    - **运行时实例化**（不止 import —— 捕捉「导入 OK 但 `apply()` 崩」）：以最小假 ctx
+      调 `apply()` 成功，注册顺序为
+      `inject[sessionProjections] → inject[settings] → effect×2 → on(agent/created)`。
+    - **对照 `0.1.2-rc.1`**（原有代次）：同样 15/15 + `apply()` 成功，注册顺序**逐项相同**
+      —— 未因本次改动产生代次间行为分叉。
+    - 运行的宿主 `0.1.5-rc.3` 现已满足新声明的 peer 范围（`semver.satisfies` 默认语义下
+      亦为 true，不再依赖 `includePrerelease`）。
+  - **护栏加强**：`tests/upstream-compat.test.mjs` 的代次守卫改为**数据驱动**
+    （原先是硬编码两代，每加一代都要改测试）。现断言结构不变量：首代 legacy、其余
+    own-events、`peerRange` 下界必须**恰为该代次本身**（逐代留痕，不借用更早下界）、
+    代次表严格递增。并附 `verGt` / `caretCovers` 的自测，防止守卫自身失效。
+    反向验证：把 `0.1.5-rc.1` 的范围偷写成 `^0.1.2-rc.1`，守卫立即失败。
 
 ## 验收对照（v1.0.0）
 

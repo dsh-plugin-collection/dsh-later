@@ -33,6 +33,22 @@ export const KERNEL_GENERATIONS = [
     peerRange: '^0.1.2-rc.1',
     sessionApi: 'own-events' as const,
   },
+  {
+    /**
+     * `0.1.5` 代次：Session 形状未变（仍 `ownEvents()` + `inheritedEventCount`），
+     * 且插件依赖的 `dsh-schedule` 导出面完整 —— 实测 `rc.1/rc.2/rc.3` 逐个
+     * `import()` 全部 15 个 host 模块均通过（见 docs/verification.md）。
+     *
+     * 为什么只补到 `0.1.5` 而不跟进最新的 `0.1.7`：`0.1.7-rc.2` 有**三处破坏性变更**
+     * （`allocateScheduleId` 导出被删、`renderEveryReminderBatchFraming` 改名、
+     * `createAfterScheduleRecord` 新增必填 `title`），实测 15 个模块中 11 个可导入、
+     * 4 个因缺符号失败。适配是独立工作项，不能靠加一行 peer 蒙混过去 —— 加了就等于
+     * 声明支持一个实际加载不了的范围。故此处只推进到与当前宿主一致的代次。
+     */
+    id: '0.1.5-rc.1',
+    peerRange: '^0.1.5-rc.1',
+    sessionApi: 'own-events' as const,
+  },
 ] as const;
 
 /**
