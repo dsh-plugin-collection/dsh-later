@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 1.1.0 — 2026-10-09
+
 - **feat** 设置页 UI 对齐官方 `SettingsForm`：从折叠卡片改为裸表单，字段直接平铺。
   - 移除 `ss-card` 容器、折叠头部、chevron、未保存徽章（`ss-card-pending`）。
   - 布尔字段改用官方 toggle switch（`role="switch"`），不再用 select + 开/关文案。
