@@ -4,6 +4,16 @@
 
 ## 未发布
 
+- **feat** 设置页 UI 对齐官方 `SettingsForm`：从折叠卡片改为裸表单，字段直接平铺。
+  - 移除 `ss-card` 容器、折叠头部、chevron、未保存徽章（`ss-card-pending`）。
+  - 布尔字段改用官方 toggle switch（`role="switch"`），不再用 select + 开/关文案。
+  - CSS 类名对齐官方（`ss-settings-form`、`ss-toggle-row`、`ss-toggle-switch`）。
+  - 清理死代码：移除 `onKey`/`offKey` 字段声明及 `optionOn`/`optionOff`/`optionEnabled`/`optionDisabled` 字典键。
+
+- **feat** 新增 `schedule-compat` 兼容层：统一处理不同 DSH 内核代次的 schedule 编解码差异。
+  - 新增 `src/schedule-compat.ts`（226 行）及其编译产物 `lib/schedule-compat.js`。
+  - 上游跨代兼容逻辑收敛到单点维护，新 rc 落地只需改矩阵 + 重跑 sync 脚本。
+
 - **feat** 插件列表显示专属图标：新增包根 `icon.svg`，并在 `package.json` 声明
   顶层 `icon` 字段。
   - 图形沿用侧栏「定时状态」badge 的几何（圆环 + 上/右指针），配色改为

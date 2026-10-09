@@ -45,15 +45,6 @@ type FieldDef =
       readonly labelKey: string;
       readonly hintKey?: string;
       readonly defaultValue: boolean;
-      /**
-       * 该布尔字段自己的「开 / 关」选项文案 key。
-       *
-       * 不能所有布尔共用一对文案：`showButton` 是「显示 / 隐藏」（它是显隐开关），
-       * 而 `confirmDelivery` 是「开 / 关」（它是功能开关）。共用会让「投递确认」
-       * 显示成「显示 / 隐藏」，意思完全不对 —— 实测在设置页发现。
-       */
-      readonly onKey: string;
-      readonly offKey: string;
     }
   | { readonly kind: 'number'; readonly key: 'maxSchedules'; readonly labelKey: string; readonly hintKey: string; readonly defaultValue: number }
   | { readonly kind: 'time'; readonly key: 'workStart' | 'workEnd' | 'lunchStart' | 'lunchEnd' | 'eveningEnd'; readonly labelKey: string; readonly hintKey?: string }
@@ -80,8 +71,6 @@ const SECTIONS: readonly SectionDef[] = [
         labelKey: 'showButtonLabel',
         hintKey: 'showButtonHint',
         defaultValue: true,
-        onKey: 'optionOn',
-        offKey: 'optionOff',
       },
       {
         kind: 'enum',
@@ -125,8 +114,6 @@ const SECTIONS: readonly SectionDef[] = [
         labelKey: 'confirmDeliveryLabel',
         hintKey: 'confirmDeliveryHint',
         defaultValue: true,
-        onKey: 'optionEnabled',
-        offKey: 'optionDisabled',
       },
       {
         kind: 'enum',

@@ -90,24 +90,12 @@ test('dock 文案齐备', () => {
   }
 });
 
-test('每个布尔字段有自己的开/关文案（不得共用「显示/隐藏」）', () => {
+test('布尔字段用官方 toggle switch（不渲染开/关文案）', () => {
   const src = read('client/components/SchedulerSettingsCard.tsx');
-  // showButton 是显隐开关 → 显示/隐藏；confirmDelivery 是功能开关 → 开启/关闭。
-  // 曾共用 optionOn/optionOff，导致「投递确认」显示成「显示/隐藏」（实机发现）。
-  assert.match(src, /onKey: 'optionOn',\s*\n\s*offKey: 'optionOff'/);
-  assert.match(src, /onKey: 'optionEnabled',\s*\n\s*offKey: 'optionDisabled'/);
-  // 渲染必须读字段自己的 key，而不是硬编码共用文案
-  assert.match(src, /t\(field\.onKey\)/);
-  assert.match(src, /t\(field\.offKey\)/);
+  // 布尔字段改为 toggle switch（role="switch"），不再用 select + 开/关文案
+  assert.match(src, /role="switch"/);
+  assert.match(src, /aria-checked=\{checked\}/);
   assert.doesNotMatch(src, /<option value="true">\{t\('optionOn'\)\}/, '不得硬编码共用开文案');
-});
-
-test('optionEnabled / optionDisabled 中英齐备', () => {
-  const src = read('client/index.tsx');
-  for (const key of ['optionEnabled', 'optionDisabled']) {
-    const hits = src.split(`${key}:`).length - 1;
-    assert.equal(hits, 2, `${key} 应中英各一份，实际 ${hits} 份`);
-  }
 });
 
 test('delivery.ts 不监听核心运行时事件（避免与核心时序隐性耦合）', () => {
