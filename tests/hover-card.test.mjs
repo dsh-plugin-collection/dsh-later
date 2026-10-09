@@ -355,7 +355,7 @@ test('悬浮卡片：有活动定时任务时追加状态行，无任务时不�
       get: (name) => {
         if (name === 'slots') return { register: () => () => {}, inject: (hole, fn) => { try { fn(); } catch { /* 本测不需要插槽 */ } }, subscribe: () => () => {}, entries: () => [], entriesOfSlot: () => [] };
         if (name === 'sessions') return sessions;
-        if (name === 'locale') return { getSnapshot: () => ({ active: 'zh' }), subscribe: () => () => {}, register: () => () => {} };
+        if (name === 'locale') return { getSnapshot: () => ({ active: 'zh' }), subscribe: () => () => {}, register: () => () => {}, bind: () => (key) => key };
         return undefined;
       },
       effect: (fn) => {
@@ -366,6 +366,9 @@ test('悬浮卡片：有活动定时任务时追加状态行，无任务时不�
         return () => {};
       },
       on: () => () => {},
+      // 嵌套服务等待：本测不提供任何设置服务（两代轨道都缺失），回调内的
+      // undefined 守卫让设置卡与按钮都不注册——测试只驱动侧栏 presence。
+      inject: (names, callback) => callback(ctx),
     };
     // apply 除 ctx.get('slots') 外还直接访问 ctx.slots（插槽注册）。
     ctx.slots = ctx.get('slots');
@@ -445,7 +448,7 @@ test('悬浮卡片：无 fiber 关联的浮层不被误标', async () => {
       get: (name) => {
         if (name === 'slots') return { register: () => () => {}, inject: (hole, fn) => { try { fn(); } catch { /* 本测不需要插槽 */ } }, subscribe: () => () => {}, entries: () => [], entriesOfSlot: () => [] };
         if (name === 'sessions') return sessions;
-        if (name === 'locale') return { getSnapshot: () => ({ active: 'zh' }), subscribe: () => () => {}, register: () => () => {} };
+        if (name === 'locale') return { getSnapshot: () => ({ active: 'zh' }), subscribe: () => () => {}, register: () => () => {}, bind: () => (key) => key };
         return undefined;
       },
       effect: (fn) => {
@@ -454,6 +457,9 @@ test('悬浮卡片：无 fiber 关联的浮层不被误标', async () => {
         return () => {};
       },
       on: () => () => {},
+      // 嵌套服务等待：本测不提供任何设置服务（两代轨道都缺失），回调内的
+      // undefined 守卫让设置卡与按钮都不注册——测试只驱动侧栏 presence。
+      inject: (names, callback) => callback(ctx),
     };
     // apply 除 ctx.get('slots') 外还直接访问 ctx.slots（插槽注册）。
     ctx.slots = ctx.get('slots');

@@ -13,6 +13,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import s from '@deepseek-ai/schemastery';
+import type z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { GenericCallView, ToolCallKind } from '@deepseek-ai/dsh-tools/presentation';
@@ -41,29 +42,27 @@ import { name, SETTINGS_NAMESPACE } from './domain.js';
 import { registerOwnedSessionEventType } from './owned-event-registration.js';
 
 /** 插件配置 schema（全可选，默认开箱即用；经 cordis config 覆盖）。 */
-export const Config = s.object({
-  /** 单 session 用户任务上限。 */
-  maxSchedules: s.number().step(1).min(1).default(DEFAULT_MAX_SCHEDULES),
-});
-
-/** Settings namespace schema（设置 - 插件 配置 UI）。 */
-const SchedulerSettingsSchema = s.object({
+/**
+ * 插件配置 schema（**单一事实来源**）。
+ *
+ * 0.2.0 起 `ctx.settings.describe()` 直接读 `entry.fiber.runtime.Config`
+ * （见 dsh-settings `schema(entry)`：「`entry.fiber?.runtime?.Config`，且需有
+ * `toJSON`」），据此生成该插件设置页的表单。因此**可编辑字段必须全部声明在
+ * `Config` 上**——只放在 `SchedulerSettingsSchema` 里的字段在 0.2.0 下不会
+ * 出现在设置 UI 中。
+ *
+ * 历史：0.1.5 用 `settingsProvider.register(ns, schema, …)` 注册一个**独立于
+ * Config 的** schema（即 `SchedulerSettingsSchema`），0.1.7 删除了该 API。
+ * 两代并存期间两份 schema 内容一致，现统一为 `Config` 一份，`SchedulerSettingsSchema`
+ * 保留为别名以免大范围改动调用点。
+ */
+export const Config: z = s.object({
   /** 单 session 用户任务上限。 */
   maxSchedules: s.number().step(1).min(1).default(DEFAULT_MAX_SCHEDULES),
   /** 是否解除提示字符的默认下限（1000）；关闭时 maxPromptChars 不生效。 */
   allowLongPrompts: s.boolean().default(false),
   /** 提示字符上限（≥1 整数）；仅在 allowLongPrompts=true 时生效。 */
   maxPromptChars: s.number().step(1).min(1).default(DEFAULT_MAX_PROMPT_CHARS),
-  /** 智能时段：工作时间开始（HH:mm）。 */
-  workStart: s.string().default('09:00'),
-  /** 智能时段：工作时间结束（HH:mm）。 */
-  workEnd: s.string().default('18:00'),
-  /** 智能时段：午休开始（HH:mm）。 */
-  lunchStart: s.string().default('12:00'),
-  /** 智能时段：午休结束（HH:mm）。 */
-  lunchEnd: s.string().default('14:00'),
-  /** 智能时段：晚间结束（HH:mm）。 */
-  eveningEnd: s.string().default('22:00'),
   /** 是否显示输入框右侧的定时按钮（仅 GUI 显隐；提醒触发与 dock 不受影响）。 */
   showButton: s.boolean().default(true),
   /**
@@ -93,7 +92,24 @@ const SchedulerSettingsSchema = s.object({
    *   仅供明确需要旧行为的场景。
    */
   onUnconfirmed: s.union([s.const('keep'), s.const('discard')]).default('keep'),
-});
+  /**
+   * 时钟图标风格。
+   *
+   * - `auto`：按 DSH 内核版本自动选择（0.2.0+ 用新版官方描边风格，0.1.x 用旧版点阵风格）。默认。
+   * - `modern`：强制使用新版官方描边风格（24×24 stroke 圆头线帽）。
+   * - `classic`：强制使用旧版点阵风格（10×10 fill 方块 crispEdges）。
+   */
+  clockIconStyle: s.union([s.const('auto'), s.const('modern'), s.const('classic')]).default('auto'),
+}).volatile();
+
+/**
+ * 0.1.5 时代 settings namespace 注册所用的 schema。
+ *
+ * 与 {@link Config} 同源（同一 schema 对象）：0.1.5 的
+ * `settingsProvider.register()` 需要显式传入，而 0.2.0 的 `describe()` 只认
+ * `Config`。保留此别名让两代共用一份定义，避免两份 schema 漂移。
+ */
+const SchedulerSettingsSchema = Config;
 
 /** 所需服务（延后激活，缺失时插件不加载）。 */
 export const inject = ['agents', 'sessions', 'tools', 'commands', 'settings'];
@@ -109,13 +125,49 @@ export interface SchedulerSettings {
   readonly maxSchedules: number;
   readonly allowLongPrompts: boolean;
   readonly maxPromptChars: number;
-  /** 插话投递方式（见 SchedulerSettingsSchema.steerDelivery）。 */
+  /** 插话投递方式（见 Config.steerDelivery）。 */
   readonly steerDelivery: UserScheduleSteerDelivery;
   /** 是否核对投递是否真正送达。 */
   readonly confirmDelivery: boolean;
   /** 投递未确认时：保留可重试 / 丢弃。 */
   readonly onUnconfirmed: UserScheduleOnUnconfirmed;
+  /** 时钟图标风格（auto / modern / classic）。 */
+  readonly clockIconStyle: 'auto' | 'modern' | 'classic';
 }
+
+/**
+ * settings 原始值（未经规整）：三条代次轨道的入参形状。
+ * 全部可选 —— 配置可能只声明了部分字段，或宿主尚未填充默认值。
+ */
+interface SettingsRawValue {
+  readonly maxSchedules?: number;
+  readonly allowLongPrompts?: boolean;
+  readonly maxPromptChars?: number;
+  readonly steerDelivery?: string;
+  readonly confirmDelivery?: boolean;
+  readonly onUnconfirmed?: string;
+  readonly clockIconStyle?: string;
+}
+
+/**
+ * 0.2.0 `SettingsForms.describe()` 返回行的最小面。
+ *
+ * `ns` 是 **profile 条目 id**（`cordis.patch.yml` 的 `id`），不是 settings
+ * namespace —— 见 dsh-settings `describe()` 的 `ns: entry.options.id`。
+ */
+interface SettingsDescriptorLike {
+  readonly ns: string;
+  readonly value?: unknown;
+}
+
+/**
+ * 本插件在 profile 里的**条目 id**。
+ *
+ * 必须与 `cordis.patch.yml` 的 `id:` 一致：0.2.0 的 `configForms.get(entryId)`
+ * 与 `SettingsForms.describe()` 的 `ns` 都用条目 id 寻址，用错会静默拿不到
+ * 表单/值（设置页空白，无报错）。
+ */
+const ENTRY_ID = 'later';
 
 /** 插话投递方式。 */
 export type UserScheduleSteerDelivery = 'followup' | 'steer';
@@ -317,10 +369,97 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     steerDelivery: 'followup',
     confirmDelivery: true,
     onUnconfirmed: 'keep',
+    clockIconStyle: 'auto',
   };
   let getSettings: () => SchedulerSettings = () => startSettings;
   ctx.inject(['settings'], (settingsCtx) => {
-    const scope = settingsCtx.settings.register(
+    // 0.1.7 移除了整个 `settings.yaml` 体系：`SettingsProvider.register()` 不复存在，
+    // `ctx.settings` 变成 `SettingsForms`（只有 configure/describe/prepareDocument），
+    // 命名空间 schema 改为**由 profile 声明驱动**（见 0.1.7 dsh-settings 的类型注释
+    // “Move the sections of the removed settings.yaml into the active profile”）。
+    //
+    // 照旧调用会抛错并让整个 settings 注入失败，因此这里做代次探测：拿不到
+    // `register` 就保持 `startSettings`（即 profile yml 的 `base` 值），
+    // 插件功能不受影响，只是不再支持运行时热改设置。
+    //
+    // TODO(0.1.7 配置迁移)：把 SchedulerSettingsSchema 迁到 profile 声明式配置，
+    // 恢复 GUI 设置页与 live 生效。这是跨 15 个插件的架构课题，单独排期。
+    //
+    // 类型收窄：0.1.5 的 `SettingsProvider` 有 `register`，0.1.7 的 `SettingsForms`
+    // 没有——直接用联合类型会让两代都无法通过编译，故按「本插件所需的最小面」
+    // 声明本地接口，再对运行时对象做一次存在性判断。
+    const provider = settingsCtx.settings as unknown as {
+      register?: (
+        ns: SettingsNamespace,
+        schema: typeof SchedulerSettingsSchema,
+        options: { applies: 'live' },
+      ) => { get: () => unknown };
+    };
+
+    /**
+     * 把「settings 原始值」规整为运行时设置（容错非法值回落默认）。
+     * 三条代次轨道共用，避免各处重复解析逻辑。
+     */
+    const readSettings = (value: SettingsRawValue | undefined): SchedulerSettings => ({
+      maxSchedules: resolveMaxSchedules(value?.maxSchedules ?? startSettings.maxSchedules),
+      allowLongPrompts: value?.allowLongPrompts === true,
+      maxPromptChars:
+        typeof value?.maxPromptChars === 'number' && value.maxPromptChars >= 1
+          ? Math.floor(value.maxPromptChars)
+          : startSettings.maxPromptChars,
+      // 非法/缺失回落默认：投递方式默认 followup（安全侧），确认默认开，
+      // 未确认默认保留（不丢消息）。
+      steerDelivery: value?.steerDelivery === 'steer' ? 'steer' : 'followup',
+      confirmDelivery: value?.confirmDelivery !== false,
+      onUnconfirmed: value?.onUnconfirmed === 'discard' ? 'discard' : 'keep',
+      clockIconStyle:
+        value?.clockIconStyle === 'modern' || value?.clockIconStyle === 'classic'
+          ? value.clockIconStyle
+          : 'auto',
+    });
+
+    // ── 轨道 1：0.2.0（settings rewrite 第二版）─────────────────────────────
+    //
+    // 0.2.0 的 `ctx.settings` 是 `SettingsForms`，**没有 `register()`**；表单由
+    // `describe()` 从 `entry.fiber.runtime.Config`（即本插件导出的 `Config`）
+    // 自动生成，值来自该 profile 条目已合并的 `config`。
+    //
+    // 因此这一代**无需注册**：字段已在 `Config` 上声明，宿主自会渲染设置页。
+    // 插件侧只需读取「当前生效配置」。但 `Config` 的默认值由 cordis 在构造时
+    // 填充，运行中热改需从 describe() 快照取——故这里订阅 document 更新事件，
+    // 把最新值同步进 getSettings，实现与 0.1.5 相同的 `applies: 'live'` 语义。
+    const forms = settingsCtx.settings as unknown as {
+      describe?: (options?: { redactSecrets?: boolean }) => readonly SettingsDescriptorLike[];
+      register?: unknown;
+    };
+    if (typeof provider.register !== 'function' && typeof forms.describe === 'function') {
+      const describeValue = (): SettingsRawValue | undefined => {
+        try {
+          // entry id = profile 条目 id（`cordis.patch.yml` 的 `id: later`），
+          // **不是** settings namespace（'dsh-later'）——见 dsh-settings
+          // describe()：`ns: entry.options.id`。
+          const row = forms
+            .describe?.({ redactSecrets: true })
+            .find((candidate) => candidate.ns === ENTRY_ID);
+          return row?.value as SettingsRawValue | undefined;
+        } catch {
+          return undefined;
+        }
+      };
+      getSettings = () => readSettings(describeValue());
+
+      // 文档更新 → 重新取值（宿主在 describe 检测到变化时发该事件）。
+      settingsCtx.on('settings/document-updated', (ns: unknown) => {
+        if (ns !== ENTRY_ID && ns !== SETTINGS_NAMESPACE) return;
+        getSettings = () => readSettings(describeValue());
+      });
+      return;
+    }
+
+    // ── 轨道 2：0.1.5 及更早（settings.yaml 体系）──────────────────────────
+    if (typeof provider.register !== 'function') return;
+
+    const scope = provider.register(
       // 断言而非 settingsNamespace()：0.1.1 要求 branded 类型，0.1.2 已删除该 helper。
       SETTINGS_NAMESPACE as SettingsNamespace,
       SchedulerSettingsSchema,
@@ -328,29 +467,7 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     );
     getSettings = () => {
       try {
-        const value = scope.get() as
-          | {
-              maxSchedules?: number;
-              allowLongPrompts?: boolean;
-              maxPromptChars?: number;
-              steerDelivery?: string;
-              confirmDelivery?: boolean;
-              onUnconfirmed?: string;
-            }
-          | undefined;
-        return {
-          maxSchedules: resolveMaxSchedules(value?.maxSchedules ?? startSettings.maxSchedules),
-          allowLongPrompts: value?.allowLongPrompts === true,
-          maxPromptChars:
-            typeof value?.maxPromptChars === 'number' && value.maxPromptChars >= 1
-              ? Math.floor(value.maxPromptChars)
-              : startSettings.maxPromptChars,
-          // 非法/缺失回落默认：投递方式默认 followup（安全侧），确认默认开，
-          // 未确认默认保留（不丢消息）。
-          steerDelivery: value?.steerDelivery === 'steer' ? 'steer' : 'followup',
-          confirmDelivery: value?.confirmDelivery !== false,
-          onUnconfirmed: value?.onUnconfirmed === 'discard' ? 'discard' : 'keep',
-        };
+        return readSettings(scope.get() as SettingsRawValue | undefined);
       } catch {
         return startSettings;
       }
@@ -392,7 +509,10 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
 
   // 3. 每个 root agent：注册用户工具 + 用户调度器生命周期。
   ctx.effect(() => {
-    const stopCreated = ctx.on('agent/created', ({ agent }: { agent: Agent }) => {
+    // 0.1.7 起 `agent/created` 是**异步串行**事件：回调须返回 Promise，且首次
+    // 模型请求会等待初始化完成。0.1.5/0.1.2 的同步回调签名在 0.1.7 下会因
+    // 返回 void 而不匹配，故显式 async。
+    const stopCreated = ctx.on('agent/created', async ({ agent }: { agent: Agent }) => {
       if (stopping || runtimes.has(agent) || !ctx.agents.roots().includes(agent)) return;
       const runtime = new UserScheduleRuntime(ctx, agent, getSettings);
       let cleanup: () => void = () => undefined;

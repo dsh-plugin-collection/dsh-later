@@ -3,8 +3,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dueUserDecision, UserScheduleRuntime } from '../lib/runtime.js';
-import { foldScheduleEvents } from '@deepseek-ai/dsh-schedule';
+import { dueUserDecision, renderOneShotBatchFraming, UserScheduleRuntime } from '../lib/runtime.js';
+import { foldScheduleEvents, renderReminderFraming } from '@deepseek-ai/dsh-schedule';
 import { getPaused, recordPaused, recordOwnership } from '../lib/ownership-store.js';
 import { freshOwnershipDir } from './helpers/ownership-state.mjs';
 
@@ -482,4 +482,46 @@ test('插话：直接传日志 scheduleId 仍然可用（向后兼容）', async
   const result = await runtime.steerById('schedule-1');
   assert.deepEqual(result, { ok: true, id: 'schedule-1', steered: true });
   await runtime.dispose();
+});
+
+/**
+ * 本地 framing 副本与上游措辞的一致性护栏。
+ *
+ * `src/runtime.ts` 的 `renderOneShotBatchFraming` 是上游文案的**本地副本**——
+ * 上游只为「单条」与「固定间隔批次」提供渲染函数，本插件的「多条到期一次性
+ * 合并」形态没有上游对应物，只能自渲染。
+ *
+ * 风险：上游改措辞时本地副本不会报错，只会让同一会话里单条与批次的防护语义
+ * 悄悄不一致（0.2.0 正是如此：上游把长句换成固定来源行，本条护栏若缺失，
+ * 只能靠人工比对发现）。
+ *
+ * 判据：本地批次 framing 的固定来源行必须等于上游 `renderReminderFraming`
+ * 的第二行。不硬编码任何一版文案 —— 从上游实时取，故**支持任意多代**。
+ */
+test('本地批次 framing 的固定来源行与上游 dsh-schedule 一致', () => {
+  const now = Date.now();
+  const upstreamSingle = renderReminderFraming({
+    id: 'probe-1',
+    kind: 'after',
+    prompt: 'x',
+    afterSeconds: 60,
+    scheduledAt: new Date(now + 60_000).toISOString(),
+    title: 'x',
+  });
+  // 上游 framing 第二行即固定来源行（首行是 [SCHEDULE REMINDER] 标签）
+  const upstreamOriginLine = upstreamSingle.split('\n')[1];
+
+  const localBatch = renderOneShotBatchFraming([
+    { id: 'x1', kind: 'after', prompt: 'a', afterSeconds: 60, scheduledAt: new Date(now).toISOString() },
+  ]);
+  const localLines = localBatch.split('\n');
+
+  assert.equal(localLines[0], '[SCHEDULE REMINDER BATCH]');
+  assert.equal(
+    localLines[1],
+    upstreamOriginLine,
+    `本地批次来源行与上游不一致\n  本地: ${localLines[1]}\n  上游: ${upstreamOriginLine}`,
+  );
+  // payload 行仍为 JSON（防护语义：动态字段全部转义）
+  assert.doesNotThrow(() => JSON.parse(/^reminders_json: (.+)$/.exec(localLines[2])[1]));
 });

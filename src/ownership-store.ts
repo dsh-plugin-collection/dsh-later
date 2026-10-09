@@ -17,7 +17,7 @@
  * - 容错读：JSON 损坏时把坏文件改名保留（.corrupt-<ts>），按空表继续；
  * - 进程内缓存：按 (mtimeMs, size) 校验，避免热路径反复读盘；
  * - 路径解析：`DSH_LATER_STATE_DIR`（测试/便携）> 旧名
- *   `DSH_LATER_STATE_DIR`（升级过渡）> `$DSH_HOME` > `~/.dsh`
+ *   `DSH_SESSION_SCHEDULER_STATE_DIR`（升级过渡）> `$DSH_HOME` > `~/.dsh`
  *   （与 dsh-home-paths 的默认解析一致）。
  *
  * 注意：本模块只被 host 端引用；client bundle 不得引入（依赖 node:fs）。
@@ -82,10 +82,29 @@ interface OwnershipFile {
   readonly paused?: Record<string, PausedEntry>;
 }
 
+/**
+ * 显式状态目录覆盖（测试 / 便携场景）。
+ *
+ * 两个变量名等价：`DSH_LATER_STATE_DIR` 是当前名，`DSH_SESSION_SCHEDULER_STATE_DIR`
+ * 是插件改名前（`session-scheduler`）的旧名，保留以兼容既有脚本与文档。
+ *
+ * 修复记录：此前两处都写成 `DSH_LATER_STATE_DIR ?? DSH_LATER_STATE_DIR`——
+ * 同一个变量自比较，旧名回退实际从未生效。旧名用户会静默落到 `$DSH_HOME`
+ * 默认目录，而 `legacyStateDir()` 又因"有 override"直接返回 undefined，
+ * 迁移也不会发生。
+ */
+function stateDirOverride(): string | undefined {
+  for (const name of ['DSH_LATER_STATE_DIR', 'DSH_SESSION_SCHEDULER_STATE_DIR']) {
+    const value = process.env[name];
+    if (value !== undefined && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
 /** 解析状态目录（优先级见模块注释）。 */
 function resolveStateDir(): string {
-  const override = process.env['DSH_LATER_STATE_DIR'] ?? process.env['DSH_LATER_STATE_DIR'];
-  if (override !== undefined && override.trim().length > 0) return override;
+  const override = stateDirOverride();
+  if (override !== undefined) return override;
   const dshHomeEnv = process.env['DSH_HOME'];
   const home =
     dshHomeEnv !== undefined && dshHomeEnv.trim().length > 0 ? dshHomeEnv : join(homedir(), '.dsh');
@@ -97,8 +116,7 @@ function resolveStateDir(): string {
  * 不做迁移以免污染调用方给定的目录语义）。
  */
 function legacyStateDir(): string | undefined {
-  const override = process.env['DSH_LATER_STATE_DIR'] ?? process.env['DSH_LATER_STATE_DIR'];
-  if (override !== undefined && override.trim().length > 0) return undefined;
+  if (stateDirOverride() !== undefined) return undefined;
   const dshHomeEnv = process.env['DSH_HOME'];
   const home =
     dshHomeEnv !== undefined && dshHomeEnv.trim().length > 0 ? dshHomeEnv : join(homedir(), '.dsh');

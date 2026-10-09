@@ -81,6 +81,8 @@ export interface PresenceLocaleLike {
 export interface SessionPresenceOptions {
   readonly sessions: PresenceSessionsLike;
   readonly locale?: PresenceLocaleLike;
+  /** 获取时钟图标风格的函数（支持动态获取最新设置）。 */
+  readonly getClockIconStyle?: () => 'auto' | 'modern' | 'classic';
 }
 
 /** badge 类名（本插件命名空间，绝不复用宿主类名）。 */
@@ -96,8 +98,8 @@ const STATE_TICK_MS = 30_000;
 /** session.list 重拉周期（读 RPC；仅页面可见时执行）。 */
 const REFRESH_INTERVAL_MS = 60_000;
 
-/** 时钟 glyph（10×10 crispEdges，外圈 8 方块 + 上/右指针，中心留空）。 */
-const CLOCK_SVG =
+/** 旧版时钟 glyph（10×10 crispEdges，外圈 8 方块 + 上/右指针，中心留空）。 */
+const CLOCK_SVG_CLASSIC =
   '<svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true">' +
   '<g class="ss-presence-ring">' +
   '<rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/>' +
@@ -107,6 +109,15 @@ const CLOCK_SVG =
   '</g>' +
   '<g class="ss-presence-hand">' +
   '<rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/>' +
+  '</g></svg>';
+
+/** 新版时钟 glyph（24×24 stroke 圆头线帽，表盘环 + 时针分针）。 */
+const CLOCK_SVG_MODERN =
+  '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>' +
+  '<g class="ss-clock-hand">' +
+  '<line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>' +
+  '<line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>' +
   '</g></svg>';
 
 const hhmmFormatter = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -190,10 +201,16 @@ function labelsFor(dict: SchedStrings): RelativeFireLabels {
  * 已注入的 badge 节点）。
  */
 export function mountSessionPresence(options: SessionPresenceOptions): () => void {
-  const { sessions, locale } = options;
+  const { sessions, locale, getClockIconStyle } = options;
   if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {
     return () => undefined;
   }
+
+  // 根据设置选择 SVG：auto 时默认使用新版（modern），后续可接入版本检测
+  const getClockSvg = (): string => {
+    const style = getClockIconStyle?.() ?? 'auto';
+    return style === 'classic' ? CLOCK_SVG_CLASSIC : CLOCK_SVG_MODERN;
+  };
 
   let index = new Map<string, PresenceSummary>();
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
@@ -268,7 +285,7 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     badge.setAttribute('role', 'img');
     badge.setAttribute('aria-label', aria);
     badge.setAttribute('title', tooltip);
-    badge.innerHTML = CLOCK_SVG;
+    badge.innerHTML = getClockSvg();
     if (beside) slot.after(badge);
     else slot.append(badge);
   }

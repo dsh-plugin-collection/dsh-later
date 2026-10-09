@@ -19,7 +19,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
-import { foldScheduleEvents } from '@deepseek-ai/dsh-schedule';
 import type { ScheduleRecord, ScheduleView } from '@deepseek-ai/dsh-schedule';
 import type { UserScheduleDelivery } from './domain.js';
 import type { PausedEntry } from './ownership-store.js';
@@ -137,9 +136,25 @@ export declare function foldOwnedDelivery(events: readonly SessionEvent[]): Read
  * 消除热路径（每次 drive / 每次工具调用）对全量日志的重复 O(n) 扫描。
  */
 export interface UserFoldState {
-    readonly folded: ReturnType<typeof foldScheduleEvents>;
+    /**
+     * `foldScheduleEvents` 的结果，按**本插件的读视图**收窄。
+     *
+     * 0.1.5 返回 `ScheduleRecord`；0.1.7 返回 `LegacyScheduleRecord`
+     * （`title` 可选，因为 title 成为必填前写入的历史事件没有该字段），
+     * 且 `ScheduleRecord` 联合新增了 daily/weekly/cron 三个本插件不产生的变体。
+     *
+     * 收窄到 `Legacy*` 视图对读路径是**语义正确**的：本插件只创建
+     * after/at/every，title 缺失时投影回退到 prompt（见 projection.ts）。
+     * 统一在此收口，避免每个消费点各写一次断言。
+     */
+    readonly folded: FoldedUserSchedules;
     readonly owned: ReadonlySet<string>;
     readonly delivery: ReadonlyMap<string, UserScheduleDelivery>;
+}
+/** fold 结果中本插件关心的字段面（`active` 按 Legacy 视图收窄）。 */
+export interface FoldedUserSchedules {
+    readonly active: readonly ScheduleRecord[];
+    readonly seenIds: ReadonlySet<string>;
 }
 /** fold 当前会话的完整用户调度状态（带缓存；调用方不得变更返回值）。
  *

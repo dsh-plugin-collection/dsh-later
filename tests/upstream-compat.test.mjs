@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { createAfterScheduleRecord } from '@deepseek-ai/dsh-schedule';
+import { createAfterRecord as createAfterScheduleRecord } from '../lib/schedule-compat.js';
 import {
   KERNEL_GENERATIONS,
   KERNEL_SCOPED_PACKAGES,
@@ -23,6 +23,7 @@ import {
   readOwnEvents,
 } from '../lib/upstream-compat.js';
 import { foldUserState } from '../lib/user-tools.js';
+import { Config } from '../lib/index.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -55,6 +56,7 @@ function modernSession(events, inheritedEventCount = 0) {
 /** 合法 schedule/change create 事件（严格解码：荷载仅 version/operation/schedule）。 */
 function createChangeEvent(id) {
   const now = Date.now();
+  // 走 compat 包装器：0.1.7 的 create*Record 需要 title，由包装器按 prompt 派生。
   const schedule = createAfterScheduleRecord(id, 'x', 3600, now);
   return {
     type: 'schedule/change',
@@ -230,7 +232,7 @@ test('dev 与运行时代次的对齐说明（防止再次悄悄脱节）', () =
   const dev = pkg.devDependencies['@deepseek-ai/dsh-agent'].replace(/^[\^~]/, '');
   // 这条断言记录「本地开发用的代次」；升级依赖时同步更新此常量，
   // 使代次变更在 diff 中显式可见，而不是被 install 悄悄改掉。
-  assert.equal(dev, '0.1.5-rc.1', 'devDependency 代次变更需同时更新本断言');
+  assert.equal(dev, '0.2.0-rc.2', 'devDependency 代次变更需同时更新本断言');
 });
 
 test('readOwnEvents：legacy 读 .events，modern 优先 ownEvents()', () => {
@@ -290,4 +292,84 @@ test('foldUserState：legacy 仅含 seed 时 active 为空（回归：seedLength
   const session = legacySession([seedPayload], 1);
   const state = foldUserState(session);
   assert.deepEqual(state.folded.active, [], '继承前缀必须被排除');
+});
+
+/**
+ * 0.2.0 settings 轨道的静态护栏。
+ *
+ * 背景：0.2.0 的 `ctx.settings` 是 `SettingsForms`（无 `register()`），设置页
+ * 表单由 `describe()` 从 `entry.fiber.runtime.Config` 生成。有三处**静默失效**
+ * 的坑，本测试逐一锁住：
+ *
+ * 1. `Config` 未标 `volatile` → `volatileForm()` 返回 undefined → 宿主认为
+ *    「无 live 字段」→ 设置页不生成（且不报错，见 dsh-settings
+ *    `if (form === void 0) throw new Error(...has no volatile fields)` 仅在
+ *    写入路径抛，读取路径静默跳过）。
+ * 2. 表单字段只放在别处（如旧的 SchedulerSettingsSchema）而不在 `Config` 上 →
+ *    0.2.0 读不到。
+ * 3. 客户端用 settings namespace（'dsh-later'）而非**条目 id**（'later'）寻址 →
+ *    `whileServed` 永不命中 → 卡片不挂载。
+ */
+test('0.2.0：Config 标了 volatile 且字段齐全（否则设置页不生成）', () => {
+  const json = Config.toJSON();
+  const refs = json.refs;
+  const root = refs[String(json.uid)] ?? Object.values(refs).find((r) => r.type === 'object' && r.dict);
+  assert.ok(root, 'Config.toJSON() 应能取到根对象节点');
+  assert.equal(root.type, 'object');
+  assert.equal(
+    root.meta?.volatile,
+    true,
+    "Config 必须 .volatile()：否则 dsh-settings 的 volatileForm() 返回 undefined，0.2.0 设置页静默不生成",
+  );
+
+  // 与 docs / 设置卡一致的可编辑字段集合
+  const expected = [
+    'maxSchedules',
+    'allowLongPrompts',
+    'maxPromptChars',
+    'showButton',
+    'steerDelivery',
+    'confirmDelivery',
+    'onUnconfirmed',
+    'clockIconStyle',
+  ];
+  assert.deepEqual(
+    Object.keys(root.dict ?? {}).sort(),
+    [...expected].sort(),
+    '可编辑字段必须全部声明在 Config 上（0.2.0 只读 Config 生成表单）',
+  );
+});
+
+test('0.2.0：客户端寻址键为条目 id（later），非 settings namespace', () => {
+  const src = readFileSync(join(root, 'src', 'client', 'index.tsx'), 'utf8');
+  assert.match(src, /const ENTRY_ID = 'later'/);
+  // configForms.get / whileServed 必须用 ENTRY_ID
+  assert.match(src, /forms\.get\(ENTRY_ID\)/, 'configForms.get 必须用条目 id');
+  assert.match(src, /whileServed\(\[ENTRY_ID\]/, 'whileServed 必须用条目 id');
+  assert.doesNotMatch(
+    src,
+    /forms\.get\(SETTINGS_NS\)|whileServed\(\[SETTINGS_NS\]/,
+    '不得用 settings namespace 寻址 configForms（0.2.0 会静默拿到空表单）',
+  );
+});
+
+test('0.2.0：条目 id 与 cordis.patch.yml 的 id 一致', () => {
+  const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8');
+  const idMatch = /-\s*insert:\s*\n\s*-\s*id:\s*(\S+)/.exec(patch);
+  assert.ok(idMatch, 'cordis.patch.yml 应有 insert[].id');
+  const entryId = idMatch[1];
+
+  const hostSrc = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
+  const clientSrc = readFileSync(join(root, 'src', 'client', 'index.tsx'), 'utf8');
+  assert.match(hostSrc, new RegExp(`const ENTRY_ID = '${entryId}'`), 'host 的 ENTRY_ID 应与 patch 一致');
+  assert.match(clientSrc, new RegExp(`const ENTRY_ID = '${entryId}'`), 'client 的 ENTRY_ID 应与 patch 一致');
+});
+
+test('0.2.0：host 侧探测 register 缺失后走 describe() 轨道', () => {
+  const src = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
+  // 必须存在 describe() 轨道，且用 ENTRY_ID 匹配 ns
+  assert.match(src, /typeof forms\.describe === 'function'/, '应探测 SettingsForms.describe');
+  assert.match(src, /candidate\.ns === ENTRY_ID/, 'describe() 结果应按条目 id 匹配');
+  // 订阅文档更新以维持 live 语义
+  assert.match(src, /settings\/document-updated/, '应订阅 settings/document-updated 保持 live');
 });

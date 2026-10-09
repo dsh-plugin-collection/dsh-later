@@ -23,6 +23,9 @@ import {
   userScheduleCreate,
   userScheduleEditPrompt,
 } from '../lib/user-tools.js';
+// 导入即把 sidecar 隔离到临时目录：create/edit 的端到端用例会真实落盘，
+// 不隔离就会写进用户的 ~/.dsh/plugin-state/later。
+import './helpers/ownership-state.mjs';
 
 const LONG_OK_INPUT = {
   prompt: 'x',

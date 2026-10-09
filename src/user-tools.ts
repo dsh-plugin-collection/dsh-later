@@ -22,14 +22,18 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   ScheduleId,
   ScheduleInputError,
-  allocateScheduleId,
-  createAfterScheduleRecord,
-  createAtScheduleRecord,
-  createEveryScheduleRecord,
   foldScheduleEvents,
   scheduleView,
 } from '@deepseek-ai/dsh-schedule';
 import type { ScheduleRecord, ScheduleView } from '@deepseek-ai/dsh-schedule';
+import {
+  allocateScheduleIdCompat as allocateScheduleId,
+  createAfterRecord as createAfterScheduleRecord,
+  createAtRecord as createAtScheduleRecord,
+  createEveryRecord as createEveryScheduleRecord,
+  toChangePayload,
+  asLegacySchedules,
+} from './schedule-compat.js';
 import { OWNED_EVENT } from './domain.js';
 import type { UserScheduleOwnedChange, UserScheduleDelivery } from './domain.js';
 import {
@@ -288,9 +292,26 @@ export function foldOwnedDelivery(
  * 消除热路径（每次 drive / 每次工具调用）对全量日志的重复 O(n) 扫描。
  */
 export interface UserFoldState {
-  readonly folded: ReturnType<typeof foldScheduleEvents>;
+  /**
+   * `foldScheduleEvents` 的结果，按**本插件的读视图**收窄。
+   *
+   * 0.1.5 返回 `ScheduleRecord`；0.1.7 返回 `LegacyScheduleRecord`
+   * （`title` 可选，因为 title 成为必填前写入的历史事件没有该字段），
+   * 且 `ScheduleRecord` 联合新增了 daily/weekly/cron 三个本插件不产生的变体。
+   *
+   * 收窄到 `Legacy*` 视图对读路径是**语义正确**的：本插件只创建
+   * after/at/every，title 缺失时投影回退到 prompt（见 projection.ts）。
+   * 统一在此收口，避免每个消费点各写一次断言。
+   */
+  readonly folded: FoldedUserSchedules;
   readonly owned: ReadonlySet<string>;
   readonly delivery: ReadonlyMap<string, UserScheduleDelivery>;
+}
+
+/** fold 结果中本插件关心的字段面（`active` 按 Legacy 视图收窄）。 */
+export interface FoldedUserSchedules {
+  readonly active: readonly ScheduleRecord[];
+  readonly seenIds: ReadonlySet<string>;
 }
 
 interface FoldCacheEntry {
@@ -321,7 +342,7 @@ export function foldUserState(session: Session): UserFoldState {
   }
   // number 形式进入 foldScheduleEvents：0.1.2 brandshape 校验接受 safe integer；
   // 0.1.1 直接收 number。
-  const folded = foldScheduleEvents(events, inheritedEventCount as never);
+  const folded = asLegacySchedules(foldScheduleEvents(events, inheritedEventCount as never));
   // 所有权与投递形态：sidecar 为准（新写入），日志中的历史 OWNED 事件作底
   // （读兼容，旧日志可能仍有残留行）。
   const sessionId = session.header?.id;
@@ -387,7 +408,10 @@ export function serializeScheduleView(view: ScheduleView): ScheduleRecordView {
     ...(view.kind === 'every' ? { every_seconds: view.everySeconds } : {}),
     scheduled_at: view.scheduledAt,
     state: view.state,
-    delivery_mode: view.deliveryMode,
+    // 0.1.5 内核给 'session-local'，0.1.7 改名为 'host'——两者语义相同
+    // （提醒永不离开所属会话）。wire 契约对外归一为 'session-local'，
+    // 避免内核改名传导到客户端与已存档的对话内容。
+    delivery_mode: 'session-local',
     source: 'user-tool',
   };
 }
@@ -499,7 +523,7 @@ export async function userScheduleCreate(
       agent.session.append('schedule/change', {
         version: 1,
         operation: 'create',
-        schedule: record,
+        schedule: toChangePayload(record),
       });
     } catch {
       removeOwnership(sessionId, id);
@@ -686,10 +710,17 @@ export async function userScheduleEditPrompt(
           now,
         );
       } else {
+        // 0.1.7 的 `ScheduleRecord` 联合新增 daily/weekly/cron（均无
+        // `everySeconds`）。本插件只创建 every，故其余变体按 300s 默认间隔
+        // 归一——它们只可能来自其他插件写入的日志，不是本插件的产物。
+        const everySeconds =
+          existing.kind === 'every' && typeof existing.everySeconds === 'number'
+            ? existing.everySeconds
+            : 300;
         record = createEveryScheduleRecord(
           allocateScheduleId(folded),
           trimmed,
-          existing.everySeconds ?? 300,
+          everySeconds,
           now,
         );
       }
@@ -711,7 +742,7 @@ export async function userScheduleEditPrompt(
     );
     try {
       agent.session.append('schedule/change', { version: 1, operation: 'delete', id: scheduleId });
-      agent.session.append('schedule/change', { version: 1, operation: 'create', schedule: record });
+      agent.session.append('schedule/change', { version: 1, operation: 'create', schedule: toChangePayload(record) });
     } catch {
       removeOwnership(sessionId, record.id);
       return internalError();
@@ -893,7 +924,7 @@ export async function userScheduleResume(
       agent.session.append('schedule/change', {
         version: 1,
         operation: 'create',
-        schedule: record,
+        schedule: toChangePayload(record),
       });
     } catch {
       removeOwnership(sessionId, record.id);

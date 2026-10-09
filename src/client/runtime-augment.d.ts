@@ -93,6 +93,30 @@ export interface ClientSettingsScopeService {
   describe?(): unknown;
 }
 
+/** 一个 namespace 的配置表单（取自 0.1.7 settings rewrite 的 ConfigForm）。
+ *
+ * 与 {@link ClientSettingsScope} 同形状，差异只在写入返回 `boolean`（宿主是否
+ * 接受）而非 `void`——按 TS 的返回类型协变，可直接喂给只认 `Promise<void>` 的
+ * 卡片组件。
+ */
+export interface ClientConfigForm<T = unknown> {
+  getSnapshot(): ClientSettingsScopeSnapshot<T>;
+  subscribe(listener: () => void): () => void;
+  set(field: string, value: unknown): Promise<boolean>;
+  unset(field: string): Promise<boolean>;
+}
+
+/** 配置表单服务（0.1.7 起取代浏览器端 settingsScope）。 */
+export interface ClientConfigFormsService {
+  /** 取某 Host plugin entry（namespace）的共享表单。 */
+  get<T = unknown>(entryId: string): ClientConfigForm<T>;
+  /** 宿主仍在服务这些 namespace 时保持注册有效；返回终止用 disposer。 */
+  whileServed(
+    namespaces: readonly string[],
+    register: (served: ReadonlySet<string>) => () => void,
+  ): () => void;
+}
+
 /** Locale 服务：register 注册命名空间字典、bind 取出 `t(key)` 函数。 */
 export interface ClientLocaleService {
   register(
@@ -107,6 +131,7 @@ declare module '@deepseek-ai/cordis' {
     slots: ClientSlotRegistry;
     sessions: ClientSessionsService;
     settingsScope: ClientSettingsScopeService;
+    configForms: ClientConfigFormsService;
     locale: ClientLocaleService;
     conversation?: unknown;
   }

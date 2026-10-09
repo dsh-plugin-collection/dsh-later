@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
-import type { ScheduleRecord } from '@deepseek-ai/dsh-schedule';
+import type { AfterScheduleRecord, AtScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
 import type { PausedEntry } from './ownership-store.js';
 import type { UserScheduleProjectionValue } from './domain.js';
 /** 投影 wire 值 schema（wire.viewSchema：离开宿主前校验客户端载荷）。 */
@@ -61,10 +61,25 @@ export declare const userSchedulesStateSchema: z.ZodObject<{
         pausedAt: z.ZodNumber;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
-/** 活动存储记录：dsh-schedule 记录 + 创建时刻（来自 create 事件的 time）。 */
-export type StoredScheduleRecord = ScheduleRecord & {
+/**
+ * 活动存储记录：dsh-schedule 记录 + 创建时刻（来自 create 事件的 time）。
+ *
+ * 显式按**本插件产出的三种 kind** 收窄，而非直接用 `ScheduleRecord`：
+ * 0.1.7 的联合新增了 daily/weekly/cron，它们的字段面
+ * （`afterSeconds` / `everySeconds`）与本插件的 wire 契约不同，透传会让
+ * `wireItemOf` 读到不存在的字段。
+ *
+ * 逐个具名引用而非 `Extract`：`Extract<ScheduleRecord, {kind:'after'|…}>`
+ * 在本仓库的 tsc 配置下不触发收窄（判别式联合的 `Extract` 需 kind 为
+ * 单字面量，逐个列举后交集才正确）。
+ */
+export type StoredScheduleRecord = (AfterScheduleRecord & {
     readonly createdAt?: number;
-};
+}) | (AtScheduleRecord & {
+    readonly createdAt?: number;
+}) | (EveryScheduleRecord & {
+    readonly createdAt?: number;
+});
 /** 投影内部状态（plain JSON：owned/active 用数组承载）。 */
 export interface UserScheduleProjectionState {
     /** 会话 id（init 由 header 注入）。 */

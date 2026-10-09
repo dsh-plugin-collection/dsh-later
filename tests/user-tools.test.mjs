@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { foldScheduleEvents } from '@deepseek-ai/dsh-schedule';
+import { foldScheduleEvents, MIN_EVERY_INTERVAL_SECONDS } from '@deepseek-ai/dsh-schedule';
 import {
   DEFAULT_MAX_SCHEDULES,
   userScheduleCreate,
@@ -116,8 +116,10 @@ test('create 校验：空 prompt / 多选 / 非法时区 / 过低频次', async 
   );
   assert.ok(!badTz.ok && badTz.code === 'invalid_time_zone');
 
+  // 最小周期随内核代次变化（0.1.5 = 300s，0.1.7 = 60s），故按内核实际常量
+  // 取「刚好低于下限」的值，避免把某代的阈值写死进测试。
   const tooFast = await userScheduleCreate(
-    { prompt: 'x', every_seconds: 60, time_zone: 'Asia/Shanghai' },
+    { prompt: 'x', every_seconds: MIN_EVERY_INTERVAL_SECONDS - 1, time_zone: 'Asia/Shanghai' },
     fakeAgent(),
     fakeCtx,
   );
@@ -179,16 +181,20 @@ test('delete 删除成功 / 不存在返回 deleted:false', async () => {
 
 test('永久分配不重复的 id', async () => {
   const agent = fakeAgent();
-  await userScheduleCreate(atInput, agent, fakeCtx);
-  // 删除后再创建，id 不复用（seenIds 保留）
-  await userScheduleDelete('schedule-1', agent, fakeCtx);
+  const first = await userScheduleCreate(atInput, agent, fakeCtx);
+  assert.ok(first.ok);
+  // 删除后再创建，id 不复用（0.1.7 起为随机 UUID，见 schedule-compat.ts）
+  await userScheduleDelete(first.id, agent, fakeCtx);
   const second = await userScheduleCreate(
     { prompt: 'again', time_zone: 'Asia/Shanghai', at: { date: '2999-01-02', time: '10:00:00', time_zone: 'Asia/Shanghai' } },
     agent,
     fakeCtx,
   );
   assert.ok(second.ok);
-  if (second.ok) assert.equal(second.id, 'schedule-2');
+  if (first.ok && second.ok) {
+    assert.notEqual(second.id, first.id, '删除后重建不得复用旧 id');
+    assert.match(second.id, /^schedule-[0-9a-f-]{36}$/, 'id 应为 schedule- + UUID');
+  }
 });
 
 // ─── P0-1：delivery 信任边界 ───────────────────────────────────────────

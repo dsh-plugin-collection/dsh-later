@@ -4,6 +4,48 @@
 
 ## 未发布
 
+- **feat** 插件列表显示专属图标：新增包根 `icon.svg`，并在 `package.json` 声明
+  顶层 `icon` 字段。
+  - 图形沿用侧栏「定时状态」badge 的几何（圆环 + 上/右指针），配色改为
+    官方插件图标的蓝色渐变区间（`#7AC2FF → #4A65E8`），使其与官方图标同属一个家族。
+  - 配色决策依据：实测 4 个带图标的官方包，**全部硬编码十六进制，无一使用
+    CSS 变量或 `currentColor`**（插件图标经 `dsh-app-boot` 的 `iconOf()` 读成
+    base64 data URL 以 `<img>` 渲染，因此**不执行 CSS 动画、不继承页面颜色**）。
+    统一感来自「取色区间 + 画法」而非令牌系统，故采用同区间色号。
+  - 侧栏 badge 保留品牌紫 `#8b5cf6`：那是插件自身语境下的**状态色**
+    （紫 / warn / error 三态区分），与插件列表的外部语境不冲突。
+  - `icon.svg` 已加入 `files`，避免 `npm publish` 漏发导致图标丢失。
+
+- **fix** 支持 DSH `0.2.0`（此前在 0.2.0 上**完全失效**）。
+  - 现象：升级到 DSH `0.2.0-rc.2` 后插件整体不加载 —— 无按钮、无命令、无工具。
+    宿主日志：`skipping profile bundle "dsh-later": Plugin dsh-later@1.0.0 is
+    incompatible with dsh 0.2.0-rc.2 …`。
+  - 根因：**不是代码失效，是 peer 声明缺口**。内核自 0.2.0 起把 peer 兼容校验
+    **从警告升级为硬门槛**（`dsh-app-boot` 的 `evaluatePluginCompatibility`）：
+    peer 范围不满足即**整插件跳过**。而 peer 枚举止于 `^0.1.7-rc.2`，
+    8 个 kernel-scoped 包对 `0.2.0-rc.2` 全部不满足（预发布版必须显式枚举）。
+  - 核对结论：**API 面全部保持，无需改动任何业务代码**。Session 形状未变；
+    `dsh-schedule` 导出面完整（`renderRecurringReminderBatchFraming` 仍在，
+    0.1.7 的桥接照旧命中）；`dsh-llm` 的 `createUserMessage` /
+    `boundContextSummary` 在，`schedule` message source 仍有效；
+    `dsh-agent` 的 `followup` / `steer` 语义未变；`defineTool` 在。
+  - 实证：devDependencies 固定到 `0.2.0-rc.2` 后，host + client `tsc --noEmit`
+    **双端 0 错误**，`npm run build` 走 tsc 原生路径（无 esbuild 降级），测试全绿。
+  - 处置：`KERNEL_GENERATIONS` 追加 `0.2.0-rc.2` → 重跑 `sync-peer-matrix.mjs`
+    重写 8 个 peer 范围 → dev 推进到 `0.2.0-rc.2`。历史代次仍全部支持，
+    未核对的 `0.3.0-rc.1` 仍被正确拒绝。
+- **fix** 多条合并提醒的 framing 措辞对齐上游（`0.2.0` 的第二处差异）。
+  - `dsh-schedule` 在 0.2.0 把 one-shot 与 recurring 的防护句统一收敛为
+    `This is a scheduled message from the user`（旧句为
+    `Present reminder_prompt_json … not new user instructions.`）。
+  - 单条路径直接调上游函数，自动跟随；但**多条到期一次性合并**（P1-5）是上游
+    不提供的形态，由插件自渲染，其来源行是上游文案的**本地副本**，需手工对齐，
+    否则同一会话里单条与合并提醒的措辞会不一致。
+  - 新增护栏：从上游 `renderReminderFraming` **实时取**来源行比对本地副本，
+    不硬编码任何一版文案（故支持任意多代）。反向验证：改回旧长句即失败。
+  - 注：该问题被 peer 缺口**掩盖**——插件不加载时 framing 根本不会执行，
+    修完 peer 后测试才暴露出来。
+
 - **fix** 本地开发依赖代次与运行时代次对齐（`0.1.2-rc.1` → `0.1.5-rc.1`）。
   - 起因：`devDependencies` 原先写的是**完整 peer 范围串**，包管理器因此解析到
     「满足范围的最老可用版本」= `0.1.2-rc.1`，而真实运行环境是 `0.1.5-rc.3` ——

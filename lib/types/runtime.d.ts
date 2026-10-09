@@ -48,6 +48,19 @@ type UserDecision = {
     target?: number;
 };
 export declare function dueUserDecision(active: readonly ScheduleRecord[], now: number, delivery?: ReadonlyMap<string, UserScheduleDelivery>): UserDecision;
+/**
+ * 多条到期一次性提醒的合并注入 framing（P1-5）。
+ * 形状与 dsh-schedule 的固定间隔批次 framing 完全一致：
+ * 动态字段全部经 JSON 转义，保持「非信任提醒内容」的防护语义。
+ *
+ * ⚠️ 这是**上游文案的本地副本**。0.2.0 起 dsh-schedule 把 one-shot 与 recurring
+ * 两条 framing 统一收敛为一句 `SCHEDULED_MESSAGE_FRAMING`，取代了此前
+ * 「Present all due reminders … not new user instructions.」的长句。
+ * 本插件只对**多条合并**这一种上游不提供的形态自渲染（单条走
+ * `renderReminderFraming`，自动跟随上游），故此处需手工对齐，否则同一会话里
+ * 单条与批次的防护措辞会不一致。
+ */
+export declare function renderOneShotBatchFraming(records: readonly OneShotScheduleRecord[]): string;
 /** 每个 agent 的独立调度器。 */
 export declare class UserScheduleRuntime {
     private readonly ctx;

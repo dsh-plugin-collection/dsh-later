@@ -34,6 +34,7 @@ export interface SchedulerSettings {
   steerDelivery?: 'followup' | 'steer';
   confirmDelivery?: boolean;
   onUnconfirmed?: 'keep' | 'discard';
+  clockIconStyle?: 'auto' | 'modern' | 'classic';
 }
 
 /** 字段元数据（顺序固定，便于稳定渲染）。 */
@@ -56,63 +57,94 @@ type FieldDef =
     }
   | { readonly kind: 'number'; readonly key: 'maxSchedules'; readonly labelKey: string; readonly hintKey: string; readonly defaultValue: number }
   | { readonly kind: 'time'; readonly key: 'workStart' | 'workEnd' | 'lunchStart' | 'lunchEnd' | 'eveningEnd'; readonly labelKey: string; readonly hintKey?: string }
-  | { readonly kind: 'enum'; readonly key: 'steerDelivery' | 'onUnconfirmed'; readonly labelKey: string; readonly hintKey?: string; readonly options: readonly string[]; readonly defaultValue: string };
+  | { readonly kind: 'enum'; readonly key: 'steerDelivery' | 'onUnconfirmed' | 'clockIconStyle'; readonly labelKey: string; readonly hintKey?: string; readonly options: readonly string[]; readonly defaultValue: string };
 
-const FIELDS: readonly FieldDef[] = [
+/** Section 分组（对齐官方插件设置页的 section 结构）。 */
+interface SectionDef {
+  readonly id: string;
+  readonly titleKey: string;
+  /** 字段布局：grid 两列并排（对齐官方 hF0LTq_limits），stack 单列堆叠。 */
+  readonly layout: 'grid' | 'stack';
+  readonly fields: readonly FieldDef[];
+}
+
+const SECTIONS: readonly SectionDef[] = [
   {
-    kind: 'boolean',
-    key: 'showButton',
-    labelKey: 'showButtonLabel',
-    hintKey: 'showButtonHint',
-    defaultValue: true,
-    onKey: 'optionOn',
-    offKey: 'optionOff',
+    id: 'display',
+    titleKey: 'sectionDisplay',
+    layout: 'stack',
+    fields: [
+      {
+        kind: 'boolean',
+        key: 'showButton',
+        labelKey: 'showButtonLabel',
+        hintKey: 'showButtonHint',
+        defaultValue: true,
+        onKey: 'optionOn',
+        offKey: 'optionOff',
+      },
+      {
+        kind: 'enum',
+        key: 'clockIconStyle',
+        labelKey: 'clockIconStyleLabel',
+        hintKey: 'clockIconStyleHint',
+        options: ['auto', 'modern', 'classic'],
+        defaultValue: 'auto',
+      },
+      { kind: 'number', key: 'maxSchedules', labelKey: 'maxSchedulesLabel', hintKey: 'maxSchedulesHint', defaultValue: 100 },
+    ],
   },
-  { kind: 'number', key: 'maxSchedules', labelKey: 'maxSchedulesLabel', hintKey: 'maxSchedulesHint', defaultValue: 100 },
-  { kind: 'time', key: 'workStart', labelKey: 'workStartLabel', hintKey: 'smartWindowHint' },
-  { kind: 'time', key: 'workEnd', labelKey: 'workEndLabel' },
-  { kind: 'time', key: 'lunchStart', labelKey: 'lunchStartLabel' },
-  { kind: 'time', key: 'lunchEnd', labelKey: 'lunchEndLabel' },
-  { kind: 'time', key: 'eveningEnd', labelKey: 'eveningEndLabel' },
   {
-    kind: 'enum',
-    key: 'steerDelivery',
-    labelKey: 'steerDeliveryLabel',
-    hintKey: 'steerDeliveryHint',
-    options: ['followup', 'steer'],
-    defaultValue: 'followup',
+    id: 'time',
+    titleKey: 'sectionTime',
+    layout: 'grid',
+    fields: [
+      { kind: 'time', key: 'workStart', labelKey: 'workStartLabel', hintKey: 'smartWindowHint' },
+      { kind: 'time', key: 'workEnd', labelKey: 'workEndLabel' },
+      { kind: 'time', key: 'lunchStart', labelKey: 'lunchStartLabel' },
+      { kind: 'time', key: 'lunchEnd', labelKey: 'lunchEndLabel' },
+      { kind: 'time', key: 'eveningEnd', labelKey: 'eveningEndLabel' },
+    ],
   },
   {
-    kind: 'boolean',
-    key: 'confirmDelivery',
-    labelKey: 'confirmDeliveryLabel',
-    hintKey: 'confirmDeliveryHint',
-    defaultValue: true,
-    onKey: 'optionEnabled',
-    offKey: 'optionDisabled',
-  },
-  {
-    kind: 'enum',
-    key: 'onUnconfirmed',
-    labelKey: 'onUnconfirmedLabel',
-    hintKey: 'onUnconfirmedHint',
-    options: ['keep', 'discard'],
-    defaultValue: 'keep',
+    id: 'delivery',
+    titleKey: 'sectionDelivery',
+    layout: 'stack',
+    fields: [
+      {
+        kind: 'enum',
+        key: 'steerDelivery',
+        labelKey: 'steerDeliveryLabel',
+        hintKey: 'steerDeliveryHint',
+        options: ['followup', 'steer'],
+        defaultValue: 'followup',
+      },
+      {
+        kind: 'boolean',
+        key: 'confirmDelivery',
+        labelKey: 'confirmDeliveryLabel',
+        hintKey: 'confirmDeliveryHint',
+        defaultValue: true,
+        onKey: 'optionEnabled',
+        offKey: 'optionDisabled',
+      },
+      {
+        kind: 'enum',
+        key: 'onUnconfirmed',
+        labelKey: 'onUnconfirmedLabel',
+        hintKey: 'onUnconfirmedHint',
+        options: ['keep', 'discard'],
+        defaultValue: 'keep',
+      },
+    ],
   },
 ] as const;
+
+const FIELDS: readonly FieldDef[] = SECTIONS.flatMap((s) => s.fields);
 
 /** 单字段的 pending 编辑意图：`{value, reset:true}` 表示点击 reset 等待保存。 */
 type Pending = { readonly value: string; readonly reset: boolean };
 type PendingMap = Partial<Record<string, Pending>>;
-
-/** 与官方 PluginCard 视觉一致的 chevron-down 图标（内联 SVG，零依赖）。 */
-function ChevronDown({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className={className} aria-hidden="true">
-      <path d="M3.5 5.25 7 8.75l3.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 export interface SchedulerSettingsCardProps {
   scope: SettingsScope<SchedulerSettings>;
@@ -139,7 +171,8 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
   const [pending, setPending] = useState<PendingMap>({});
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [open, setOpen] = useState(false);
+  /** 帮助按钮展开态（对齐官方 _helpButton_：aria-expanded 切换） */
+  const [helpOpen, setHelpOpen] = useState<Readonly<Record<string, boolean>>>({});
 
   useEffect(() => {
     const initial = scope.getSnapshot();
@@ -299,145 +332,173 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
     (pending.confirmDelivery?.value ?? (value.confirmDelivery === false ? 'false' : 'true')) !== 'false';
 
   return (
-    <li className={open ? 'ss-card ss-cardOpen' : 'ss-card'}>
-      <button
-        type="button"
-        className="ss-card-header"
-        aria-expanded={open}
-        aria-label={`${t(open ? 'collapse' : 'expand')}: ${t('title')}`}
-        onClick={() => setOpen(!open)}
-      >
-        <span className="ss-card-headText">
-          <span className="ss-card-name">{t('title')}</span>
-          <span className="ss-card-description">{t('description')}</span>
-        </span>
-        {dirty && <span className="ss-card-pending">{t('pendingBadge')}</span>}
-        <ChevronDown className={open ? 'ss-card-chevron ss-card-chevronOpen' : 'ss-card-chevron'} />
-      </button>
-      {open ? (
-        <div className="ss-card-body">
-          {!writable && (
-            <p className="ss-card-readOnly" role="status">
-              {t('readOnly')}
-            </p>
-          )}
+    <div className="ss-settings-form">
+      {!writable && (
+        <p className="ss-hint" role="status">
+          {t('readOnly')}
+        </p>
+      )}
 
-          {FIELDS.map((field) => {
-            const invalid = invalidField(field);
-            const isTime = field.kind === 'time';
-            const labelKey = field.labelKey;
-            const hintKey = field.hintKey;
-            const userHas = isUserOverridden(field.key);
-            const fieldId = `ss-${field.key}`;
-            return (
-              <div className="ss-field" key={field.key}>
-                <div className="ss-card-fieldHead">
-                  <label htmlFor={fieldId} className="ss-card-label">
-                    {t(labelKey)}
-                  </label>
-                  {userHas && (
-                    <span className="ss-card-badges">
-                      <span className="ss-card-badge">{t('overriddenLabel')}</span>
+      {SECTIONS.map((section) => (
+        <section className="ss-section" key={section.id} aria-labelledby={`ss-section-${section.id}`}>
+          <h3 className="ss-section-heading" id={`ss-section-${section.id}`}>
+            {t(section.titleKey)}
+          </h3>
+          <div className={section.layout === 'grid' ? 'ss-section-fields ss-section-fieldsGrid' : 'ss-section-fields'}>
+            {section.fields.map((field) => {
+              const invalid = invalidField(field);
+              const isTime = field.kind === 'time';
+              const labelKey = field.labelKey;
+              const hintKey = field.hintKey;
+              const userHas = isUserOverridden(field.key);
+              const fieldId = `ss-${field.key}`;
+              const helpHint = hintKey !== undefined && t(hintKey).length > 0;
+              const badges = userHas ? (
+                <span className="ss-card-badges">
+                  <span className="ss-card-badge">{t('overriddenLabel')}</span>
+                  <button
+                    type="button"
+                    className="ss-card-reset"
+                    disabled={!writable || saving}
+                    onClick={() => handleResetField(field)}
+                  >
+                    {t('resetLabel')}
+                  </button>
+                </span>
+              ) : null;
+              /* 布尔字段用官方 toggle 行（label 左 + switch 右，说明常驻）；
+                 其余字段保持「label 行 → 输入 → 帮助展开」三段式。 */
+              if (field.kind === 'boolean') {
+                const checked = displayValue(field) !== 'false';
+                return (
+                  <div className="ss-field ss-fieldToggle" key={field.key}>
+                    <div className="ss-toggle-row">
+                      <div className="ss-label-group">
+                        <label htmlFor={fieldId} className="ss-toggle-label">
+                          {t(labelKey)}
+                        </label>
+                      </div>
+                      {badges}
                       <button
                         type="button"
-                        className="ss-card-reset"
+                        id={fieldId}
+                        role="switch"
+                        aria-checked={checked}
+                        aria-label={t(labelKey)}
+                        className="ss-toggle-switch"
                         disabled={!writable || saving}
-                        onClick={() => handleResetField(field)}
-                      >
-                        {t('resetLabel')}
-                      </button>
-                    </span>
+                        onClick={() => handleFieldEdit(field, checked ? 'false' : 'true')}
+                      />
+                    </div>
+                    {helpHint ? <p className="ss-toggle-description">{t(hintKey)}</p> : null}
+                    {invalid !== null ? <p className="ss-card-invalid" role="status">{invalid}</p> : null}
+                  </div>
+                );
+              }
+              return (
+                <div className="ss-field" key={field.key}>
+                  <div className="ss-card-fieldHead">
+                    <div className="ss-label-group">
+                      <label htmlFor={fieldId} className="ss-card-label">
+                        {t(labelKey)}
+                      </label>
+                      {helpHint && (
+                        <button
+                          type="button"
+                          className={helpOpen[field.key] === true ? 'ss-help-btn ss-help-btnOpen' : 'ss-help-btn'}
+                          aria-label={`${t(labelKey)}说明`}
+                          aria-expanded={helpOpen[field.key] === true}
+                          aria-controls={`ss-help-${field.key}`}
+                          onClick={() => setHelpOpen((prev) => ({ ...prev, [field.key]: !prev[field.key] }))}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true" strokeWidth="1">
+                            <path d="M12.5757 7.00012C12.5757 3.92085 10.0794 1.42463 7.00012 1.42456C3.9208 1.42456 1.42456 3.9208 1.42456 7.00012C1.42463 10.0794 3.92085 12.5757 7.00012 12.5757C10.0793 12.5756 12.5756 10.0793 12.5757 7.00012ZM13.8002 7.00012C13.8001 10.7559 10.7559 13.8001 7.00012 13.8002C3.2443 13.8002 0.199291 10.7559 0.199219 7.00012C0.199219 3.24426 3.24426 0.199219 7.00012 0.199219C10.7559 0.199291 13.8002 3.2443 13.8002 7.00012Z" fill="currentColor"/>
+                            <path d="M7.6127 3.18921V4.55986H6.38735V3.18921H7.6127Z" fill="currentColor"/>
+                            <path d="M7.6127 5.68921V10.8109H6.38735V5.68921H7.6127Z" fill="currentColor"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    {badges}
+                  </div>
+                  {field.kind === 'enum' ? (
+                    <select
+                      id={fieldId}
+                      className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
+                      aria-invalid={invalid !== null || undefined}
+                      value={displayValue(field)}
+                      disabled={!writable || saving}
+                      onChange={(event) => handleFieldEdit(field, event.target.value)}
+                    >
+                      {field.options.map((option) => (
+                        <option value={option} key={option}>
+                          {t(`${field.key}Option_${option}`)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      id={fieldId}
+                      type={isTime ? 'time' : 'text'}
+                      inputMode={isTime ? undefined : 'numeric'}
+                      className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
+                      aria-invalid={invalid !== null || undefined}
+                      value={displayValue(field)}
+                      placeholder={field.kind === 'number' ? String(field.defaultValue) : undefined}
+                      disabled={!writable || saving}
+                      onChange={(event) => handleFieldEdit(field, event.target.value)}
+                    />
                   )}
+                  {invalid !== null ? (
+                    <p className="ss-card-invalid" role="status">{invalid}</p>
+                  ) : null}
+                  {helpOpen[field.key] === true && hintKey !== undefined && t(hintKey).length > 0 ? (
+                    <div id={`ss-help-${field.key}`} role="region" aria-label={`${t(labelKey)}说明`} className="ss-help">
+                      <p>{t(hintKey)}</p>
+                    </div>
+                  ) : null}
+                  {field.key === 'steerDelivery' && displayValue(field) === 'steer' ? (
+                    <p className="ss-card-risk" role="status">
+                      {confirmEnabled ? t('steerRiskGuarded') : t('steerRiskUnguarded')}
+                    </p>
+                  ) : null}
+                  {field.key === 'onUnconfirmed' && displayValue(field) === 'discard' ? (
+                    <p className="ss-card-risk" role="status">
+                      {t('discardRisk')}
+                    </p>
+                  ) : null}
                 </div>
-                {field.kind === 'boolean' ? (
-                  <select
-                    id={fieldId}
-                    className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
-                    aria-invalid={invalid !== null || undefined}
-                    value={displayValue(field) === 'false' ? 'false' : 'true'}
-                    disabled={!writable || saving}
-                    onChange={(event) => handleFieldEdit(field, event.target.value)}
-                  >
-                    <option value="true">{t(field.onKey)}</option>
-                    <option value="false">{t(field.offKey)}</option>
-                  </select>
-                ) : field.kind === 'enum' ? (
-                  <select
-                    id={fieldId}
-                    className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
-                    aria-invalid={invalid !== null || undefined}
-                    value={displayValue(field)}
-                    disabled={!writable || saving}
-                    onChange={(event) => handleFieldEdit(field, event.target.value)}
-                  >
-                    {field.options.map((option) => (
-                      <option value={option} key={option}>
-                        {t(`${field.key}Option_${option}`)}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    id={fieldId}
-                    type={isTime ? 'time' : 'text'}
-                    inputMode={isTime ? undefined : 'numeric'}
-                    className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
-                    aria-invalid={invalid !== null || undefined}
-                    value={displayValue(field)}
-                    placeholder={field.kind === 'number' ? String(field.defaultValue) : undefined}
-                    disabled={!writable || saving}
-                    onChange={(event) => handleFieldEdit(field, event.target.value)}
-                  />
-                )}
-                {invalid !== null || (hintKey !== undefined && t(hintKey).length > 0) ? (
-                  <p className={invalid !== null ? 'ss-card-invalid' : 'ss-hint'}>
-                    {invalid !== null ? invalid : t(hintKey as string)}
-                  </p>
-                ) : null}
-                {/*
-                  steer 的风险警示：选中时**常驻**显示（非 tooltip），且文案随
-                  「投递确认」开关变化 —— 让「选项的后果」与「当前配置」始终对齐。
-                  若确认已关，则明说不会保留条目，避免留下「选了更快的就行」的错觉。
-                */}
-                {field.key === 'steerDelivery' && displayValue(field) === 'steer' ? (
-                  <p className="ss-card-risk" role="status">
-                    {confirmEnabled ? t('steerRiskGuarded') : t('steerRiskUnguarded')}
-                  </p>
-                ) : null}
-                {field.key === 'onUnconfirmed' && displayValue(field) === 'discard' ? (
-                  <p className="ss-card-risk" role="status">
-                    {t('discardRisk')}
-                  </p>
-                ) : null}
-              </div>
-            );
-          })}
-
-          <div className="ss-card-footer">
-            {failed && (
-              <p className="ss-card-failed" role="status">
-                {t('saveFailed')}
-              </p>
-            )}
-            <button
-              type="button"
-              className="ss-card-discard"
-              disabled={!dirty || saving}
-              onClick={handleDiscard}
-            >
-              {t('discard')}
-            </button>
-            <button
-              type="button"
-              className="ss-card-save"
-              disabled={saveDisabled}
-              onClick={() => void handleSave()}
-            >
-              {saving ? t('saving') : t('save')}
-            </button>
+              );
+            })}
           </div>
-        </div>
-      ) : null}
-    </li>
+        </section>
+      ))}
+
+      <div className="ss-card-footer">
+        {failed && (
+          <p className="ss-card-failed" role="status">
+            {t('saveFailed')}
+          </p>
+        )}
+        {dirty && (
+          <button
+            type="button"
+            className="ss-card-discard"
+            disabled={saving}
+            onClick={handleDiscard}
+          >
+            {t('discard')}
+          </button>
+        )}
+        <button
+          type="button"
+          className="ss-card-save"
+          disabled={saveDisabled}
+          onClick={() => void handleSave()}
+        >
+          {saving ? t('saving') : t('save')}
+        </button>
+      </div>
+    </div>
   );
 }

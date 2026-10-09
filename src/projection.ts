@@ -16,7 +16,12 @@
 import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import { decodeScheduleChange, resolveEveryOccurrence } from '@deepseek-ai/dsh-schedule';
-import type { ScheduleRecord } from '@deepseek-ai/dsh-schedule';
+import type {
+  AfterScheduleRecord,
+  AtScheduleRecord,
+  EveryScheduleRecord,
+  ScheduleRecord,
+} from '@deepseek-ai/dsh-schedule';
 import { OWNED_EVENT, PROJECTION_KEY } from './domain.js';
 import {
   allOwnership,
@@ -101,8 +106,22 @@ export const userSchedulesStateSchema = z.object({
   paused: z.array(pausedStateSchema).default([]),
 });
 
-/** 活动存储记录：dsh-schedule 记录 + 创建时刻（来自 create 事件的 time）。 */
-export type StoredScheduleRecord = ScheduleRecord & { readonly createdAt?: number };
+/**
+ * 活动存储记录：dsh-schedule 记录 + 创建时刻（来自 create 事件的 time）。
+ *
+ * 显式按**本插件产出的三种 kind** 收窄，而非直接用 `ScheduleRecord`：
+ * 0.1.7 的联合新增了 daily/weekly/cron，它们的字段面
+ * （`afterSeconds` / `everySeconds`）与本插件的 wire 契约不同，透传会让
+ * `wireItemOf` 读到不存在的字段。
+ *
+ * 逐个具名引用而非 `Extract`：`Extract<ScheduleRecord, {kind:'after'|…}>`
+ * 在本仓库的 tsc 配置下不触发收窄（判别式联合的 `Extract` 需 kind 为
+ * 单字面量，逐个列举后交集才正确）。
+ */
+export type StoredScheduleRecord =
+  | (AfterScheduleRecord & { readonly createdAt?: number })
+  | (AtScheduleRecord & { readonly createdAt?: number })
+  | (EveryScheduleRecord & { readonly createdAt?: number });
 
 /** 投影内部状态（plain JSON：owned/active 用数组承载）。 */
 export interface UserScheduleProjectionState {
@@ -143,12 +162,25 @@ function wireItemOf(record: StoredScheduleRecord, sessionId: string): UserSchedu
   const ownership = sessionId.length > 0 ? getOwnership(sessionId, record.id) : undefined;
   const uid = ownership?.uid;
   const windowSeconds = ownership?.windowSeconds;
+  // 0.1.7 的 `ScheduleRecord` 联合含 daily/weekly/cron，本插件的 wire 契约
+  // （`UserScheduleWireItem.kind`）仍只认 after/at/every —— 这三个变体只可能
+  // 来自其他插件写入的日志。归一为 `every`（与编辑路径的 300s 默认一致），
+  // 避免把未知 kind 泄漏到客户端。
+  //
+  // 字段读取按 `record.kind` 而非归一后的 `kind`：只有前者能让 TS 对判别式
+  // 联合收窄，从而确认 `afterSeconds` / `everySeconds` 存在。
+  const kind: 'after' | 'at' | 'every' =
+    record.kind === 'after' || record.kind === 'at' ? record.kind : 'every';
+  const everySeconds =
+    record.kind === 'every' && typeof record.everySeconds === 'number'
+      ? record.everySeconds
+      : undefined;
   return {
     id: uid ?? record.id,
-    kind: record.kind,
+    kind,
     prompt: record.prompt,
     ...(record.kind === 'after' ? { after_seconds: record.afterSeconds } : {}),
-    ...(record.kind === 'every' ? { every_seconds: record.everySeconds } : {}),
+    ...(everySeconds !== undefined ? { every_seconds: everySeconds } : {}),
     ...(typeof record.createdAt === 'number' ? { created_at: new Date(record.createdAt).toISOString() } : {}),
     ...(record.kind === 'after' && typeof windowSeconds === 'number'
       ? { window_seconds: windowSeconds }
@@ -179,11 +211,14 @@ function pausedWireItemOf(entry: PausedEntry): UserScheduleWireItem {
 }
 
 /** 对 `every` dispatch 推进 scheduledAt（与 dsh-schedule dispatchedRecord 一致）。 */
-function advanceEvery(record: ScheduleRecord, acceptedAt: string): ScheduleRecord | undefined {
+function advanceEvery(
+  record: StoredScheduleRecord,
+  acceptedAt: string,
+): StoredScheduleRecord | undefined {
   if (record.kind !== 'every') return record;
   const occurrence = resolveEveryOccurrence(record, Date.parse(acceptedAt));
   if (occurrence.nextScheduledAt === undefined) return undefined;
-  return { ...record, scheduledAt: occurrence.nextScheduledAt } as ScheduleRecord;
+  return { ...record, scheduledAt: occurrence.nextScheduledAt } as StoredScheduleRecord;
 }
 
 /**

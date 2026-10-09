@@ -20,6 +20,17 @@ test('相对时长：+30m / +2h / +1d', () => {
   assert.ok(d.ok && d.kind === 'after' && d.afterSeconds === 86400);
 });
 
+test('相对时长（小数）：+2.5h / +0.5h / +1.5d', () => {
+  const a = parseScheduleSpec('+2.5h', NOW, TZ);
+  assert.ok(a.ok && a.kind === 'after' && a.afterSeconds === 9000);
+  const b = parseScheduleSpec('+0.5h', NOW, TZ);
+  assert.ok(b.ok && b.kind === 'after' && b.afterSeconds === 1800);
+  const c = parseScheduleSpec('+1.5d', NOW, TZ);
+  assert.ok(c.ok && c.kind === 'after' && c.afterSeconds === 129600);
+  const d = parseScheduleSpec('+0.5m', NOW, TZ);
+  assert.ok(d.ok && d.kind === 'after' && d.afterSeconds === 30);
+});
+
 test('相对时长：非法值拒绝', () => {
   assert.ok(!parseScheduleSpec('+0m', NOW, TZ).ok);
   assert.ok(!parseScheduleSpec('+xm', NOW, TZ).ok);
@@ -133,6 +144,11 @@ test('宽容：+1h30m 组合相对', () => {
   assert.ok(r.ok && r.target.kind === 'after' && r.target.afterSeconds === 5400);
 });
 
+test('宽容（小数）：+2.5h 拉丁相对', () => {
+  const r = parseScheduleInput('+2.5h 内容', NOW, TZ);
+  assert.ok(r.ok && r.target.kind === 'after' && r.target.afterSeconds === 9000);
+});
+
 test('宽容：+90s 秒 / +1w 周', () => {
   const s = parseScheduleInput('+90s x', NOW, TZ);
   assert.ok(s.ok && s.target.kind === 'after' && s.target.afterSeconds === 90);
@@ -147,6 +163,15 @@ test('宽容：30分钟后 / 半小时后 / 两小时后', () => {
   assert.ok(b.ok && b.target.kind === 'after' && b.target.afterSeconds === 1800);
   const c = parseScheduleInput('两小时后 x', NOW, TZ);
   assert.ok(c.ok && c.target.kind === 'after' && c.target.afterSeconds === 7200);
+});
+
+test('宽容（小数）：2.5小时后 / 0.5天后', () => {
+  const a = parseScheduleInput('2.5小时后 开会', NOW, TZ);
+  assert.ok(a.ok && a.target.kind === 'after' && a.target.afterSeconds === 9000);
+  const b = parseScheduleInput('0.5天后 提醒', NOW, TZ);
+  assert.ok(b.ok && b.target.kind === 'after' && b.target.afterSeconds === 43200);
+  const c = parseScheduleInput('1.5小时后 喝水', NOW, TZ);
+  assert.ok(c.ok && c.target.kind === 'after' && c.target.afterSeconds === 5400);
 });
 
 test('宽容：明天 15:32（带空格 + 内容切分）', () => {

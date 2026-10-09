@@ -12,13 +12,21 @@
  * rc.7 兼容性：所需服务通过模块级 `inject` 数组声明（fiber 激活门控），
  * apply 内用 `ctx.get(name)` 读取；缺失时静默跳过（不阻塞会话其他能力）。
  *
+ * 设置服务两代双轨：0.1.7 的 settings rewrite 删掉了浏览器端 `settingsScope`，
+ * 配置面改由 `configForms` 提供（同名 namespace 的表单，快照/写入形状一致），
+ * 设置页卡片插槽也从 `settings.plugin.item` 换到 Plugins 页的
+ * `plugins.bundle.config`。两条轨道各注册一次、先到先得，因此 `settingsScope`
+ * **不进**顶层 `inject`（否则会在新 harness 下永久 pending），只在嵌套
+ * `ctx.inject([...])` 里按需等待。
+ *
  * Context 服务类型增强在 `./runtime-augment.d.ts`：声明 `slots`/`sessions`/
- * `settingsScope`/`locale` 的最小契约，避免引入 `@deepseek-ai/dsh-client-*`
+ * `settingsScope`/`configForms`/`locale` 的最小契约，避免引入 `@deepseek-ai/dsh-client-*`
  * 这一族浏览器运行时包作为 NPM 依赖（它们是宿主注入产物，pnpm 解析预发布版
  * 会带来 hoisting/range 噪音）。
  * @module dsh-later/client
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { ClientConfigForm, ClientSettingsScope } from './runtime-augment.js';
 import { name } from '../domain.js';
 import { injectStyles } from './styles.js';
 import { SchedButton } from './components/SchedButton.js';
@@ -32,14 +40,26 @@ import { mountSessionPresence, type PresenceLocaleLike, type PresenceSessionsLik
 /** Filled slot：输入框右侧工具行。 */
 const INPUT_RIGHT_SLOT = 'conversation.input.right';
 
-/** 所需服务：插槽注册 + 会话解析（命令通道需要 session face）。 */
-const inject = ['slots', 'sessions', 'conversation', 'settingsScope', 'locale'];
+/** 所需服务：插槽注册 + 会话解析（命令通道需要 session face）。设置服务另走
+ *  嵌套 `ctx.inject` 双轨等待，不在此列（见文件头）。 */
+const inject = ['slots', 'sessions', 'conversation', 'locale'];
 
 /** Locale 字典命名空间（locale 命名空间允许点分）。 */
 const NS = 'settings.plugins.later';
 
 /** Settings 命名空间（必须与 host 端注册的字符串一致：dsh-later）。 */
 const SETTINGS_NS = 'dsh-later';
+
+/**
+ * profile 里的**条目 id**（`cordis.patch.yml` 的 `id: later`）。
+ *
+ * 0.1.7+ 的 settings rewrite 用条目 id 而非 namespace 寻址表单：
+ * - `configForms.get(entryId)`
+ * - `SettingsForms.describe()` 的 `ns: entry.options.id`
+ *
+ * 用错不会报错，只会让设置页空白 —— 故与 `SETTINGS_NS` 分开命名、各司其职。
+ */
+const ENTRY_ID = 'later';
 
 /**
  * 浏览器插件主体。
@@ -52,12 +72,18 @@ const SETTINGS_NS = 'dsh-later';
 function apply(ctx: Context): void {
   const slots = ctx.get('slots');
   const sessions = ctx.get('sessions');
-  const settingsScope = ctx.get('settingsScope');
   const locale = ctx.get('locale');
   if (slots === undefined || sessions === undefined) return;
 
   // 样式注入（卸载清理）。
   ctx.effect(() => injectStyles(), 'dsh-later: styles');
+
+  // 设置服务两代双轨：获取 clockIconStyle 设置
+  // auto 模式根据 DSH 版本自动选择：0.2.0+ 用新版，0.1.x 用旧版
+  // 检测方式：有 configForms 服务 = 0.2.0+，否则 = 0.1.x
+  let detectedVersion: 'modern' | 'classic' = 'classic';
+  let getClockIconStyle: () => 'auto' | 'modern' | 'classic' = () => 'auto';
+
   // 侧栏会话行「定时状态」badge（docs/ui/09 路线 B）：数据源为 sessions.list
   // 的行级 projectionValues（session.list 基线覆盖全会话，当前会话由投影帧
   // 实时推进），周期 refresh() 读 RPC 补时效。服务缺失时静默跳过。
@@ -66,6 +92,11 @@ function apply(ctx: Context): void {
       mountSessionPresence({
         sessions: sessions as unknown as PresenceSessionsLike,
         ...(locale === undefined ? {} : { locale: locale as unknown as PresenceLocaleLike }),
+        getClockIconStyle: () => {
+          const style = getClockIconStyle();
+          if (style === 'auto') return detectedVersion;
+          return style;
+        },
       }),
     'dsh-later: presence',
   );
@@ -80,6 +111,9 @@ function apply(ctx: Context): void {
         expand: '展开设置',
         collapse: '收起设置',
         readOnly: '本部署的设置为只读。',
+        sectionDisplay: '显示设置',
+        sectionTime: '时间设置',
+        sectionDelivery: '投递设置',
         showButtonLabel: '显示定时按钮',
         showButtonHint: '关闭后输入框右侧不再显示时钟按钮；已创建的提醒仍会照常触发，并在输入框下方的待发送列表中显示。',
         optionOn: '显示',
@@ -104,6 +138,11 @@ function apply(ctx: Context): void {
         onUnconfirmedHint: '投递未能确认时的处理方式。',
         onUnconfirmedOption_keep: '保留条目可重试（推荐）',
         onUnconfirmedOption_discard: '丢弃',
+        clockIconStyleLabel: '时钟图标风格',
+        clockIconStyleHint: '侧栏会话行定时状态图标的显示风格。',
+        clockIconStyleOption_auto: '自动（推荐）',
+        clockIconStyleOption_modern: '新版描边风格',
+        clockIconStyleOption_classic: '旧版点阵风格',
         steerRiskGuarded: '⚠ 撞上回合启动时可能被吞掉；已开启投递确认，未送达会保留条目并可重试。',
         steerRiskUnguarded: '⚠ 撞上回合启动时可能被吞掉，且不会保留条目（投递确认已关闭）。',
         discardRisk: '⚠ 未确认的提醒会被移出列表 —— 静默丢失将重新变得可能。',
@@ -125,6 +164,9 @@ function apply(ctx: Context): void {
         expand: 'Show settings',
         collapse: 'Hide settings',
         readOnly: 'Settings for this deployment are read-only.',
+        sectionDisplay: 'Display',
+        sectionTime: 'Time windows',
+        sectionDelivery: 'Delivery',
         showButtonLabel: 'Show schedule button',
         showButtonHint: 'Hide the clock button on the input bar. Existing reminders keep firing and stay visible in the dock below the composer.',
         optionOn: 'Show',
@@ -149,6 +191,11 @@ function apply(ctx: Context): void {
         onUnconfirmedHint: 'What to do when delivery cannot be confirmed.',
         onUnconfirmedOption_keep: 'Keep for retry (recommended)',
         onUnconfirmedOption_discard: 'Discard',
+        clockIconStyleLabel: 'Clock icon style',
+        clockIconStyleHint: 'Display style of the schedule status icon in the sidebar.',
+        clockIconStyleOption_auto: 'Auto (recommended)',
+        clockIconStyleOption_modern: 'Modern stroke style',
+        clockIconStyleOption_classic: 'Classic dot-matrix style',
         steerRiskGuarded: '⚠ May be swallowed when it collides with turn start; delivery confirmation is on, so an undelivered reminder is kept and can be retried.',
         steerRiskUnguarded: '⚠ May be swallowed when it collides with turn start, and the reminder will NOT be kept (delivery confirmation is off).',
         discardRisk: '⚠ Unconfirmed reminders are removed from the list — silent loss becomes possible again.',
@@ -185,25 +232,8 @@ function apply(ctx: Context): void {
     }
   };
 
-  // 绑定插件设置 namespace → wire scope，供按钮/面板订阅智能时段配置。
-  // 设置页保存后 SchedPanel 芯片立即重算，无须刷新会话。
-  const schedulerScope = settingsScope === undefined ? undefined : settingsScope.bind({ namespace: SETTINGS_NS });
-
-  ctx.slots.inject(
-    INPUT_RIGHT_SLOT,
-    () =>
-      ctx.slots.register(
-        {
-          name: INPUT_RIGHT_SLOT,
-          id: 'later',
-          order: 50,
-          inject: () => ({ callCommand, locale, schedulerScope } as SchedButtonInjected),
-        },
-        SchedButton,
-      ),
-  );
-
-  // 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。
+  // 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，
+  // 不依赖设置服务，因此在顶层无条件注册。
   ctx.slots.inject(
     'conversation.input.dock',
     () =>
@@ -218,23 +248,99 @@ function apply(ctx: Context): void {
       ),
   );
 
-  // 注册设置页卡片：scope 以普通 prop 传入（与 dsh-wakatime / dsh-auto-collapse
-  // 同款写法）——宿主渲染器会把 inject() 里的 `hooks.xxx` 转成 useXxx hook prop，
-  // 而卡片组件按普通 `scope` prop 解构，放 hooks 里会导致 scope 为 undefined、
-  // 卡片崩溃被卸载（设置 → 插件 里看不到本插件的卡片）。
-  if (settingsScope !== undefined && locale !== undefined) {
-    ctx.slots.inject('settings.plugin.item', function* () {
-      yield ctx.slots.register({
-        name: 'settings.plugin.item',
-        key: SETTINGS_NS,
-        locale: NS,
-        inject: () => ({
-          scope: settingsScope.bind({ namespace: SETTINGS_NS }),
-          t: locale.bind(NS),
-        }),
-      }, SchedulerSettingsCard);
-    });
-  }
+  /** 输入框按钮是否已挂载：两条设置轨道只会命中一条，重复挂载会出现两颗按钮。 */
+  let composerMounted = false;
+
+  /**
+   * 挂载输入框右侧按钮（其面板订阅智能时段配置，故需要设置 scope）。
+   * @param scope - 本插件 namespace 的设置面（旧 `settingsScope` 或新 `configForms`）。
+   */
+  const mountComposer = (scope: ClientSettingsScope | ClientConfigForm): void => {
+    if (composerMounted) return;
+    composerMounted = true;
+    ctx.slots.inject(
+      INPUT_RIGHT_SLOT,
+      () =>
+        ctx.slots.register(
+          {
+            name: INPUT_RIGHT_SLOT,
+            id: 'later',
+            order: 50,
+            inject: () => ({ callCommand, locale, schedulerScope: scope } as SchedButtonInjected),
+          },
+          SchedButton,
+        ),
+    );
+  };
+
+  /** 设置卡文案取值器；locale 服务缺失时卡片不注册（按钮自带回退，仍可挂载）。 */
+  const cardT = locale === undefined ? undefined : locale.bind(NS);
+
+  /** 设置页卡片声明（两代 harness 仅插槽名不同）。 */
+  const cardDeclaration = (slot: string, scope: ClientSettingsScope | ClientConfigForm) => ({
+    name: slot,
+    key: SETTINGS_NS,
+    locale: NS,
+    inject: () => ({ scope, t: cardT }),
+  });
+
+  // 旧 harness（≤ 0.1.5）：浏览器端 settingsScope + 设置页 settings.plugin.item。
+  ctx.inject(['settingsScope'], () => {
+    const binder = ctx.get('settingsScope');
+    if (binder === undefined) return;
+    // 旧版本（0.1.x）使用旧版点阵时钟
+    detectedVersion = 'classic';
+    const scope = binder.bind({ namespace: SETTINGS_NS });
+    // 更新 getClockIconStyle 函数，从 scope 中读取 clockIconStyle 设置
+    getClockIconStyle = () => {
+      const snap = scope.getSnapshot();
+      if (snap.status !== 'ready') return 'auto';
+      const value = (snap.value ?? {}) as Record<string, unknown>;
+      const style = value['clockIconStyle'];
+      return style === 'modern' || style === 'classic' ? style : 'auto';
+    };
+    mountComposer(scope);
+    if (cardT === undefined) return;
+    ctx.slots.inject('settings.plugin.item', () =>
+      ctx.slots.register(cardDeclaration('settings.plugin.item', scope), SchedulerSettingsCard),
+    );
+  });
+
+  // 新 harness（0.1.7+ settings rewrite）：configForms 表单 + Plugins 页
+  // `plugins.bundle.config` 卡片。该插槽由宿主按「条目确被服务」渲染，故用
+  // whileServed 等宿主 describe 里出现本插件**条目 id** 再注册（撤服时连带注销）。
+  //
+  // ⚠️ 寻址键是**条目 id**（`cordis.patch.yml` 的 `id: later`），不是 settings
+  // namespace（'dsh-later'）：`configForms.get(entryId)` 与 describe() 的
+  // `ns: entry.options.id` 都用条目 id。宿主 describe() 直接从
+  // `entry.fiber.runtime.Config` 生成表单，而 `ns` 即条目 id——用错会静默拿到
+  // 空表单（设置页空白、无报错）。这正是 0.2.0 下卡片不显示的原因之一。
+  ctx.inject(['configForms'], () => {
+    const forms = ctx.get('configForms');
+    if (forms === undefined || typeof forms.get !== 'function' || typeof forms.whileServed !== 'function') return;
+    // 新版本（0.2.0+）使用新版描边时钟
+    detectedVersion = 'modern';
+    const scope = forms.get(ENTRY_ID);
+    // 更新 getClockIconStyle 函数，从 configForms scope 中读取 clockIconStyle 设置
+    getClockIconStyle = () => {
+      const snap = scope.getSnapshot();
+      if (snap.status !== 'ready') return 'auto';
+      const value = (snap.value ?? {}) as Record<string, unknown>;
+      const style = value['clockIconStyle'];
+      return style === 'modern' || style === 'classic' ? style : 'auto';
+    };
+    mountComposer(scope);
+    if (cardT === undefined) return;
+    ctx.effect(
+      () =>
+        forms.whileServed([ENTRY_ID], () =>
+          ctx.slots.inject('plugins.bundle.config', () =>
+            ctx.slots.register(cardDeclaration('plugins.bundle.config', scope), SchedulerSettingsCard),
+          ),
+        ),
+      'dsh-later: plugins-page card',
+    );
+  });
 }
 
 export { apply, inject, name };
