@@ -319,6 +319,85 @@ interface SmartWindowConfig {
 
 ---
 
+## 7. 插件间契约（client 侧）
+
+### 7.1 模块导出面（`dsh-later/client`）
+
+dsh-later 的浏览器产物 `lib/client.js` 在注册 `apply` 之外，额外导出一组**跨插件公共
+API**（[issue #17](http://192.168.4.77:3000/dsh-plugins/dsh-later/issues/17)）。消费方在
+`package.json` 的 `dsh.client.external` 里声明 `"dsh-later"`（构建图会把它排在本包之前），
+然后在客户端 factory 里 `require('dsh-later/client')`。
+
+| 导出 | 类型 | 说明 |
+|---|---|---|
+| `getScheduleSummaryStore()` | `() => ScheduleSummaryStore \| undefined` | 当前生效的摘要 store；dsh-later 未 apply 时为 `undefined` |
+| `subscribeScheduleSummaryStore(fn)` | `(fn) => () => void` | 订阅 store 登记变化（store 迟到时仍能重渲染） |
+| `useScheduleSummary(store?)` | React hook | 订阅摘要；返回 `ScheduleSummaryMap`（引用稳定） |
+| `buildScheduleSummary(source, now)` | 纯函数 | 由 `sessions.list` 快照直接算出摘要 |
+| `schedulesOfProjection(projectionValues)` | 纯函数 | 从投影值取出任务数组（容错） |
+| `summarizeScheduleGroup(map, sessionIds)` | 纯函数 | 按分组聚合（会话数/任务数/最早触发/最高优先级） |
+| `createScheduleSummaryStore(sessions, options?)` | 工厂 | 自建 store（高级用法/单测） |
+
+### 7.2 数据结构
+
+```typescript
+/** 会话 id → 该会话的定时摘要（仅含有任务的会话）。 */
+type ScheduleSummaryMap = ReadonlyMap<string, ScheduleSummaryEntry>
+
+interface ScheduleSummaryEntry {
+  count: number          // 任务数（含暂停项）
+  pausedCount: number    // 暂停项数量（计入 count，不参与 nextAt）
+  nextAt?: number        // 最早触发时刻（epoch ms）；全部暂停时缺省
+  state: 'scheduled' | 'urgent' | 'overdue'  // 按快照时刻判定（urgent = ≤5min）
+}
+
+interface GroupScheduleSummary {
+  sessions: number       // 组内有任务的会话数
+  count: number          // 组内任务总数
+  pausedCount: number
+  nextAt?: number        // 组内最早触发时刻
+  state?: 'scheduled' | 'urgent' | 'overdue'  // 组内最高优先级；无任务时缺省
+}
+```
+
+### 7.3 store 契约
+
+```typescript
+interface ScheduleSummaryStore {
+  getSnapshot(): ScheduleSummaryMap       // 引用稳定：内容变化时才换新对象
+  subscribe(listener: () => void): () => void
+  reload(): void                          // 立即按最新快照重算（内容变化才通知）
+  dispose(): void                         // 释放订阅与定时器
+}
+```
+
+语义保证：
+
+- **唯一数据权威**：dsh-later 自己的侧栏 badge（`session-presence`）与外部消费者读同一份
+  摘要，两边不会漂移。
+- 内部负责 `sessions.list` 订阅、30s 状态 tick（`scheduled → urgent → overdue`）与 60s
+  `session.list` 读 RPC（仅页面可见时）；消费方不需要自己刷新。
+- `dispose()` 后不再通知、不再发 RPC；dsh-later 卸载时自动注销登记表。
+- 消费方必须容忍 `getScheduleSummaryStore()` 返回 `undefined`。
+
+### 7.4 消费示例
+
+```js
+// package.json: "dsh": { "client": { "platform": "web", "external": ["dsh-later"] } }
+const { getScheduleSummaryStore, summarizeScheduleGroup } = require('dsh-later/client')
+
+const store = getScheduleSummaryStore()
+if (store !== undefined) {
+  const off = store.subscribe(() => {
+    const group = summarizeScheduleGroup(store.getSnapshot(), groupSessionIds)
+    render(group) // 例如：分组徽标加时钟/紫色点 + 数字
+  })
+  // 卸载时 off()
+}
+```
+
+---
+
 ## 参考链接
 
 - dsh-schedule 工具 schema: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/lib/types/types.d.ts)

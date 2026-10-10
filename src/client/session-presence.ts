@@ -4,11 +4,14 @@
  * 数据源（零宿主改动）：`sessions.list` 快照里每行 summary 携带
  * `projectionValues.userSchedules` —— `session.list` 基线为全会话携带
  * projections 块（live 走注册表现值、冷会话走持久化投影缓存），当前打开的
- * 会话由 `session/projection` mux 帧实时推进并合入同一快照。因此：
- *  - 订阅 `sessions.list` 即可感知所有会话的任务变化；
- *  - 周期性 `sessions.refresh()`（session.list 读 RPC，不写会话日志）补齐
- *    未打开会话的时效；
- *  - 30s 本地 tick 只重算 badge 状态（scheduled/urgent/overdue），零网络。
+ * 会话由 `session/projection` mux 帧实时推进并合入同一快照。
+ *
+ * ⚠️ 本模块**不直接读** `sessions.list`，而是消费
+ * `src/schedule-summary-store.ts` 的摘要 store：store 内部订阅列表变化、周期
+ * `sessions.refresh()`（session.list 读 RPC，不写会话日志）补时效，并在 30s
+ * 状态 tick 上重算 `scheduled/urgent/overdue`。这样「外部插件读到的摘要」与
+ * 「本插件侧栏 badge」必然同源（issue #17）；本模块只保留 30s 本地 tick 以刷新
+ * 相对时间文案（零网络）。
  *
  * 行→会话映射：行元素向上走 ≤8 层 React fiber，取 `memoizedProps.node.id`
  * （ui-workspace 会话行的行数据，实测深度 3）。**禁止**依赖 `YDXeBa_*` 等
@@ -43,34 +46,12 @@ import {
   badgeStateFor,
   hoverScheduleStatus,
   relativeFireLabel,
-  summarizeSchedules,
   type PresenceBadgeState,
-  type PresenceScheduleLike,
-  type PresenceSummary,
   type RelativeFireLabels,
 } from '../presence.js';
+import type { ScheduleSummaryEntry, ScheduleSummaryMap } from '../schedule-summary.js';
+import type { ScheduleSummaryStore } from '../schedule-summary-store.js';
 import { dictFor, format, type SchedStrings } from './strings.js';
-
-/** 会话行 summary 的结构化子集（避免引入运行时包类型依赖）。 */
-interface PresenceSessionSummaryLike {
-  readonly displayTitle?: string;
-  readonly title?: string;
-  readonly projectionValues?: Readonly<Record<string, unknown>>;
-}
-
-/** 会话列表快照的结构化子集。 */
-interface PresenceListStateLike {
-  readonly byId: Readonly<Record<string, PresenceSessionSummaryLike>>;
-}
-
-/** 客户端 sessions 服务的结构化子集（SessionRuntime 的 list + refresh）。 */
-export interface PresenceSessionsLike {
-  readonly list: {
-    getSnapshot(): PresenceListStateLike;
-    subscribe(fn: () => void): () => void;
-  };
-  refresh(): Promise<unknown>;
-}
 
 /** 宿主 locale 服务的结构化子集。 */
 export interface PresenceLocaleLike {
@@ -79,7 +60,12 @@ export interface PresenceLocaleLike {
 }
 
 export interface SessionPresenceOptions {
-  readonly sessions: PresenceSessionsLike;
+  /**
+   * 定时摘要 store（`src/schedule-summary-store.ts`）。本模块**不再**自己读
+   * `sessions.list`、也不再自己周期 `refresh()`——数据权威只有一个，外部插件
+   * （dsh-group-status）读到的与本插件侧栏 badge 必然一致（issue #17）。
+   */
+  readonly summary: ScheduleSummaryStore;
   readonly locale?: PresenceLocaleLike;
   /** 获取时钟图标风格的函数（支持动态获取最新设置）。 */
   readonly getClockIconStyle?: () => 'auto' | 'modern' | 'classic';
@@ -95,8 +81,6 @@ const FIBER_MAX_DEPTH = 8;
 const SCAN_DEBOUNCE_MS = 60;
 /** badge 状态重算周期（本地时钟，零网络）。 */
 const STATE_TICK_MS = 30_000;
-/** session.list 重拉周期（读 RPC；仅页面可见时执行）。 */
-const REFRESH_INTERVAL_MS = 60_000;
 
 /** 旧版时钟 glyph（10×10 crispEdges，外圈 8 方块 + 上/右指针，中心留空）。 */
 const CLOCK_SVG_CLASSIC =
@@ -161,17 +145,10 @@ function sessionIdOfNode(element: Element): string | undefined {
   return undefined;
 }
 
-/** 从列表快照归纳 badge 索引：sessionId → PresenceSummary（仅保留 count>0 的行）。 */
-function buildIndex(state: PresenceListStateLike): Map<string, PresenceSummary> {
-  const index = new Map<string, PresenceSummary>();
-  for (const [sessionId, summary] of Object.entries(state.byId)) {
-    const schedules = (summary.projectionValues?.['userSchedules'] as
-      | { schedules?: readonly PresenceScheduleLike[] }
-      | undefined)?.schedules;
-    const entry = summarizeSchedules(schedules);
-    if (entry.count > 0) index.set(sessionId, entry);
-  }
-  return index;
+/** 取当前摘要索引：先拉最新快照（store 是唯一数据权威），再读缓存。 */
+function currentIndex(summary: ScheduleSummaryStore): ScheduleSummaryMap {
+  summary.reload();
+  return summary.getSnapshot();
 }
 
 /** 找行内已注入的 badge（slot 内或 slot 后；不越界到嵌套子行）。 */
@@ -201,7 +178,7 @@ function labelsFor(dict: SchedStrings): RelativeFireLabels {
  * 已注入的 badge 节点）。
  */
 export function mountSessionPresence(options: SessionPresenceOptions): () => void {
-  const { sessions, locale, getClockIconStyle } = options;
+  const { summary, locale, getClockIconStyle } = options;
   if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {
     return () => undefined;
   }
@@ -212,7 +189,7 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     return style === 'classic' ? CLOCK_SVG_CLASSIC : CLOCK_SVG_MODERN;
   };
 
-  let index = new Map<string, PresenceSummary>();
+  let index: ScheduleSummaryMap = new Map<string, ScheduleSummaryEntry>();
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
 
@@ -221,7 +198,7 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
   /** 全量重扫：重建索引 + 按当前 DOM 对账 badge。 */
   const scan = (): void => {
     if (disposed) return;
-    index = buildIndex(sessions.list.getSnapshot());
+    index = currentIndex(summary);
     const dict = dictForNow();
     const now = Date.now();
     for (const row of Array.from(document.querySelectorAll<HTMLElement>('[role="treeitem"][draggable="true"]'))) {
@@ -363,47 +340,25 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     statusHost.append(row);
   }
 
-  // 数据/环境触发：列表变化（含当前会话投影帧）、语言切换、DOM 变化。
-  const unsubscribeList = sessions.list.subscribe(scheduleScan);
+  // 数据/环境触发：摘要变化（含当前会话投影帧与状态 tick）、语言切换、DOM 变化。
+  // 「其余会话的时效」由 store 负责（周期 session.list 读 RPC + 可见性/online 触发），
+  // 本模块不再自己 refresh，避免同一份数据被拉两次。
+  const unsubscribeSummary = summary.subscribe(scheduleScan);
   const unsubscribeLocale = locale?.subscribe(scheduleScan);
   const observer = new MutationObserver(scheduleScan);
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // 其余会话的时效：session.list 读 RPC（不写会话日志），仅页面可见时。
-  const refreshNow = (): void => {
-    if (disposed) return;
-    try {
-      void sessions.refresh().catch(() => undefined);
-    } catch {
-      /* 刷新失败不影响既有 badge */
-    }
-  };
-  const onVisible = (): void => {
-    if (document.visibilityState === 'visible') {
-      refreshNow();
-      scheduleScan();
-    }
-  };
-  document.addEventListener('visibilitychange', onVisible);
-  window.addEventListener('online', onVisible);
   const stateTick = setInterval(scheduleScan, STATE_TICK_MS);
-  const refreshTick = setInterval(() => {
-    if (document.visibilityState === 'visible') refreshNow();
-  }, REFRESH_INTERVAL_MS);
 
-  refreshNow();
   scheduleScan();
 
   return () => {
     disposed = true;
     if (scanTimer !== undefined) clearTimeout(scanTimer);
     clearInterval(stateTick);
-    clearInterval(refreshTick);
     observer.disconnect();
-    unsubscribeList();
+    unsubscribeSummary();
     unsubscribeLocale?.();
-    document.removeEventListener('visibilitychange', onVisible);
-    window.removeEventListener('online', onVisible);
     for (const badge of Array.from(document.querySelectorAll(`.${BADGE_CLASS}`))) badge.remove();
     for (const row of Array.from(document.querySelectorAll(`.${HOVER_ROW_CLASS}`))) row.remove();
   };

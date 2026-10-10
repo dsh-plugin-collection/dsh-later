@@ -4,6 +4,29 @@
 
 ## 未发布
 
+- **feat** 暴露跨插件「定时任务摘要」公共 API（issue #17）。
+  - 新增 `src/schedule-summary.ts`（纯函数，宿主/浏览器/`node --test` 共用）：
+    `buildScheduleSummary` 把 `sessions.list` 折叠成
+    `Map<SessionId, { count, pausedCount, nextAt, state }>`；`summarizeScheduleGroup`
+    按分组聚合（会话数/任务数/最早触发/最高优先级，`overdue > urgent > scheduled`）。
+  - 新增 `src/schedule-summary-store.ts`：可订阅 store（`getSnapshot` / `subscribe` /
+    `reload` / `dispose`）+ 全局登记表，**唯一数据权威**——内部负责 `sessions.list`
+    订阅、30s 状态 tick 与 60s `session.list` 读 RPC（仅页面可见时）。
+  - 新增 `src/client/useScheduleSummary.ts`：React 订阅 hook（`useSyncExternalStore`，
+    store 迟到时自动重渲染）。
+  - `lib/client.js` 导出 `getScheduleSummaryStore` / `subscribeScheduleSummaryStore` /
+    `useScheduleSummary` / `buildScheduleSummary` / `schedulesOfProjection` /
+    `summarizeScheduleGroup` / `createScheduleSummaryStore` 及类型；消费方（如
+    dsh-group-status）声明 `dsh.client.external: ["dsh-later"]` 后
+    `require('dsh-later/client')` 即可使用。契约见
+    [API 参考 §7](./docs/technical/03-api-reference.md)。
+  - **refactor** 侧栏 badge 不再自己读 `sessions.list` / 周期 `refresh()`，改为消费同一个
+    store：外部插件读到的摘要与本插件行内 badge 必然同源，且 `session.list` 读 RPC
+    不再被拉两次。
+  - 新增 15 个单测：纯逻辑（数量/状态分档/暂停语义/分组聚合/判等）、store
+    （列表变化、状态 tick、refresh 闸门、dispose、登记表）与构建产物契约
+    （`lib/client.js` 导出面 + apply 登记/注销 store）。
+
 ## 1.1.0 — 2026-10-09
 
 - **feat** 设置页 UI 对齐官方 `SettingsForm`：从折叠卡片改为裸表单，字段直接平铺。

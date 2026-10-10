@@ -35,7 +35,13 @@ import { SchedulerSettingsCard } from './components/SchedulerSettingsCard.js';
 import type { SchedButtonInjected } from './components/SchedButton.js';
 import type { ScheduleDockInjected } from './components/ScheduleDock.js';
 import type { CommandOutcome } from '../command-outcome.js';
-import { mountSessionPresence, type PresenceLocaleLike, type PresenceSessionsLike } from './session-presence.js';
+import { mountSessionPresence, type PresenceLocaleLike } from './session-presence.js';
+import {
+  createScheduleSummaryStore,
+  getScheduleSummaryStore,
+  setActiveScheduleSummaryStore,
+  type ScheduleSummarySessionsLike,
+} from '../schedule-summary-store.js';
 
 /** Filled slot：输入框右侧工具行。 */
 const INPUT_RIGHT_SLOT = 'conversation.input.right';
@@ -84,13 +90,28 @@ function apply(ctx: Context): void {
   let detectedVersion: 'modern' | 'classic' = 'classic';
   let getClockIconStyle: () => 'auto' | 'modern' | 'classic' = () => 'auto';
 
-  // 侧栏会话行「定时状态」badge（docs/ui/09 路线 B）：数据源为 sessions.list
-  // 的行级 projectionValues（session.list 基线覆盖全会话，当前会话由投影帧
-  // 实时推进），周期 refresh() 读 RPC 补时效。服务缺失时静默跳过。
+  // 定时摘要 store（issue #17）：全插件唯一的定时任务数据权威。本插件的侧栏
+  // badge 与外部插件（dsh-group-status 等，经 `require('dsh-later/client')`）
+  // 读同一份摘要，因此 GroupLiveStatus 与行内 badge 永不漂移。
+  // 卸载时先撤销登记再 dispose，避免消费方拿到已释放的 store。
+  const summary = createScheduleSummaryStore(sessions as unknown as ScheduleSummarySessionsLike);
+  setActiveScheduleSummaryStore(summary);
+  ctx.effect(
+    () => () => {
+      if (getScheduleSummaryStore() === summary) setActiveScheduleSummaryStore(undefined);
+      summary.dispose();
+    },
+    'dsh-later: schedule summary',
+  );
+
+  // 侧栏会话行「定时状态」badge（docs/ui/09 路线 B）：数据源为上面的摘要 store
+  // （store 内部订阅 sessions.list 的行级 projectionValues——session.list 基线
+  // 覆盖全会话，当前会话由投影帧实时推进——并周期 refresh() 读 RPC 补时效）。
+  // 服务缺失时静默跳过。
   ctx.effect(
     () =>
       mountSessionPresence({
-        sessions: sessions as unknown as PresenceSessionsLike,
+        summary,
         ...(locale === undefined ? {} : { locale: locale as unknown as PresenceLocaleLike }),
         getClockIconStyle: () => {
           const style = getClockIconStyle();
@@ -336,3 +357,37 @@ function apply(ctx: Context): void {
 }
 
 export { apply, inject, name };
+
+// ── 跨插件公共 API（issue #17）──────────────────────────────────────────────
+//
+// 消费方（如 dsh-group-status）在 package.json 声明
+// `"dsh.client": { "external": ["dsh-later"] }` 后，在客户端 factory 里
+// `require('dsh-later/client')` 即可拿到下面这组导出：
+//
+//   const later = require('dsh-later/client')
+//   const store = later.getScheduleSummaryStore()          // 可能为 undefined（未加载）
+//   later.summarizeScheduleGroup(store.getSnapshot(), ids) // 分组聚合
+//
+// 或直接读 React hook：`later.useScheduleSummary()`。
+export {
+  buildScheduleSummary,
+  schedulesOfProjection,
+  summarizeScheduleGroup,
+} from '../schedule-summary.js';
+export {
+  createScheduleSummaryStore,
+  getScheduleSummaryStore,
+  subscribeScheduleSummaryStore,
+} from '../schedule-summary-store.js';
+export { useScheduleSummary } from './useScheduleSummary.js';
+export type {
+  GroupScheduleSummary,
+  ScheduleSummaryEntry,
+  ScheduleSummaryMap,
+  ScheduleSummarySource,
+} from '../schedule-summary.js';
+export type {
+  ScheduleSummarySessionsLike,
+  ScheduleSummaryStore,
+  ScheduleSummaryStoreOptions,
+} from '../schedule-summary-store.js';
