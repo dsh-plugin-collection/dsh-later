@@ -191,6 +191,52 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 
 ---
 
+## For plugin developers: the schedule summary API (cross-plugin)
+
+dsh-later exposes a workspace-wide schedule summary as a public data face
+([issue #17](http://192.168.4.77:3000/dsh-plugins/dsh-later/issues/17)), so other client
+plugins (e.g. dsh-group-status) can aggregate schedule state on folders/sidebar rows
+**without** parsing the `userSchedules` projection themselves — and without drifting
+from the inline row badge.
+
+Declare the external module in `package.json` first:
+
+```json
+{ "dsh": { "client": { "platform": "web", "external": ["dsh-later"] } } }
+```
+
+Then `require('dsh-later/client')` inside the client factory:
+
+```js
+const { getScheduleSummaryStore, summarizeScheduleGroup, useScheduleSummary } = require('dsh-later/client')
+
+// 1) Read the store directly: session id → { count, pausedCount, nextAt, state }
+const store = getScheduleSummaryStore() // undefined when dsh-later is not loaded
+const summary = store?.getSnapshot() ?? new Map()
+
+// 2) Aggregate per group (used by the folded-folder badge)
+const group = summarizeScheduleGroup(summary, groupSessionIds)
+// → { sessions, count, pausedCount, nextAt?, state? }
+
+// 3) Subscribe inside a React component (re-renders if the store arrives late)
+const live = useScheduleSummary()
+```
+
+| Field | Meaning |
+|---|---|
+| `count` | Number of schedules (**including** paused ones) |
+| `pausedCount` | Paused schedules (they count toward `count` but **not** toward `nextAt`) |
+| `nextAt` | Earliest fire time (epoch ms); `undefined` when everything is paused |
+| `state` | `scheduled` / `urgent` (≤5 min) / `overdue` (due but not dispatched), judged at snapshot time |
+
+Contract notes:
+
+- The summary contains **only sessions with schedules**; consumers look up their own `sessionIds`.
+- The store is the **single source of truth**: dsh-later's own sidebar badge reads it too, so the
+  two can never disagree. It owns the `sessions.list` subscription, the 30s state tick and the
+  60s `session.list` read RPC (visible-page only).
+- Consumers must tolerate `undefined` (dsh-later not installed/enabled) and degrade silently.
+
 ## Technical documentation
 
 Developer- and maintainer-oriented content has moved out of this README:

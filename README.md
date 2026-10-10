@@ -191,6 +191,50 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 
 ---
 
+## 给插件开发者：定时摘要 API（跨插件）
+
+dsh-later 把「全会话定时任务摘要」作为公共数据面暴露出来
+（[issue #17](http://192.168.4.77:3000/dsh-plugins/dsh-later/issues/17)），其它客户端插件
+（如 dsh-group-status）据此在分组/侧栏聚合显示定时状态，**无需**自己解析
+`userSchedules` 投影，也不会与行内 badge 漂移。
+
+消费方先在 `package.json` 声明外部模块：
+
+```json
+{ "dsh": { "client": { "platform": "web", "external": ["dsh-later"] } } }
+```
+
+然后在客户端 factory 里 `require('dsh-later/client')`：
+
+```js
+const { getScheduleSummaryStore, summarizeScheduleGroup, useScheduleSummary } = require('dsh-later/client')
+
+// 1) 直接读 store：会话 id → { count, pausedCount, nextAt, state }
+const store = getScheduleSummaryStore() // dsh-later 未加载时为 undefined
+const summary = store?.getSnapshot() ?? new Map()
+
+// 2) 按分组聚合（折叠分组徽标直接用它）
+const group = summarizeScheduleGroup(summary, groupSessionIds)
+// → { sessions, count, pausedCount, nextAt?, state? }
+
+// 3) React 组件内订阅（store 迟到也会自动重渲染）
+const live = useScheduleSummary()
+```
+
+| 字段 | 含义 |
+|---|---|
+| `count` | 任务数（**含**暂停项） |
+| `pausedCount` | 暂停项数量（暂停项计入 count，但**不参与** `nextAt`） |
+| `nextAt` | 最早触发时刻（epoch ms）；全部暂停时为 `undefined` |
+| `state` | `scheduled` / `urgent`（≤5 分钟）/ `overdue`（已到期未派发），按快照时刻判定 |
+
+契约要点：
+
+- 摘要**只包含有任务的会话**，无任务的会话不出现；消费方按自己的 `sessionIds` 查表即可。
+- store 是**唯一数据权威**：dsh-later 侧栏 badge 也读它，因此两边必然同源；它内部负责
+  `sessions.list` 订阅、30s 状态 tick 与 60s `session.list` 读 RPC（仅页面可见时）。
+- 消费方必须容忍 `undefined`（dsh-later 未安装/未启用时静默降级）。
+
 ## 技术文档
 
 以下内容面向开发者与维护者，已移出本 README：
