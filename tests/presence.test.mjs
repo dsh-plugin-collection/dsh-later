@@ -11,6 +11,7 @@ import {
   badgeStateFor,
   hoverScheduleStatus,
   PRESENCE_URGENT_WINDOW_MS,
+  progressOf,
   relativeFireLabel,
   summarizeSchedules,
 } from '../lib/presence.js';
@@ -163,4 +164,105 @@ test('非暂停项仍照常触发 overdue（回归保护）', () => {
   assert.equal(entry.pausedCount, 0);
   assert.equal(entry.nextAt, NOW - 60_000);
   assert.equal(badgeStateFor(entry.nextAt, NOW), 'overdue', '真正的到期项仍应报 overdue');
+});
+
+/* ==================== 进度环（方案 A：track + prog 双环） ==================== */
+
+test('进度：after 用 after_seconds 回推窗口起点，两端夹住', () => {
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(10 * 60_000), kind: 'after', after_seconds: 600 },
+  ]);
+  assert.equal(entry.nextAt, NOW + 10 * 60_000);
+  assert.equal(entry.progressFrom, NOW, '窗口 = [触发时刻 − 600s, 触发时刻]，起点正好 NOW');
+  assert.equal(progressOf(entry, NOW), 0);
+  assert.equal(progressOf(entry, NOW + 5 * 60_000), 0.5);
+  assert.equal(progressOf(entry, NOW + 10 * 60_000), 1);
+  assert.equal(progressOf(entry, NOW + 99 * 60_000), 1, '已超时停在满环，不绕出去');
+});
+
+test('进度：every 用 every_seconds，周期推进后窗口整体前移、进度归零', () => {
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(30_000), kind: 'every', every_seconds: 300 },
+  ]);
+  assert.equal(entry.progressFrom, NOW + 30_000 - 300_000);
+  assert.equal(progressOf(entry, NOW + 30_000 - 150_000), 0.5);
+  const nextRound = summarizeSchedules([
+    { scheduled_at: iso(330_000), kind: 'every', every_seconds: 300 },
+  ]);
+  assert.equal(nextRound.progressFrom, NOW + 330_000 - 300_000);
+  assert.equal(progressOf(nextRound, NOW + 30_000), 0, '新一轮开始即归零');
+});
+
+test('进度：window_seconds 优先于按 kind 推导', () => {
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(60_000), kind: 'after', after_seconds: 600, window_seconds: 120 },
+  ]);
+  assert.equal(entry.progressFrom, NOW + 60_000 - 120_000, '显式总窗口更权威');
+});
+
+test('进度：at 回退到 created_at', () => {
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(3_600_000), kind: 'at', created_at: iso(-1_800_000) },
+  ]);
+  assert.equal(entry.progressFrom, NOW - 1_800_000);
+  assert.equal(progressOf(entry, NOW), 1 / 3);
+});
+
+test('进度：推不出窗口时不给 progressFrom（退回恒定整环）', () => {
+  const entry = summarizeSchedules([{ scheduled_at: iso(60_000), kind: 'at' }]);
+  assert.equal(entry.nextAt, NOW + 60_000);
+  assert.ok(!('progressFrom' in entry), '不得凭空造一个起点');
+  assert.equal(progressOf(entry, NOW), undefined);
+  assert.equal(progressOf({ count: 1, pausedCount: 0 }, NOW), undefined, '连 nextAt 都没有');
+});
+
+test('进度：窗口退化（span ≤ 0）时宁可不出环', () => {
+  // created_at 晚于触发时刻：数据异常。宁可不出进度，也不出"恒满环"这种假信息。
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(60_000), kind: 'at', created_at: iso(120_000) },
+  ]);
+  assert.equal(progressOf(entry, NOW), undefined);
+});
+
+test('进度：秒数字段非法（0/负数）视为没给', () => {
+  assert.ok(!('progressFrom' in summarizeSchedules([
+    { scheduled_at: iso(60_000), kind: 'after', after_seconds: 0 },
+  ])));
+  assert.ok(!('progressFrom' in summarizeSchedules([
+    { scheduled_at: iso(60_000), kind: 'every', every_seconds: -5 },
+  ])));
+});
+
+test('进度：窗口起点只跟随 nextAt 那条任务', () => {
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(10 * 60_000), kind: 'after', after_seconds: 600 }, // 更晚
+    { scheduled_at: iso(2 * 60_000), kind: 'after', after_seconds: 120 },  // 最早 → 说了算
+  ]);
+  assert.equal(entry.nextAt, NOW + 2 * 60_000);
+  assert.equal(entry.progressFrom, NOW + 2 * 60_000 - 120_000, '用最早那条的窗口');
+});
+
+test('进度：暂停项既不参与 nextAt，也不贡献 progressFrom', () => {
+  const entry = summarizeSchedules([
+    { scheduled_at: iso(-600_000), kind: 'after', after_seconds: 600, status: 'paused' },
+    { scheduled_at: iso(120_000), kind: 'after', after_seconds: 60 },
+  ]);
+  assert.equal(entry.progressFrom, NOW + 120_000 - 60_000);
+});
+
+test('进度：兼容 runtime 记录形状（camelCase）', () => {
+  const entry = summarizeSchedules([
+    { scheduledAt: iso(60_000), kind: 'after', afterSeconds: 120 },
+  ]);
+  assert.equal(entry.progressFrom, NOW + 60_000 - 120_000);
+});
+
+test('进度：没有窗口信息时 summary 形状与改造前完全一致', () => {
+  // 无进度 → 不得出现 progressFrom 键，否则既有 wire/deepEqual 契约会被打破
+  assert.deepEqual(summarizeSchedules([]), { count: 0, pausedCount: 0 });
+  assert.deepEqual(summarizeSchedules([{ scheduled_at: iso(60_000) }]), {
+    count: 1,
+    nextAt: NOW + 60_000,
+    pausedCount: 0,
+  });
 });

@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 1.2.0 — 2026-10-09
+
 - **feat** 暴露跨插件「定时任务摘要」公共 API（issue #17）。
   - 新增 `src/schedule-summary.ts`（纯函数，宿主/浏览器/`node --test` 共用）：
     `buildScheduleSummary` 把 `sessions.list` 折叠成
@@ -26,6 +28,24 @@
   - 新增 15 个单测：纯逻辑（数量/状态分档/暂停语义/分组聚合/判等）、store
     （列表变化、状态 tick、refresh 闸门、dispose、登记表）与构建产物契约
     （`lib/client.js` 导出面 + apply 登记/注销 store）。
+
+- **feat** 侧栏 badge 进度环（方案 A：track + prog 双环）。
+  - 新版时钟 glyph 从单环改为双环：`ss-clock-track` 恒定底环（总窗口参照），
+    `ss-clock-prog` 进度弧从 12 点顺时针填充（`stroke-dashoffset` 驱动）。
+  - 新增 `progressFrom` 字段（`PresenceSummary`）：窗口起点时刻（epoch ms），
+    只跟随 `nextAt` 那条任务。
+  - 新增 `windowStartOf` 推导逻辑，按优先级取窗口跨度：
+    1. `window_seconds`（宿主/投影显式给）→ 最权威
+    2. `after_seconds` / `every_seconds`（按 `kind` 推）
+    3. `created_at`（`at` 类型回退）
+    推不出则 `progressFrom` 缺省，视觉退回恒定整环（旧形状即退化态）。
+  - `progressOf(entry, now)` 返回 0–1 比例；超时停满环（不绕出去）。
+  - urgent 只脉冲底环（进度弧跟着闪会让比例不可读）。
+  - 减少动效模式：进度弧位移过渡一并停。
+  - 新增 11 个单测：after/every/at 窗口推导、window_seconds 优先、退化/非法值、
+    多任务窗口跟随 nextAt、暂停项排除、camelCase 兼容、无窗口时形状不变。
+  - `sameScheduleSummary` 补 `progressFrom` 比对（暂停→恢复窗口换了但 nextAt 未变时
+    仍需通知订阅者刷新进度环）。
 
 ## 1.1.0 — 2026-10-09
 

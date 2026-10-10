@@ -45,6 +45,7 @@
 import {
   badgeStateFor,
   hoverScheduleStatus,
+  progressOf,
   relativeFireLabel,
   type PresenceBadgeState,
   type RelativeFireLabels,
@@ -95,10 +96,32 @@ const CLOCK_SVG_CLASSIC =
   '<rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/>' +
   '</g></svg>';
 
-/** 新版时钟 glyph（24×24 stroke 圆头线帽，表盘环 + 时针分针）。 */
+/** 新版表盘半径（viewBox 24 用户单位）。 */
+const CLOCK_FACE_R = 9.5;
+/**
+ * 表盘周长。进度弧用 `stroke-dasharray = 周长` + 可变 `stroke-dashoffset`
+ * 表达"已过比例"：offset = 周长 × (1 − 比例)，写满周长即 0%。
+ */
+const CLOCK_FACE_CIRCUMFERENCE = 2 * Math.PI * CLOCK_FACE_R;
+
+/**
+ * 新版时钟 glyph（24×24 stroke 圆头线帽）—— 方案 A：双环。
+ *
+ * `ss-clock-track` 是恒定底环，给出「总窗口」的视觉参照；`ss-clock-prog` 是
+ * 进度弧，从 12 点顺时针填充（`rotate(-90 12 12)` 把 SVG 默认的 3 点起点挪到
+ * 12 点）。时针分针原样保留，不动。
+ *
+ * 初始 `dashoffset` 直接写满周长（= 0%），插入后由 {@link applyProgress} 按真实
+ * 比例改写。**无从算进度时那条弧会被隐藏**，于是退回改造前的"恒定整环" ——
+ * 旧形状即新形状的退化态，不需要分支渲染。
+ */
 const CLOCK_SVG_MODERN =
   '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">' +
-  '<circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>' +
+  `<circle class="ss-clock-track" cx="12" cy="12" r="${CLOCK_FACE_R}"/>` +
+  `<circle class="ss-clock-prog" cx="12" cy="12" r="${CLOCK_FACE_R}" ` +
+  `stroke-dasharray="${CLOCK_FACE_CIRCUMFERENCE.toFixed(3)}" ` +
+  `stroke-dashoffset="${CLOCK_FACE_CIRCUMFERENCE.toFixed(3)}" ` +
+  'transform="rotate(-90 12 12)"/>' +
   '<g class="ss-clock-hand">' +
   '<line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>' +
   '<line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>' +
@@ -247,10 +270,16 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
       : state === 'overdue'
         ? format(dict.presenceOverdueTooltip, { n: entry.count })
         : format(dict.presenceTooltip, { n: entry.count, time });
+    /**
+     * 进度按 `now` 现算、不缓存：它随时间单调变化，而 scan 每 30s 就会带着新的
+     * `now` 重跑一遍，缓存只会多出失效分支。
+     */
+    const progress = progressOf(entry, now);
     if (existing !== null) {
       if (existing.dataset.state !== state) existing.dataset.state = state;
       if (existing.getAttribute('aria-label') !== aria) existing.setAttribute('aria-label', aria);
       if (existing.getAttribute('title') !== tooltip) existing.setAttribute('title', tooltip);
+      applyProgress(existing, progress);
       return;
     }
     const slot = row.firstElementChild;
@@ -263,8 +292,27 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     badge.setAttribute('aria-label', aria);
     badge.setAttribute('title', tooltip);
     badge.innerHTML = getClockSvg();
+    applyProgress(badge, progress);
     if (beside) slot.after(badge);
     else slot.append(badge);
+  }
+
+  /**
+   * 把进度写进已注入 badge 的进度弧（`stroke-dashoffset`）。
+   *
+   * 无从算进度（`undefined`）时**隐藏**弧线、退回恒定整环 —— 比画一个 0% 的空环
+   * 诚实：0% 是"刚开始"，`undefined` 是"算不出来"。classic 点阵风格没有这条弧，
+   * 查询落空即静默跳过（两套图标共用调用方，不需要分支）。
+   */
+  function applyProgress(badge: HTMLElement, ratio: number | undefined): void {
+    const arc = badge.querySelector<SVGCircleElement>('.ss-clock-prog');
+    if (arc === null) return;
+    if (ratio === undefined) {
+      arc.style.display = 'none';
+      return;
+    }
+    if (arc.style.display === 'none') arc.style.display = '';
+    arc.style.strokeDashoffset = String(CLOCK_FACE_CIRCUMFERENCE * (1 - ratio));
   }
 
   /**

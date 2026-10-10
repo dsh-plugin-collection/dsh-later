@@ -23,6 +23,20 @@ export interface PresenceScheduleLike {
     readonly status?: string;
     /** 暂停冻结的剩余秒数；仅在 `status === 'paused'` 时有意义。 */
     readonly remaining_seconds?: number;
+    /** 任务类型。决定进度窗口起点按哪个口径推导（见 {@link windowStartOf}）。 */
+    readonly kind?: string;
+    /** `after` 类型的总倒计时秒数（进度起点 = 触发时刻 − 该值）。 */
+    readonly after_seconds?: number;
+    readonly afterSeconds?: number;
+    /** `every` 类型的周期间隔秒数（进度起点 = 触发时刻 − 该值，即本周期起点）。 */
+    readonly every_seconds?: number;
+    readonly everySeconds?: number;
+    /** 宿主/投影直接给的显式总窗口秒数；给了就优先于按 kind 推导。 */
+    readonly window_seconds?: number;
+    readonly windowSeconds?: number;
+    /** `at` 类型的进度起点（任务创建时刻，ISO）。`at` 没有天然周期，只能用它。 */
+    readonly created_at?: string;
+    readonly createdAt?: number;
 }
 /** 由一组活动任务归纳的 badge 概要。 */
 export interface PresenceSummary {
@@ -32,6 +46,14 @@ export interface PresenceSummary {
     readonly nextAt?: number;
     /** 暂停中的任务数（用于文案区分「已冻结」与「等待发送」）。 */
     readonly pausedCount: number;
+    /**
+     * 进度环起点（epoch ms）：`nextAt` 那条任务的窗口开始时刻。
+     *
+     * **只跟随 `nextAt` 那条**：环表达的是"距离最近一次触发还剩多少"，若取别条
+     * 任务的窗口就与 `nextAt` 对不上了。无从推导时缺省，此时调用方应退回恒定
+     * 整环（{@link progressOf} 返回 `undefined`）。
+     */
+    readonly progressFrom?: number;
 }
 /**
  * 归纳：取最早触发时刻 + 任务数量。
@@ -49,6 +71,16 @@ export interface PresenceSummary {
  * 「已到期」或"下次 X 分后"。
  */
 export declare function summarizeSchedules(schedules: readonly PresenceScheduleLike[] | undefined): PresenceSummary;
+/**
+ * 进度环比例（0–1）：`now` 在 `[progressFrom, nextAt]` 中的位置。
+ *
+ * 返回 `undefined` 表示**无从算起**（缺窗口起点，或窗口已退化），调用方此时应
+ * 退回「恒定整环」的旧表现，而不是画一个 0% 的空环 —— 后者是错误信息：
+ * 0% 是"刚开始"，`undefined` 是"算不出来"。
+ *
+ * 两端夹住：`overdue` 时 `now > nextAt`，环停在满环而不是绕出去。
+ */
+export declare function progressOf(entry: PresenceSummary, now: number): number | undefined;
 /** 由当前时刻判定 badge 状态。 */
 export declare function badgeStateFor(nextAt: number | undefined, now: number): PresenceBadgeState;
 /**

@@ -86,8 +86,12 @@ export function buildScheduleSummary(source: ScheduleSummarySource, now: number)
 }
 
 /**
- * 两份摘要是否等价（逐条比对四个字段）。store 用它决定是否需要通知订阅者，
+ * 两份摘要是否等价（逐条比对五个字段）。store 用它决定是否需要通知订阅者，
  * 避免每次重算都产生新的 Map 引用导致 React 无谓重渲染。
+ *
+ * `progressFrom` 一并比对：它虽然通常随 `nextAt` 同进同退，但暂停→恢复会让
+ * 同一条任务重新拥有窗口起点，此时 `nextAt` 可能未变而窗口已换 —— 漏比会
+ * 让进度环停在上一个窗口的比例上。
  * @param a - 旧摘要。
  * @param b - 新摘要。
  * @returns 键集合与每条内容都相同时为 true。
@@ -102,6 +106,7 @@ export function sameScheduleSummary(a: ScheduleSummaryMap, b: ScheduleSummaryMap
       left.count !== right.count ||
       left.pausedCount !== right.pausedCount ||
       left.nextAt !== right.nextAt ||
+      left.progressFrom !== right.progressFrom ||
       left.state !== right.state
     ) {
       return false;

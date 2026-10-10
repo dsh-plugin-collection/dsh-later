@@ -26,6 +26,20 @@ export interface PresenceScheduleLike {
   readonly status?: string;
   /** 暂停冻结的剩余秒数；仅在 `status === 'paused'` 时有意义。 */
   readonly remaining_seconds?: number;
+  /** 任务类型。决定进度窗口起点按哪个口径推导（见 {@link windowStartOf}）。 */
+  readonly kind?: string;
+  /** `after` 类型的总倒计时秒数（进度起点 = 触发时刻 − 该值）。 */
+  readonly after_seconds?: number;
+  readonly afterSeconds?: number;
+  /** `every` 类型的周期间隔秒数（进度起点 = 触发时刻 − 该值，即本周期起点）。 */
+  readonly every_seconds?: number;
+  readonly everySeconds?: number;
+  /** 宿主/投影直接给的显式总窗口秒数；给了就优先于按 kind 推导。 */
+  readonly window_seconds?: number;
+  readonly windowSeconds?: number;
+  /** `at` 类型的进度起点（任务创建时刻，ISO）。`at` 没有天然周期，只能用它。 */
+  readonly created_at?: string;
+  readonly createdAt?: number;
 }
 
 /** 由一组活动任务归纳的 badge 概要。 */
@@ -36,6 +50,14 @@ export interface PresenceSummary {
   readonly nextAt?: number;
   /** 暂停中的任务数（用于文案区分「已冻结」与「等待发送」）。 */
   readonly pausedCount: number;
+  /**
+   * 进度环起点（epoch ms）：`nextAt` 那条任务的窗口开始时刻。
+   *
+   * **只跟随 `nextAt` 那条**：环表达的是"距离最近一次触发还剩多少"，若取别条
+   * 任务的窗口就与 `nextAt` 对不上了。无从推导时缺省，此时调用方应退回恒定
+   * 整环（{@link progressOf} 返回 `undefined`）。
+   */
+  readonly progressFrom?: number;
 }
 
 /**
@@ -55,6 +77,7 @@ export interface PresenceSummary {
  */
 export function summarizeSchedules(schedules: readonly PresenceScheduleLike[] | undefined): PresenceSummary {
   let nextAt: number | undefined;
+  let progressFrom: number | undefined;
   let count = 0;
   let pausedCount = 0;
   for (const item of schedules ?? []) {
@@ -67,10 +90,80 @@ export function summarizeSchedules(schedules: readonly PresenceScheduleLike[] | 
       pausedCount += 1;
       continue; // 冻结项没有排定的触发时刻，不参与 nextAt
     }
-    if (nextAt === undefined || epoch < nextAt) nextAt = epoch;
+    if (nextAt === undefined || epoch < nextAt) {
+      nextAt = epoch;
+      // 窗口起点只跟随被选中的那一条；并列最早时保留先出现者的窗口。
+      progressFrom = windowStartOf(item, epoch);
+    }
   }
   if (count === 0) return { count: 0, pausedCount: 0 };
-  return nextAt === undefined ? { count, pausedCount } : { count, nextAt, pausedCount };
+  // 字段用条件展开：无进度时不产生 `progressFrom: undefined`，保持既有
+  // deepEqual 测试与 wire 形状不变。
+  return nextAt === undefined
+    ? { count, pausedCount }
+    : { count, nextAt, pausedCount, ...(progressFrom !== undefined ? { progressFrom } : {}) };
+}
+
+/**
+ * 推导进度窗口的起点时刻（epoch ms）；无从推导时返回 `undefined`。
+ *
+ * 口径按优先级：
+ *  1. `window_seconds` —— 宿主/投影直接给的总窗口，最权威（暂停项的 wire 正是
+ *     用它携带"原 after 间隔"，见 projection.ts 的 `pausedWireItemOf`）。
+ *  2. 按 `kind` 推：`after` 用 `after_seconds`，`every` 用 `every_seconds`。
+ *     两者都是"从触发时刻往回推一整个窗口"，天然得到本周期起点。
+ *  3. `created_at` —— `at` 类型没有周期，只能拿任务创建时刻当起点。
+ *
+ * **推不出就返回 `undefined`**，绝不拿 `scheduledAt` 兜底：那会让 span 为 0，
+ * 进度恒为 100%，把"算不出来"伪装成"已经走完"。
+ */
+function windowStartOf(item: PresenceScheduleLike, scheduledEpoch: number): number | undefined {
+  const explicit = toFiniteSeconds(item.window_seconds ?? item.windowSeconds);
+  if (explicit !== undefined) return scheduledEpoch - explicit * 1000;
+
+  const afterSec = toFiniteSeconds(item.after_seconds ?? item.afterSeconds);
+  const everySec = toFiniteSeconds(item.every_seconds ?? item.everySeconds);
+  const span = item.kind === 'every' ? everySec : (afterSec ?? everySec);
+  if (span !== undefined) return scheduledEpoch - span * 1000;
+
+  const created = toEpochMs(item.created_at) ?? toEpochMs(item.createdAt);
+  if (created !== null) return created;
+
+  return undefined;
+}
+
+/** 秒数归一：只接受有限正数（0 / 负数 / NaN 一律视为"没给"）。 */
+function toFiniteSeconds(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/** epoch ms（number）或 ISO 字符串统一成 epoch ms；无法解析返回 `null`。 */
+function toEpochMs(value: string | number | undefined): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.length > 0) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * 进度环比例（0–1）：`now` 在 `[progressFrom, nextAt]` 中的位置。
+ *
+ * 返回 `undefined` 表示**无从算起**（缺窗口起点，或窗口已退化），调用方此时应
+ * 退回「恒定整环」的旧表现，而不是画一个 0% 的空环 —— 后者是错误信息：
+ * 0% 是"刚开始"，`undefined` 是"算不出来"。
+ *
+ * 两端夹住：`overdue` 时 `now > nextAt`，环停在满环而不是绕出去。
+ */
+export function progressOf(entry: PresenceSummary, now: number): number | undefined {
+  const { nextAt, progressFrom } = entry;
+  if (nextAt === undefined || progressFrom === undefined) return undefined;
+  const span = nextAt - progressFrom;
+  if (!(span > 0)) return undefined;
+  const ratio = (now - progressFrom) / span;
+  if (!Number.isFinite(ratio)) return undefined;
+  return ratio <= 0 ? 0 : ratio >= 1 ? 1 : ratio;
 }
 
 /** 由当前时刻判定 badge 状态。 */
