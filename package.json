@@ -16,11 +16,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WuJiaoJue/dsh-later.git"
+    "url": "git+https://github.com/dsh-plugins/dsh-later.git"
   },
-  "homepage": "https://github.com/WuJiaoJue/dsh-later",
+  "homepage": "https://github.com/dsh-plugins/dsh-later",
   "bugs": {
-    "url": "https://github.com/WuJiaoJue/dsh-later/issues"
+    "url": "https://github.com/dsh-plugins/dsh-later/issues"
   },
   "type": "module",
   "main": "lib/index.js",
@@ -73,6 +73,7 @@
     "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
     "@deepseek-ai/dsh-settings": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.18",
