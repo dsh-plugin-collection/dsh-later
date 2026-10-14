@@ -4,6 +4,16 @@
 
 ## 未发布
 
+## 1.3.0 — 2026-10-10
+
+- **feat** `/later` 附件支持：带图提交不再被拦截，附件写进 sidecar，到点按记录顺序拼在文本块之后代发。
+- **feat** 多次写法（Beta，默认开启）：`+1h*3`（等间隔×N）、`+1h+1h+0.5h`（相对链式）、`15:32+16:32`（绝对锚点）展开成 N 条独立 one-shot 任务。上限 10 条、最小间隔 60 秒。
+- **feat** 残片守卫：`+1h*3 x` 不再静默误解析成单条，一律显式报错。
+- **fix** 时区墙钟修复：UTC 负偏移时区（如 `America/Los_Angeles`）整体错一天的问题。
+- **refactor** UI 图标全部改用官方图标集 `@deepseek-ai/dsh-client-ui-primitives`（issue #19）：删掉 8 处手写内联 SVG 与 3 处文本符号，统一换 `<IconXxxRegular />`。dock 操作按钮改为 portal 化的 `DockTip` tooltip。
+- **fix** 定时配置面板抬升面对齐官方风格（issue #24）：背景/描边/阴影/圆角/层级对齐官方 PickerPopover，面板 portal 到 document.body，定位改用官方 `useAnchoredPosition`。
+- **docs** README 与微文案补上多次写法、附件与设置项说明。
+
 ## 1.2.0 — 2026-10-09
 
 - **feat** 暴露跨插件「定时任务摘要」公共 API（issue #17）。
