@@ -45,6 +45,8 @@ export interface SchedulerSettings {
     readonly onUnconfirmed: UserScheduleOnUnconfirmed;
     /** 时钟图标风格（auto / modern / classic）。 */
     readonly clockIconStyle: 'auto' | 'modern' | 'classic';
+    /** 高级语法（Beta）：多次写法是否可用。默认开。 */
+    readonly advancedSyntax: boolean;
 }
 /** 插话投递方式。 */
 export type UserScheduleSteerDelivery = 'followup' | 'steer';

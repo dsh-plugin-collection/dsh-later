@@ -332,6 +332,7 @@ test('0.2.0：Config 标了 volatile 且字段齐全（否则设置页不生成�
     'confirmDelivery',
     'onUnconfirmed',
     'clockIconStyle',
+    'advancedSyntax',
   ];
   assert.deepEqual(
     Object.keys(root.dict ?? {}).sort(),
@@ -372,4 +373,51 @@ test('0.2.0：host 侧探测 register 缺失后走 describe() 轨道', () => {
   assert.match(src, /candidate\.ns === ENTRY_ID/, 'describe() 结果应按条目 id 匹配');
   // 订阅文档更新以维持 live 语义
   assert.match(src, /settings\/document-updated/, '应订阅 settings/document-updated 保持 live');
+});
+
+/**
+ * Config 里每个可编辑字段都必须真的出现在设置卡里。
+ *
+ * 为什么需要：0.2.0 的表单由 `Config` 生成，但**渲染哪些行由 SECTIONS 决定**。
+ * 只加 Config 字段、忘了加 section 条目时，宿主不会报错——字段就在 schema 里，
+ * 却在设置页上无处可点，等于该功能没有开关（本次加 advancedSyntax 时两边都要动，
+ * 正是最容易只改一半的组合）。反向不校验：智能时段的 5 个 HH:mm 字段历史上就
+ * 只存在于设置卡、不在 Config 里，那是另一件事，不该由这条测试顺带掩盖。
+ */
+test('Config 的每个可编辑字段都在设置卡 SECTIONS 中有对应行', () => {
+  const json = Config.toJSON();
+  const refs = json.refs;
+  const root2 =
+    refs[String(json.uid)] ?? Object.values(refs).find((r) => r.type === 'object' && r.dict);
+  const configKeys = Object.keys(root2.dict ?? {});
+  assert.ok(configKeys.length >= 9, `Config 字段解析异常：${configKeys.join(',')}`);
+
+  const card = readFileSync(join(root, 'src', 'client', 'components', 'SchedulerSettingsCard.tsx'), 'utf8');
+  const renderedKeys = new Set(
+    [...card.matchAll(/key:\s*'([A-Za-z]+)'/g)].map((m) => m[1]),
+  );
+  /**
+   * 已知缺口（**显式豁免，不是放宽断言**）：这两个字段只有 host 侧管线，
+   * 设置卡从未渲染过对应行——README「在设置里开启长文本」因此是不可达的指引。
+   * 设计文档 docs/ui/01-component-specs.md §6.3/§6.4 与 08-microcopy 6.1/6.2
+   * 都把它们当卡片字段写，属于「spec 有、实现无」。补齐需要 §6.3 的
+   * 「关闭时禁用并灰显 maxPromptChars」联动，是独立一块工作，不在本次范围。
+   * 这里点名豁免，是为了让**新加字段**仍然会被这条测试拦住。
+   */
+  const KNOWN_UNRENDERED = ['allowLongPrompts', 'maxPromptChars'];
+  const missing = configKeys.filter((key) => !renderedKeys.has(key) && !KNOWN_UNRENDERED.includes(key));
+  assert.deepEqual(missing, [], `这些 Config 字段没有设置卡入口：${missing.join(', ')}`);
+  for (const key of KNOWN_UNRENDERED) {
+    assert.ok(!renderedKeys.has(key), `${key} 已在设置卡出现——请把它从 KNOWN_UNRENDERED 豁免里删掉`);
+    assert.ok(configKeys.includes(key), `Config 不再声明 ${key}，请同步清理豁免列表`);
+  }
+
+  // 双语字典也必须覆盖每个渲染字段的 label/hint key，否则界面上直接显示 key 名
+  const client = readFileSync(join(root, 'src', 'client', 'index.tsx'), 'utf8');
+  const labelKeys = [...card.matchAll(/(?:labelKey|hintKey|titleKey|ariaKey):\s*'([A-Za-z]+)'/g)].map((m) => m[1]);
+  const absent = [...new Set(labelKeys)].filter((key) => {
+    const re = new RegExp(`\\b${key}:`, 'g');
+    return (client.match(re) ?? []).length < 2; // zh 与 en 各一次
+  });
+  assert.deepEqual(absent, [], `这些文案 key 缺少 zh/en 之一：${absent.join(', ')}`);
 });

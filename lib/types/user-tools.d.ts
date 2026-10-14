@@ -21,7 +21,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { ScheduleRecord, ScheduleView } from '@deepseek-ai/dsh-schedule';
 import type { UserScheduleDelivery } from './domain.js';
-import type { PausedEntry } from './ownership-store.js';
+import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
 /** 单 session 用户任务上限（PRD：防滥用）。 */
 export declare const DEFAULT_MAX_SCHEDULES = 100;
 /**
@@ -195,6 +195,14 @@ export declare function runUserScheduleTransaction<T>(agent: Agent, operation: (
 export interface UserScheduleCreateOptions {
     /** 可信通道显式声明的投递形态；未提供或非 'user' 一律按安全默认 'context'。 */
     readonly trustedDelivery?: UserScheduleDelivery;
+    /**
+     * 可信通道（人类显式输入的 `/later`）随命令提交的附件块。
+     *
+     * 与 `trustedDelivery` 同一道闸门：**只**接受选项传入，原始输入载荷里的
+     * `attachments` 字段不具任何效力——模型工具与 GUI JSON 载荷永远带不进附件，
+     * 防止任何通道夹带未准入的对象拼进代发消息。
+     */
+    readonly attachments?: readonly ScheduledAttachment[];
 }
 /** `user_schedule_create` 核心实现。 */
 export declare function userScheduleCreate(input: unknown, agent: Agent, ctx: Context, maxSchedules?: number, options?: UserScheduleCreateOptions, limits?: PromptLimits): Promise<UserScheduleCreateResult>;
