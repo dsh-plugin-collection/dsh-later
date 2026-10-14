@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
+import { IconInfoOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import { isValidHhmm } from '../../smart-window.js';
 
 /**
@@ -35,13 +36,15 @@ export interface SchedulerSettings {
   confirmDelivery?: boolean;
   onUnconfirmed?: 'keep' | 'discard';
   clockIconStyle?: 'auto' | 'modern' | 'classic';
+  /** 高级语法（Beta）：多次写法开关，默认开。 */
+  advancedSyntax?: boolean;
 }
 
 /** 字段元数据（顺序固定，便于稳定渲染）。 */
 type FieldDef =
   | {
       readonly kind: 'boolean';
-      readonly key: 'showButton' | 'confirmDelivery';
+      readonly key: 'showButton' | 'confirmDelivery' | 'advancedSyntax';
       readonly labelKey: string;
       readonly hintKey?: string;
       readonly defaultValue: boolean;
@@ -54,6 +57,8 @@ type FieldDef =
 interface SectionDef {
   readonly id: string;
   readonly titleKey: string;
+  /** 该 section 里的能力处于 Beta：标题旁挂 Beta 徽标。 */
+  readonly beta?: boolean;
   /** 字段布局：grid 两列并排（对齐官方 hF0LTq_limits），stack 单列堆叠。 */
   readonly layout: 'grid' | 'stack';
   readonly fields: readonly FieldDef[];
@@ -125,6 +130,21 @@ const SECTIONS: readonly SectionDef[] = [
       },
     ],
   },
+  {
+    id: 'advanced',
+    titleKey: 'sectionAdvanced',
+    layout: 'stack',
+    beta: true,
+    fields: [
+      {
+        kind: 'boolean',
+        key: 'advancedSyntax',
+        labelKey: 'advancedSyntaxLabel',
+        hintKey: 'advancedSyntaxHint',
+        defaultValue: true,
+      },
+    ],
+  },
 ] as const;
 
 const FIELDS: readonly FieldDef[] = SECTIONS.flatMap((s) => s.fields);
@@ -136,6 +156,8 @@ type PendingMap = Partial<Record<string, Pending>>;
 export interface SchedulerSettingsCardProps {
   scope: SettingsScope<SchedulerSettings>;
   t: (key: string) => string;
+  /** 渲染面：`detail` = 插件详情页（显示「在设置中显示」开关）；`settings` = 设置对话框页。 */
+  surface?: 'detail' | 'settings';
 }
 
 /**
@@ -153,13 +175,29 @@ export interface SchedulerSettingsCardProps {
  * 保存时按字段批量写。`reset` 表示「点击了 reset 按钮但尚未保存」，实际写入
  * 由 save 统一调用 `unset` 完成。空串视为「回退默认」→ unset。
  */
-export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps): JSX.Element {
+export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCardProps): JSX.Element {
   const [snapshot, setSnapshot] = useState(() => scope.getSnapshot());
   const [pending, setPending] = useState<PendingMap>({});
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   /** 帮助按钮展开态（对齐官方 _helpButton_：aria-expanded 切换） */
   const [helpOpen, setHelpOpen] = useState<Readonly<Record<string, boolean>>>({});
+
+  // 「在设置中显示」开关：仅详情页显示，控制 settings.plugin.item 是否注册。
+  // localStorage 非响应式，切换后需刷新页面生效。
+  const SHOW_SETTINGS_KEY = 'dsh-later:show-settings-section';
+  const [showSettings, setShowSettings] = useState<boolean>(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem(SHOW_SETTINGS_KEY) === 'true';
+  });
+  const toggleShowSettings = (): void => {
+    const next = !showSettings;
+    setShowSettings(next);
+    if (typeof localStorage !== 'undefined') {
+      if (next) localStorage.setItem(SHOW_SETTINGS_KEY, 'true');
+      else localStorage.removeItem(SHOW_SETTINGS_KEY);
+    }
+  };
 
   useEffect(() => {
     const initial = scope.getSnapshot();
@@ -326,10 +364,42 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
         </p>
       )}
 
+      {/* 仅详情页显示：控制设置对话框中是否出现本插件的设置页。
+          localStorage 非响应式，切换后需刷新页面生效。 */}
+      {surface === 'detail' && (
+        <section className="ss-section" aria-labelledby="ss-section-display-toggle">
+          <h3 className="ss-section-heading" id="ss-section-display-toggle">{t('sectionDisplayToggle')}</h3>
+          <div className="ss-section-fields">
+            <div className="ss-field ss-fieldToggle">
+              <div className="ss-toggle-row">
+                <div className="ss-label-group">
+                  <label className="ss-toggle-label" htmlFor="ss-show-settings">{t('showInSettings')}</label>
+                </div>
+                <button
+                  type="button"
+                  id="ss-show-settings"
+                  role="switch"
+                  aria-checked={showSettings}
+                  aria-label={t('showInSettings')}
+                  className="ss-toggle-switch"
+                  onClick={toggleShowSettings}
+                />
+              </div>
+              <p className="ss-toggle-description">{t('showInSettingsHint')}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {SECTIONS.map((section) => (
         <section className="ss-section" key={section.id} aria-labelledby={`ss-section-${section.id}`}>
           <h3 className="ss-section-heading" id={`ss-section-${section.id}`}>
             {t(section.titleKey)}
+            {section.beta === true ? (
+              <span className="ss-section-beta" aria-label={t('betaBadgeAria')}>
+                {t('betaBadge')}
+              </span>
+            ) : null}
           </h3>
           <div className={section.layout === 'grid' ? 'ss-section-fields ss-section-fieldsGrid' : 'ss-section-fields'}>
             {section.fields.map((field) => {
@@ -398,11 +468,7 @@ export function SchedulerSettingsCard({ scope, t }: SchedulerSettingsCardProps):
                           aria-controls={`ss-help-${field.key}`}
                           onClick={() => setHelpOpen((prev) => ({ ...prev, [field.key]: !prev[field.key] }))}
                         >
-                          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true" strokeWidth="1">
-                            <path d="M12.5757 7.00012C12.5757 3.92085 10.0794 1.42463 7.00012 1.42456C3.9208 1.42456 1.42456 3.9208 1.42456 7.00012C1.42463 10.0794 3.92085 12.5757 7.00012 12.5757C10.0793 12.5756 12.5756 10.0793 12.5757 7.00012ZM13.8002 7.00012C13.8001 10.7559 10.7559 13.8001 7.00012 13.8002C3.2443 13.8002 0.199291 10.7559 0.199219 7.00012C0.199219 3.24426 3.24426 0.199219 7.00012 0.199219C10.7559 0.199291 13.8002 3.2443 13.8002 7.00012Z" fill="currentColor"/>
-                            <path d="M7.6127 3.18921V4.55986H6.38735V3.18921H7.6127Z" fill="currentColor"/>
-                            <path d="M7.6127 5.68921V10.8109H6.38735V5.68921H7.6127Z" fill="currentColor"/>
-                          </svg>
+                          <IconInfoOutlineRegular size={12} />
                         </button>
                       )}
                     </div>

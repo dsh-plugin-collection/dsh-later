@@ -119,3 +119,54 @@ test('isValidHhmm：边界与格式校验', () => {
   assert.equal(isValidHhmm('foo'), false);
   assert.equal(isValidHhmm(900), false);
 });
+
+// ── 跨时区墙钟解析（P1 暴露出的既有 bug 回归）───────────────────────────────
+/**
+ * 旧实现把 `Date.UTC(年,月,日)`（UTC 零点）当「当天」探针交给 resolveWallClock，
+ * 后者再用 localFieldsOf 反推日期——在 UTC 负偏移时区那个瞬间读出来的是**前一天**，
+ * 于是 `epochFromLocal('2026-11-01','09:00','America/Los_Angeles')` 解成 10-31 09:00，
+ * 面板自定义日期与 `/later 明天9点` 整体错一天；正偏移 ≤ +11 的时区恰好看不出来，
+ * 而本文件此前**只测 Asia/Shanghai**，所以一直没被发现。
+ */
+
+test('epochFromLocal：UTC 负偏移时区不得退到前一天（LA / NY）', () => {
+  assert.equal(
+    new Date(epochFromLocal('2026-11-01', '09:00', 'America/Los_Angeles')).toISOString(),
+    '2026-11-01T17:00:00.000Z',
+  );
+  assert.equal(
+    new Date(epochFromLocal('2026-11-01', '09:00', 'America/New_York')).toISOString(),
+    '2026-11-01T14:00:00.000Z',
+  );
+});
+
+test('epochFromLocal：极端正偏移（+14 Kiritimati / 新西兰）同样对齐请求日期', () => {
+  assert.equal(
+    new Date(epochFromLocal('2026-11-01', '09:00', 'Pacific/Kiritimati')).toISOString(),
+    '2026-10-31T19:00:00.000Z',
+  );
+  assert.equal(
+    new Date(epochFromLocal('2026-01-01', '00:30', 'Pacific/Kiritimati')).toISOString(),
+    '2025-12-31T10:30:00.000Z',
+  );
+  assert.equal(
+    new Date(epochFromLocal('2026-11-01', '09:00', 'Pacific/Auckland')).toISOString(),
+    '2026-10-31T20:00:00.000Z',
+  );
+});
+
+test('epochFromLocal：回拨日同一墙钟出现两次 → 取较早的瞬点', () => {
+  // 2026-11-01 美国回拨：01:30 先后以 PDT(-7) 与 PST(-8) 各出现一次
+  const epoch = epochFromLocal('2026-11-01', '01:30', 'America/Los_Angeles');
+  assert.equal(new Date(epoch).toISOString(), '2026-11-01T08:30:00.000Z');
+});
+
+test('epochFromLocal：前拨跳过的墙钟返回 undefined（不静默挪到别处）', () => {
+  // 2026-03-08 02:00→03:00 前拨，LA 的 02:30 不存在
+  assert.equal(epochFromLocal('2026-03-08', '02:30', 'America/Los_Angeles'), undefined);
+});
+
+test('epochFromLocal：既有无 DST 时区行为不变', () => {
+  assert.equal(new Date(epochFromLocal('2026-08-19', '14:00', TZ)).toISOString(), '2026-08-19T06:00:00.000Z');
+  assert.equal(new Date(epochFromLocal('2026-08-19', '14:00:30', 'UTC')).toISOString(), '2026-08-19T14:00:30.000Z');
+});

@@ -100,6 +100,19 @@ export const Config: z = s.object({
    * - `classic`：强制使用旧版点阵风格（10×10 fill 方块 crispEdges）。
    */
   clockIconStyle: s.union([s.const('auto'), s.const('modern'), s.const('classic')]).default('auto'),
+  /**
+   * 高级语法（**Beta**，默认开启）：`/later` 与 `/schedule` 的多次写法。
+   *
+   * 覆盖三种写法：等间隔重复 `+1h*3`、相对链式序列 `+1h+1h+0.5h`、绝对锚点序列
+   * `15:32+16:32` / `9:00+1d`。标 Beta 的理由不是"没测"（38 个单测已覆盖），而是
+   * **展开语义还没被真实使用验证过**：一次命令写 10 条任务会不会刷屏 dock、
+   * 60 秒地板与 10 条上限的尺度是否合适，都需要一段观察期。
+   *
+   * 关闭后这些写法被**明确拒绝**并提示来设置页开启——不会退回"静默建成一条乱码"
+   * 的旧行为：那是 bug，不属于可回退的功能面。残片守卫（`15:32*3`、`+1h..3h`）
+   * 与本开关无关，始终生效。
+   */
+  advancedSyntax: s.boolean().default(true),
 }).volatile();
 
 /**
@@ -133,6 +146,8 @@ export interface SchedulerSettings {
   readonly onUnconfirmed: UserScheduleOnUnconfirmed;
   /** 时钟图标风格（auto / modern / classic）。 */
   readonly clockIconStyle: 'auto' | 'modern' | 'classic';
+  /** 高级语法（Beta）：多次写法是否可用。默认开。 */
+  readonly advancedSyntax: boolean;
 }
 
 /**
@@ -147,6 +162,7 @@ interface SettingsRawValue {
   readonly confirmDelivery?: boolean;
   readonly onUnconfirmed?: string;
   readonly clockIconStyle?: string;
+  readonly advancedSyntax?: boolean;
 }
 
 /**
@@ -215,7 +231,8 @@ function registerUserScheduleTools(
           // description 在每次 register 时按当前 settings 生成：
           // 模型看到的字符上限始终与宿主实际校验一致，避免描述与实现脱节。
           description:
-            '为用户创建一条当前会话内的定时提醒。必须提供非空提示与恰好一个选择器：after_seconds（正整数延时秒）、at（显式偏移时间或 {date,time,time_zone} 本地时间）、every_seconds（≥300 的固定间隔秒）。time_zone 可选，缺省用会话检测时区。创建来源被标记为用户工具，GUI 面板会展示。',
+            '为用户创建一条当前会话内的定时提醒。必须提供非空提示与恰好一个选择器：after_seconds（正整数延时秒）、at（显式偏移时间或 {date,time,time_zone} 本地时间）、every_seconds（≥300 的固定间隔秒）。time_zone 可选，缺省用会话检测时区。创建来源被标记为用户工具，GUI 面板会展示。' +
+            'every_seconds 是**无结束条件**的固定间隔（会一直发下去，直到用户删除）；用户说了次数上限（如「每小时提醒我一次，持续 3 次」）时不要用 every_seconds，改为**逐条调用本工具 N 次**、每次用 at 给出对应的绝对时刻（t+1h、t+2h、t+3h）。',
           parameters: {
             prompt: {
               type: 'string',
@@ -223,7 +240,7 @@ function registerUserScheduleTools(
               description: `提醒内容（trim 后非空，≤${resolveSchedulerPromptLimits(getSettings()).maxChars} 字符；超过会返回 invalid_prompt）。`,
             },
             after_seconds: { type: 'number', description: '正整数延时秒数。' },
-            every_seconds: { type: 'number', description: '固定间隔秒数，至少 300。' },
+            every_seconds: { type: 'number', description: '固定间隔秒数，至少 300；无结束条件（有次数上限请改为逐条创建 at）。' },
             at: {
               description: '绝对目标：显式偏移的 RFC 3339 字符串，或 {date, time, time_zone} 本地日历对象。',
               oneOf: [
@@ -370,6 +387,8 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     confirmDelivery: true,
     onUnconfirmed: 'keep',
     clockIconStyle: 'auto',
+    // Beta 功能默认开：语法已经过 38 个单测，关闭它只会把用户推向报错。
+    advancedSyntax: true,
   };
   let getSettings: () => SchedulerSettings = () => startSettings;
   ctx.inject(['settings'], (settingsCtx) => {
@@ -416,6 +435,8 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
         value?.clockIconStyle === 'modern' || value?.clockIconStyle === 'classic'
           ? value.clockIconStyle
           : 'auto',
+      // 仅显式 false 关闭；缺失/非法一律按默认开（与 schema 的 default(true) 同源）
+      advancedSyntax: value?.advancedSyntax !== false,
     });
 
     // ── 轨道 1：0.2.0（settings rewrite 第二版）─────────────────────────────

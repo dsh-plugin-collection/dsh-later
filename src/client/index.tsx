@@ -135,6 +135,14 @@ function apply(ctx: Context): void {
         sectionDisplay: '显示设置',
         sectionTime: '时间设置',
         sectionDelivery: '投递设置',
+        sectionAdvanced: '高级语法',
+        betaBadge: 'Beta',
+        betaBadgeAria: 'Beta 功能，行为可能随版本调整',
+        advancedSyntaxLabel: '启用多次写法（+1h*3 / 15:32+16:32）',
+        advancedSyntaxHint:
+            '让 /later 与 /schedule 支持一次写多条：+1h*3（等间隔 3 次）、+1h+1h+0.5h（相对序列）、'
+            + '15:32+16:32 与 9:00+1d（锚点序列，按墙钟推进，跨夏令时不漂）。每条都是独立任务，'
+            + '可单独取消或编辑；单次最多 10 条。标记为 Beta：展开后的观感与条数上限仍需观察。',
         showButtonLabel: '显示定时按钮',
         showButtonHint: '关闭后输入框右侧不再显示时钟按钮；已创建的提醒仍会照常触发，并在输入框下方的待发送列表中显示。',
         maxSchedulesLabel: '单会话任务上限',
@@ -173,6 +181,9 @@ function apply(ctx: Context): void {
         saveFailed: '保存失败，请重试。',
         loading: '加载中…',
         unavailable: '设置暂不可用。',
+        sectionDisplayToggle: '显示设置',
+        showInSettings: '在设置中显示',
+        showInSettingsHint: '在设置对话框中显示本插件的设置页（刷新页面后生效）',
       },
       en: {
         title: 'Session Scheduler',
@@ -184,6 +195,16 @@ function apply(ctx: Context): void {
         sectionDisplay: 'Display',
         sectionTime: 'Time windows',
         sectionDelivery: 'Delivery',
+        sectionAdvanced: 'Advanced syntax',
+        betaBadge: 'Beta',
+        betaBadgeAria: 'Beta feature; behaviour may change between versions',
+        advancedSyntaxLabel: 'Multi-shot syntax (+1h*3 / 15:32+16:32)',
+        advancedSyntaxHint:
+            'Let /later and /schedule create several tasks at once: +1h*3 (same interval N times), '
+            + '+1h+1h+0.5h (relative chain), 15:32+16:32 and 9:00+1d (anchored on a wall clock — '
+            + 'it keeps the clock time across DST). Each occurrence is an independent task you can '
+            + 'cancel or edit on its own; up to 10 per command. Marked Beta: the expanded result and '
+            + 'the 10-task cap still need real-world observation.',
         showButtonLabel: 'Show schedule button',
         showButtonHint: 'Hide the clock button on the input bar. Existing reminders keep firing and stay visible in the dock below the composer.',
         maxSchedulesLabel: 'Max schedules per session',
@@ -222,6 +243,9 @@ function apply(ctx: Context): void {
         saveFailed: 'Save failed, please try again.',
         loading: 'Loading…',
         unavailable: 'Settings unavailable.',
+        sectionDisplayToggle: 'Display',
+        showInSettings: 'Show in settings',
+        showInSettingsHint: 'Show this plugin\'s settings page in the settings dialog (refresh to take effect)',
       },
     }), 'dsh-later: locale');
   }
@@ -290,11 +314,17 @@ function apply(ctx: Context): void {
   const cardT = locale === undefined ? undefined : locale.bind(NS);
 
   /** 设置页卡片声明（两代 harness 仅插槽名不同）。 */
-  const cardDeclaration = (slot: string, scope: ClientSettingsScope | ClientConfigForm) => ({
+  const cardDeclaration = (slot: string, scope: ClientSettingsScope | ClientConfigForm, surface: 'detail' | 'settings' = 'detail') => ({
     name: slot,
+    id: SETTINGS_NS,
+    order: 30,
     key: SETTINGS_NS,
     locale: NS,
-    inject: () => ({ scope, t: cardT }),
+    label: () => {
+      const active = locale === undefined ? 'zh' : locale.getSnapshot().active;
+      return active === 'en' ? 'Session Scheduler' : '定时提醒';
+    },
+    inject: () => ({ scope, t: cardT, surface }),
   });
 
   // 旧 harness（≤ 0.1.5）：浏览器端 settingsScope + 设置页 settings.plugin.item。
@@ -314,9 +344,19 @@ function apply(ctx: Context): void {
     };
     mountComposer(scope);
     if (cardT === undefined) return;
-    ctx.slots.inject('settings.plugin.item', () =>
-      ctx.slots.register(cardDeclaration('settings.plugin.item', scope), SchedulerSettingsCard),
+    // 设置对话框中的设置页：默认不显示，由插件详情页的开关控制。
+    // 开关状态存储在 localStorage 中，key 为 'dsh-later:show-settings-section'。
+    const SHOW_SETTINGS_KEY = 'dsh-later:show-settings-section';
+    const showSettingsSection = typeof localStorage !== 'undefined' && localStorage.getItem(SHOW_SETTINGS_KEY) === 'true';
+    if (!showSettingsSection) return;
+    const disposeSection = ctx.slots.inject('settings.section', () =>
+      ctx.slots.register(cardDeclaration('settings.section', scope, 'settings'), SchedulerSettingsCard),
     );
+    if (typeof disposeSection === 'function') {
+      ctx.effect(() => () => {
+        disposeSection();
+      });
+    }
   });
 
   // 新 harness（0.1.7+ settings rewrite）：configForms 表单 + Plugins 页
@@ -348,11 +388,24 @@ function apply(ctx: Context): void {
       () =>
         forms.whileServed([ENTRY_ID], () =>
           ctx.slots.inject('plugins.bundle.config', () =>
-            ctx.slots.register(cardDeclaration('plugins.bundle.config', scope), SchedulerSettingsCard),
+            ctx.slots.register(cardDeclaration('plugins.bundle.config', scope, 'detail'), SchedulerSettingsCard),
           ),
         ),
       'dsh-later: plugins-page card',
     );
+    // 设置对话框中的设置页：默认不显示，由插件详情页的开关控制。
+    // 开关状态存储在 localStorage 中，key 为 'dsh-later:show-settings-section'。
+    const SHOW_SETTINGS_KEY = 'dsh-later:show-settings-section';
+    const showSettingsSection = typeof localStorage !== 'undefined' && localStorage.getItem(SHOW_SETTINGS_KEY) === 'true';
+    if (!showSettingsSection) return;
+    const disposeSection = ctx.slots.inject('settings.section', () =>
+      ctx.slots.register(cardDeclaration('settings.section', scope, 'settings'), SchedulerSettingsCard),
+    );
+    if (typeof disposeSection === 'function') {
+      ctx.effect(() => () => {
+        disposeSection();
+      });
+    }
   });
 }
 

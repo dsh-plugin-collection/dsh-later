@@ -158,11 +158,20 @@ export declare class UserScheduleRuntime {
      * 构造注入的消息，按投递形态分流：
      *  - `user`（`/later` 显式请求的延迟发送）：原样内容 + `source.kind='user'`，
      *    让 GUI 呈现为「我」发出的普通气泡（产品取舍：用户明确要求以本人身份）。
-     *    跳过 framing 防护 —— 这是「代发」语义，不是注入。
+     *    跳过 framing 防护 —— 这是「代发」语义，不是注入。随命令提交的附件
+     *    （图片/文件耐久引用，存于 sidecar）按记录顺序拼在文本块之后，
+     *    与用户自己发「文字+图」的消息形状一致。
      *  - `context`（默认）：复用 dsh-schedule 的注入防护 framing + notice 表单，
      *    保持「上下文注入」的可信审计线；多条一次性到期合并为批次 framing（P1-5），
      *    形状与 dsh-schedule 的固定间隔批次一致。
      */
     private buildMessage;
+    /**
+     * 读某条提醒随命令提交的附件（sidecar 权威；无会话 id / 无条目时为空）。
+     *
+     * 只在 `user` 代发路径调用——context 注入通道从未声明接受附件（见 commands.ts），
+     * 不会把图片拼进防护 framing。sidecar 读路径已做块级收窄（sanitizeAttachments）。
+     */
+    private attachmentsOf;
 }
 export {};

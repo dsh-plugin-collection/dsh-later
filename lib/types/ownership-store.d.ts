@@ -1,4 +1,23 @@
+import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm';
 import type { UserScheduleDelivery } from './domain.js';
+/**
+ * 随提醒一起延迟发送的附件块（宿主命令准入后的耐久引用，JSON 可序列化）。
+ *
+ * `/later` 声明 `input.attachments` 后，命令框架把 composer 附件做耐久化准入
+ * （图片→内容寻址存储，文件→staged receipt 解析），以这两种块交给 handler。
+ * 块内只持有不透明 `attachmentId` 引用（非路径、非字节），因此可以安全地
+ * 落进 sidecar JSON，到点投递时再拼回 user message 的 content。
+ */
+export type ScheduledAttachment = ImageBlock | FileBlock;
+/**
+ * 校验并收窄任意来源（含磁盘 JSON）的附件块数组。
+ *
+ * sidecar 是本地文件，可能被外部改写或被旧版本写入半成品；而附件块最终会
+ * 拼进**以用户身份代发**的消息 content，故读路径必须视为不可信输入：
+ * 只放行 `{type:'image'|'file', attachment:{attachmentId: string}}` 形状的块，
+ * 其余一律丢弃（不抛错——单块损坏不应让整份 sidecar 不可读）。
+ */
+export declare function sanitizeAttachments(value: unknown): readonly ScheduledAttachment[] | undefined;
 /** 单条所有权记录。 */
 export interface OwnedEntry {
     /** 到点注入形态（/later 为 'user'，其余 'context'）。 */
@@ -15,6 +34,14 @@ export interface OwnedEntry {
      * 若直接当窗口会从 0 重跑；此处保留原 after 间隔供 wire/进度条使用。
      */
     readonly windowSeconds?: number;
+    /**
+     * `/later` 随命令提交的附件（到点代发时拼进消息 content）。
+     *
+     * 为什么不进会话日志：`schedule/change` 荷载被 dsh-schedule 严格解码
+     * （hasExactKeys），追加字段会让整份历史拒读（见 domain.ts 的兼容性说明）；
+     * sidecar 是本插件私有存储，加字段天然向后兼容。
+     */
+    readonly attachments?: readonly ScheduledAttachment[];
 }
 /** 暂停留档（仅 kind==='after'；不进会话日志）。 */
 export interface PausedEntry {
@@ -31,6 +58,8 @@ export interface PausedEntry {
     /** 暂停前的日志 schedule id（审计/关联）。 */
     readonly lastScheduleId: string;
     readonly pausedAt: number;
+    /** 暂停时随条目冻结的附件（resume/插话投递时原样带回）。 */
+    readonly attachments?: readonly ScheduledAttachment[];
 }
 /** 读取某会话的全部所有权记录（缓存优先；返回副本语义，调用方不得变更）。 */
 export declare function allOwnership(sessionId: string): Readonly<Record<string, OwnedEntry>>;
@@ -41,7 +70,7 @@ export declare function getOwnership(sessionId: string, id: string): OwnedEntry 
 /** 生成稳定插件 uid（pause/resume 跨日志 id 变更）。 */
 export declare function newTaskUid(): string;
 /** 记录（新增或覆盖）一条所有权；幂等。仅显式传入 `uid` 时写入稳定身份。 */
-export declare function recordOwnership(sessionId: string, id: string, delivery: UserScheduleDelivery, uid?: string, windowSeconds?: number): OwnedEntry;
+export declare function recordOwnership(sessionId: string, id: string, delivery: UserScheduleDelivery, uid?: string, windowSeconds?: number, attachments?: readonly ScheduledAttachment[]): OwnedEntry;
 /** 撤销一条所有权；幂等（不存在时无操作）。 */
 export declare function removeOwnership(sessionId: string, id: string): void;
 /** 按 uid 找当前仍 active 的 schedule id（缺失 undefined）。 */
