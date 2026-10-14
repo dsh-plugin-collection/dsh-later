@@ -301,9 +301,36 @@ export function epochFromLocal(
   ) {
     return undefined;
   }
-  // 以纯 UTC 构造「当日近似 epoch」作为锚点，再用偏移校正解析真实墙钟时刻。
-  const approx = Date.UTC(year, month - 1, day, 0, 0, 0, 0);
-  return resolveWallClock(approx, timeZone, hour, minute, second);
+  // 「哪一天」必须由**请求的日历日期**决定，不能从某个探测瞬点反推：
+  // 旧实现传 `Date.UTC(y,m-1,d)`（UTC 零点）给 resolveWallClock，它再用
+  // localFieldsOf 读「当天」——在 UTC 负偏移时区（America/Los_Angeles 等）那个
+  // 瞬间读出来的是**前一天**，于是 `2026-11-01 09:00 @LA` 解成 10-31 09:00，
+  // 面板自定义日期与 `/later 明天9点` 整体错一天（正偏移 ≤ +11 的时区恰好看不出）。
+  // 这里改为直接以请求日期为判据，在候选偏移里挑字段完全吻合的最小瞬点。
+  const localEpoch = Date.UTC(year, month - 1, day, hour, minute, second, 0);
+  const offsets = new Set<number>();
+  for (let delta = -2; delta <= 2; delta += 1) {
+    offsets.add(offsetOf(localEpoch + delta * DAY_MS, timeZone));
+  }
+  const candidates: number[] = [];
+  for (const offset of offsets) {
+    const candidate = localEpoch - offset;
+    const f = localFieldsOf(candidate, timeZone);
+    if (
+      f.year === year &&
+      f.month === month &&
+      f.day === day &&
+      f.hour === hour &&
+      f.minute === minute &&
+      f.second === second
+    ) {
+      candidates.push(candidate);
+    }
+  }
+  // 回拨日同一墙钟出现两次 → 取较早的一次（与 dsh-schedule 的 weekly/daily 口径一致）；
+  // 前拨跳过的墙钟 → 无候选 → undefined，由调用方给出「该时刻不存在」的提示。
+  candidates.sort((a, b) => a - b);
+  return candidates[0];
 }
 
 /**

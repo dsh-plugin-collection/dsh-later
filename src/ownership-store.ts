@@ -36,7 +36,41 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm';
 import type { UserScheduleDelivery } from './domain.js';
+
+/**
+ * 随提醒一起延迟发送的附件块（宿主命令准入后的耐久引用，JSON 可序列化）。
+ *
+ * `/later` 声明 `input.attachments` 后，命令框架把 composer 附件做耐久化准入
+ * （图片→内容寻址存储，文件→staged receipt 解析），以这两种块交给 handler。
+ * 块内只持有不透明 `attachmentId` 引用（非路径、非字节），因此可以安全地
+ * 落进 sidecar JSON，到点投递时再拼回 user message 的 content。
+ */
+export type ScheduledAttachment = ImageBlock | FileBlock;
+
+/**
+ * 校验并收窄任意来源（含磁盘 JSON）的附件块数组。
+ *
+ * sidecar 是本地文件，可能被外部改写或被旧版本写入半成品；而附件块最终会
+ * 拼进**以用户身份代发**的消息 content，故读路径必须视为不可信输入：
+ * 只放行 `{type:'image'|'file', attachment:{attachmentId: string}}` 形状的块，
+ * 其余一律丢弃（不抛错——单块损坏不应让整份 sidecar 不可读）。
+ */
+export function sanitizeAttachments(value: unknown): readonly ScheduledAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const blocks: ScheduledAttachment[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const block = item as { type?: unknown; attachment?: unknown; offloaded?: unknown };
+    if (block.type !== 'image' && block.type !== 'file') continue;
+    const ref = block.attachment;
+    if (typeof ref !== 'object' || ref === null) continue;
+    if (typeof (ref as { attachmentId?: unknown }).attachmentId !== 'string') continue;
+    blocks.push(item as ScheduledAttachment);
+  }
+  return blocks.length > 0 ? blocks : undefined;
+}
 
 /** 单条所有权记录。 */
 export interface OwnedEntry {
@@ -54,6 +88,14 @@ export interface OwnedEntry {
    * 若直接当窗口会从 0 重跑；此处保留原 after 间隔供 wire/进度条使用。
    */
   readonly windowSeconds?: number;
+  /**
+   * `/later` 随命令提交的附件（到点代发时拼进消息 content）。
+   *
+   * 为什么不进会话日志：`schedule/change` 荷载被 dsh-schedule 严格解码
+   * （hasExactKeys），追加字段会让整份历史拒读（见 domain.ts 的兼容性说明）；
+   * sidecar 是本插件私有存储，加字段天然向后兼容。
+   */
+  readonly attachments?: readonly ScheduledAttachment[];
 }
 
 /** 暂停留档（仅 kind==='after'；不进会话日志）。 */
@@ -71,6 +113,8 @@ export interface PausedEntry {
   /** 暂停前的日志 schedule id（审计/关联）。 */
   readonly lastScheduleId: string;
   readonly pausedAt: number;
+  /** 暂停时随条目冻结的附件（resume/插话投递时原样带回）。 */
+  readonly attachments?: readonly ScheduledAttachment[];
 }
 
 /** sidecar 文件形状（version 2；v1 读入时补空 paused）。 */
@@ -209,10 +253,23 @@ function readFresh(sessionId: string): OwnershipFile {
       throw new Error('unexpected shape');
     }
     // v1 → v2：补空 paused，写回时统一升到 2
+    //
+    // 附件块在**读路径**收窄（sidecar 是本地文件，视同不可信输入）：旧版本
+    // 写入的半成品或外部改写在此被滤掉，下游（代发拼 content）只见到合法块。
+    const entries: Record<string, OwnedEntry> = {};
+    for (const [id, entry] of Object.entries(parsed.entries)) {
+      const attachments = sanitizeAttachments((entry as { attachments?: unknown }).attachments);
+      entries[id] = attachments === undefined ? entry : { ...entry, attachments };
+    }
+    const paused: Record<string, PausedEntry> = {};
+    for (const [uid, entry] of Object.entries((parsed as { paused?: Record<string, PausedEntry> }).paused ?? {})) {
+      const attachments = sanitizeAttachments((entry as { attachments?: unknown }).attachments);
+      paused[uid] = attachments === undefined ? entry : { ...entry, attachments };
+    }
     const file: OwnershipFile = {
       version: 2,
-      entries: parsed.entries,
-      paused: (parsed as { paused?: Record<string, PausedEntry> }).paused ?? {},
+      entries,
+      paused,
     };
     cache.set(sessionId, { mtimeMs: stat.mtimeMs, size: stat.size, file });
     return file;
@@ -293,13 +350,16 @@ export function recordOwnership(
   delivery: UserScheduleDelivery,
   uid?: string,
   windowSeconds?: number,
+  attachments?: readonly ScheduledAttachment[],
 ): OwnedEntry {
+  const safeAttachments = sanitizeAttachments(attachments);
   if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof id !== 'string' || id.length === 0) {
     const bare: OwnedEntry = {
       delivery,
       createdAt: Date.now(),
       ...(uid !== undefined ? { uid } : {}),
       ...(typeof windowSeconds === 'number' ? { windowSeconds } : {}),
+      ...(safeAttachments !== undefined ? { attachments: safeAttachments } : {}),
     };
     return bare;
   }
@@ -307,11 +367,16 @@ export function recordOwnership(
   const entries: Record<string, OwnedEntry> = { ...file.entries };
   const nextUid = uid ?? entries[id]?.uid;
   const nextWindow = windowSeconds ?? entries[id]?.windowSeconds;
+  // 附件与 uid/window 同语义：未显式传入时保留旧条目值，保证「pause 回填 uid」
+  // 与「flush 失败回滚」等覆盖写不丢附件；显式传入（含 undefined 清空语义由
+  // 调用方用 previousEntry?.attachments 表达）以传入值为准。
+  const nextAttachments = attachments !== undefined ? safeAttachments : entries[id]?.attachments;
   const entry: OwnedEntry = {
     delivery,
     createdAt: Date.now(),
     ...(nextUid !== undefined ? { uid: nextUid } : {}),
     ...(typeof nextWindow === 'number' ? { windowSeconds: nextWindow } : {}),
+    ...(nextAttachments !== undefined ? { attachments: nextAttachments } : {}),
   };
   entries[id] = entry;
   writeThrough(sessionId, { version: 2, entries, paused: file.paused ?? {} });
