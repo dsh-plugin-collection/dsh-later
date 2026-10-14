@@ -308,6 +308,24 @@ async function loadClientBundle() {
     if (id === 'react-dom' || id === 'react-dom/client') {
       return { createPortal: () => null, createRoot: () => ({ render() {}, unmount() {} }) };
     }
+    // 宿主 seed 模块（PLATFORM_MODULES，issue #19）：图标组件在测试里不渲染，
+    // 给空组件桩；非 Icon 导出照旧报错（保持与运行时一致的响亮失败）。
+    // 唯二例外是 primitives-compat 探测的两个定位 hook：issue #24 起面板外壳
+    // 会读它们来决定「用官方锚定/外部点击关闭」还是「本地兜底」，故必须给出
+    // 桩（否则读到 undefined 走兜底分支，虽不报错，但探测路径就没被覆盖到）。
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') {
+      const hooks = {
+        useAnchoredPosition: () => ({ left: '0px', top: '0px' }),
+        useDismissOnOutsidePointer: () => {},
+      };
+      return new Proxy({}, {
+        get: (_target, name) => {
+          if (typeof name === 'string' && name.startsWith('Icon')) return () => null;
+          if (typeof name === 'string' && name in hooks) return hooks[name];
+          throw new Error(`unexpected primitives export: ${String(name)}`);
+        },
+      });
+    }
     throw new Error(`unexpected host require: ${id}`);
   };
   return captured.factory(require);
