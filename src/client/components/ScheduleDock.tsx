@@ -9,8 +9,19 @@
  *  - 每条可单独取消；可点击编辑图标进入行内修改内容（保留原时刻）
  * @module dsh-later/client/components/ScheduleDock
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  IconChevronDownOutlineRegular,
+  IconClockOutlineRegular,
+  IconCloseOutlineRegular,
+  IconEditOutlineRegular,
+  IconPauseOutlineRegular,
+  IconPlayOutlineRegular,
+  IconSendOutlineRegular,
+  IconTrashOutlineRegular,
+} from '@deepseek-ai/dsh-client-ui-primitives';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
 import { format, type SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
@@ -555,7 +566,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
             {saving ? '…' : t.editSave}
           </button>
           <button type="button" className="ss-dock-action" onClick={cancelEdit} aria-label={t.editCancel}>
-            ✕
+            <IconCloseOutlineRegular size={14} />
           </button>
           {editErr !== null && <span className="ss-dock-edit-err">{editErr}</span>}
         </li>
@@ -603,58 +614,63 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
         </div>
         {/* 图标：编辑 → 暂停/恢复 → 删除 → 插话（暂停保留槽位宽度） */}
         <div className="ss-dock-actions">
-          <button
-            type="button"
-            className="ss-dock-action"
-            title={t.editTask}
-            aria-label={t.editTask}
-            onClick={() => startEdit(item)}
-          >
-            <QueueEditIcon />
-          </button>
+          <DockTip label={t.editTask}>
+            <button
+              type="button"
+              className="ss-dock-action"
+              aria-label={t.editTask}
+              onClick={() => startEdit(item)}
+            >
+              <IconEditOutlineRegular size={14} />
+            </button>
+          </DockTip>
           {isPaused ? (
-            <button
-              type="button"
-              className={`ss-dock-action ss-paused-active${resuming.has(item.id) ? ' ss-pending' : ''}`}
-              title={t.resumeTask}
-              aria-label={t.resumeTask}
-              disabled={resuming.has(item.id)}
-              onClick={() => handleResume(item)}
-            >
-              <QueueResumeIcon />
-            </button>
+            <DockTip label={t.resumeTask}>
+              <button
+                type="button"
+                className={`ss-dock-action ss-paused-active${resuming.has(item.id) ? ' ss-pending' : ''}`}
+                aria-label={t.resumeTask}
+                disabled={resuming.has(item.id)}
+                onClick={() => handleResume(item)}
+              >
+                <IconPlayOutlineRegular size={16} />
+              </button>
+            </DockTip>
           ) : (
-            <button
-              type="button"
-              className={`ss-dock-action${pausing.has(item.id) ? ' ss-pending' : ''}`}
-              title={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}
-              aria-label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}
-              disabled={!canPause(item, now) || pausing.has(item.id)}
-              onClick={() => handlePause(item)}
-            >
-              <QueuePauseIcon />
-            </button>
+            <DockTip label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}>
+              <button
+                type="button"
+                className={`ss-dock-action${pausing.has(item.id) ? ' ss-pending' : ''}`}
+                aria-label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}
+                disabled={!canPause(item, now) || pausing.has(item.id)}
+                onClick={() => handlePause(item)}
+              >
+                <IconPauseOutlineRegular size={16} />
+              </button>
+            </DockTip>
           )}
-          <button
-            type="button"
-            className="ss-dock-action"
-            title={t.deleteTask}
-            aria-label={t.deleteTask}
-            onClick={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
-          >
-            <QueueDeleteIcon />
-          </button>
-          {item.kind !== 'every' && (
+          <DockTip label={t.deleteTask}>
             <button
               type="button"
-              className={`ss-dock-action ss-dock-action-steer${steering.has(item.id) ? ' ss-pending' : ''}${steerDone.has(item.id) ? ' ss-done' : ''}`}
-              title={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}
-              aria-label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}
-              disabled={steering.has(item.id) || steerDone.has(item.id)}
-              onClick={() => handleSteer(item)}
+              className="ss-dock-action"
+              aria-label={t.deleteTask}
+              onClick={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
             >
-              <QueueSendIcon />
+              <IconTrashOutlineRegular size={14} />
             </button>
+          </DockTip>
+          {item.kind !== 'every' && (
+            <DockTip label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}>
+              <button
+                type="button"
+                className={`ss-dock-action ss-dock-action-steer${steering.has(item.id) ? ' ss-pending' : ''}${steerDone.has(item.id) ? ' ss-done' : ''}`}
+                aria-label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}
+                disabled={steering.has(item.id) || steerDone.has(item.id)}
+                onClick={() => handleSteer(item)}
+              >
+                <IconSendOutlineRegular size={16} />
+              </button>
+            </DockTip>
           )}
         </div>
       </li>
@@ -672,11 +688,11 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
             onClick={() => setCollapsed((value) => !value)}
           >
             <span className="ss-dock-lead" aria-hidden="true">
-              <QueueClockIcon />
+              <IconClockOutlineRegular size={16} />
             </span>
             <span className="ss-dock-count">{format(t.panelCount, { n: schedules.length })}</span>
             <span className={expanded ? 'ss-dock-chevron ss-open' : 'ss-dock-chevron'} aria-hidden="true">
-              <QueueChevronIcon />
+              <IconChevronDownOutlineRegular size={14} />
             </span>
           </button>
         )}
@@ -795,68 +811,93 @@ function MultiBar({
   );
 }
 
-/* ==================== QueueDock 同款图标（path 逐字取自 dsh-client-ui-conversation） ==================== */
+/* ==================== DockTip：对齐官方 Tooltip 组件（primitives）的自定义实现 ==================== */
+/* 官方 QueueDock 用 Tooltip({ portal: true, label, side: "bottom", delayMs: 500 }) 包裹每个 action button。
+ * 图标已直接 import primitives（issue #19）；Tooltip 仍为自定义实现（官方 Tooltip 的
+ * 完整 API 依赖宿主 slots/portal 上下文），用 createPortal + fixed 定位实现相同视觉效果。
+ *  - 500ms 延迟显示
+ *  - 150ms 淡入动画
+ *  - 固定定位，z-index 1100（portal 层）
+ *  - 超出视口自动翻转（bottom → top）
+ *  - 水平方向 clamp 到视口边缘 12px
+ */
+function DockTip({ label, children }: { label: string; children: JSX.Element }) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; side: 'bottom' | 'top' } | null>(null);
+  const timerRef = useRef<number | null>(null);
 
-/** 时钟（折叠头 lead，14×14）。 */
-function QueueClockIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M7.00049 0.199829C3.24488 0.199829 0.199952 3.24408 0.199707 6.99963C0.199707 8.0414 0.434087 9.03061 0.854004 9.91467L1.11279 10.4576L2.19775 9.94202L1.94092 9.39905L1.81787 9.12268C1.5498 8.46885 1.40186 7.75171 1.40186 6.99963C1.4021 3.90808 3.90888 1.40198 7.00049 1.40198C10.0919 1.40219 12.5979 3.90821 12.5981 6.99963C12.5981 10.0913 10.0921 12.5981 7.00049 12.5983C6.36734 12.5983 5.90348 12.5535 5.49268 12.4401C5.08803 12.3283 4.7041 12.1414 4.24463 11.8209C3.57111 11.3511 2.60588 11.1855 1.81006 11.6881L1.79736 11.6959L1.78467 11.7047L1.25537 12.0778L1.65381 13.2672L2.46045 12.6989C2.75029 12.5214 3.18004 12.5442 3.55615 12.8063C4.10063 13.1861 4.60863 13.4423 5.17334 13.5983C5.73194 13.7525 6.31665 13.8004 7.00049 13.8004C10.7561 13.8002 13.8003 10.7553 13.8003 6.99963C13.8 3.24421 10.7559 0.200041 7.00049 0.199829ZM3.81201 7.47327V8.67542H7.11572V7.47327H3.81201ZM3.81201 6.34924H10.2173V5.14709H3.81201V6.34924Z" fill="currentColor" />
-    </svg>
-  );
-}
+  const cancel = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
 
-/** 下箭头 chevron（折叠头，展开时外层 rotate(180deg)，14×14）。 */
-function QueueChevronIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z" fill="currentColor" />
-    </svg>
-  );
-}
+  const show = () => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({ left: r.left + r.width / 2, top: r.bottom + 8, side: 'bottom' });
+  };
 
-/** 铅笔「编辑」（16×16）。 */
-function QueueEditIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M9.94076 1.34942C10.7047 0.90231 11.6503 0.902415 12.4143 1.34942C12.7061 1.52015 12.9688 1.79118 13.3104 2.13284C13.6521 2.47448 13.9231 2.73721 14.0939 3.02894C14.5408 3.79294 14.5409 4.73856 14.0939 5.50251C13.9231 5.79415 13.652 6.05704 13.3104 6.39861L6.65932 13.0497C6.28068 13.4284 6.00695 13.7108 5.66543 13.9097C5.32391 14.1085 4.94315 14.2074 4.42705 14.3498L3.24394 14.6761C2.77527 14.8054 2.34538 14.9262 2.00131 14.9684C1.65196 15.0112 1.17964 15.0013 0.810764 14.6325C0.441921 14.2637 0.432107 13.7913 0.47486 13.442C0.517035 13.0979 0.6379 12.668 0.767181 12.1993L1.09352 11.0162C1.23588 10.5001 1.33481 10.1193 1.5336 9.77784C1.7325 9.43632 2.0149 9.1626 2.39355 8.78395L9.04466 2.13284C9.38625 1.79126 9.64911 1.52016 9.94076 1.34942ZM15.5427 14.8398H7.55223L8.96707 13.425H15.5427V14.8398ZM3.39382 9.78422C2.965 10.213 2.84244 10.3436 2.75709 10.49C2.67183 10.6366 2.61862 10.8079 2.45733 11.3925L2.13099 12.5756C2.00183 13.0439 1.92194 13.3419 1.88863 13.5536C2.10041 13.5204 2.39872 13.4416 2.86764 13.3123L4.05075 12.9859C4.63544 12.8246 4.80669 12.7715 4.95323 12.6862C5.09968 12.6008 5.23022 12.4783 5.65905 12.0494L10.721 6.98644L8.45577 4.72121L3.39382 9.78422ZM11.7 2.57079C11.3774 2.38198 10.9777 2.38198 10.6551 2.57079C10.5602 2.62647 10.4487 2.72931 10.0449 3.13311L9.45604 3.72094L11.7213 5.98617L12.3102 5.39833C12.7139 4.99457 12.8168 4.88307 12.8725 4.78818C13.0613 4.46561 13.0612 4.06585 12.8725 3.74326C12.8169 3.64827 12.7146 3.53752 12.3102 3.13311C11.9057 2.72863 11.795 2.6264 11.7 2.57079Z" fill="currentColor" />
-    </svg>
-  );
-}
+  const enter = () => {
+    cancel();
+    timerRef.current = window.setTimeout(show, 500);
+  };
 
-/** 垃圾桶「删除」（16×16）。 */
-function QueueDeleteIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M14.4782 4.84067L14.2138 10.1152C14.1102 12.1872 14.067 13.0115 13.3866 13.9607C13.1044 14.3546 12.7498 14.6912 12.3424 14.9535C11.8239 15.2872 11.2415 15.4316 10.5585 15.4998C9.88727 15.5668 9.04946 15.5656 7.99998 15.5656C6.95051 15.5656 6.1127 15.5668 5.44142 15.4998C4.75851 15.4316 4.17602 15.2872 3.65753 14.9535C3.25012 14.6912 2.89559 14.3546 2.61332 13.9607C1.93296 13.0115 1.88979 12.1872 1.78619 10.1152L1.52179 4.84067L2.89006 4.77277L3.15343 10.0463C3.26221 12.2218 3.32452 12.6015 3.72646 13.1624C3.90825 13.4161 4.13686 13.6334 4.39927 13.8023C4.66204 13.9714 5.00263 14.0792 5.57825 14.1367C6.16562 14.1953 6.92298 14.1963 7.99998 14.1963C9.07699 14.1963 9.83434 14.1953 10.4217 14.1367C10.9973 14.0792 11.3379 13.9714 11.6007 13.8023C11.8631 13.6334 12.0917 13.4161 12.2735 13.1624C12.6755 12.6015 12.7378 12.2218 12.8465 10.0463L13.1099 4.77277L14.4782 4.84067ZM5.43011 6.22849H6.7994V11.3909H5.43011V6.22849ZM9.20056 6.22849H10.5699V11.3909H9.20056V6.22849ZM8.53597 0.434431C9.17976 0.434431 9.6522 0.426926 10.0966 0.571258C10.2357 0.616451 10.3717 0.672554 10.502 0.738948C10.9182 0.951107 11.2464 1.29099 11.7015 1.74612L12.4978 2.54136H15.3742V3.91169H0.625732V2.54136H3.50218L4.29845 1.74612C4.75358 1.29099 5.08174 0.951107 5.49801 0.738948C5.62831 0.672554 5.76425 0.616451 5.90334 0.571258C6.34776 0.426926 6.82021 0.434431 7.46399 0.434431H8.53597ZM7.46399 1.80476C6.73208 1.80476 6.51641 1.81187 6.32617 1.87369C6.25545 1.89667 6.18668 1.92533 6.12041 1.95907C5.96398 2.03878 5.82348 2.16253 5.44142 2.54136H10.5585C10.1765 2.16253 10.036 2.03878 9.87955 1.95907C9.81329 1.92533 9.74452 1.89667 9.6738 1.87369C9.48356 1.81187 9.26789 1.80476 8.53597 1.80476H7.46399Z" fill="currentColor" />
-    </svg>
-  );
-}
+  const leave = () => {
+    cancel();
+    setPos(null);
+  };
 
-/** 上箭头「插话发送」（14×14）。 */
-function QueueSendIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M7.24707 1.01771C7.52897 1.07653 7.77619 1.19694 8.00391 1.38001C8.19202 1.53136 8.39884 1.73784 8.61914 1.95814L12.6396 5.9806L11.6299 6.99134L7.71484 3.0763V13.0001H6.28516V3.0763L2.36914 6.99134L1.35938 5.9806L5.38086 1.95814C5.60116 1.73784 5.80798 1.53136 5.99609 1.38001C6.19476 1.22027 6.4385 1.06739 6.75195 1.01771C6.91296 0.992304 7.07471 0.997504 7.24707 1.01771Z" fill="currentColor" />
-    </svg>
-  );
-}
+  useEffect(() => cancel, []);
 
-/** 暂停「⏸」（16×16）。 */
-function QueuePauseIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="3.6" y="2.6" width="3.2" height="10.8" rx="1.1" fill="currentColor" />
-      <rect x="9.2" y="2.6" width="3.2" height="10.8" rx="1.1" fill="currentColor" />
-    </svg>
-  );
-}
+  // 渲染后测量气泡尺寸，clamp 水平位置，必要时翻转到上方
+  useLayoutEffect(() => {
+    if (!pos || !bubbleRef.current) return;
+    const b = bubbleRef.current;
+    const w = b.offsetWidth;
+    const h = b.offsetHeight;
+    const edge = 12;
+    let left = pos.left;
+    let top = pos.top;
+    let side = pos.side;
+    // 水平 clamp
+    left = Math.max(edge + w / 2, Math.min(left, window.innerWidth - edge - w / 2));
+    // 垂直翻转：下方放不下则翻到上方
+    if (side === 'bottom' && top + h > window.innerHeight - edge) {
+      const anchorEl = anchorRef.current!;
+      const r = anchorEl.getBoundingClientRect();
+      top = r.top - 8;
+      side = 'top';
+    }
+    b.style.left = `${left}px`;
+    b.style.top = `${top}px`;
+    b.dataset.side = side;
+    b.style.visibility = 'visible';
+  }, [pos]);
 
-/** 恢复「▶」（16×16）。 */
-function QueueResumeIcon(): JSX.Element {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M4.4 2.9c0-.6.66-1 1.18-.68l7.1 4.1c.52.3.52 1.06 0 1.36l-7.1 4.1A.8.8 0 0 1 4.4 11.1V2.9Z" fill="currentColor" />
-    </svg>
+    <>
+      <span
+        ref={anchorRef}
+        className="ss-dock-tip-anchor"
+        onPointerEnter={enter}
+        onPointerLeave={leave}
+        onFocus={enter}
+        onBlur={leave}
+      >
+        {children}
+      </span>
+      {pos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div ref={bubbleRef} className="ss-dock-tip" style={{ left: pos.left, top: pos.top, visibility: 'hidden' }}>
+            {label}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }

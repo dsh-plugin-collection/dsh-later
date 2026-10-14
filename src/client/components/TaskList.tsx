@@ -4,6 +4,7 @@
  * @module dsh-later/client/components/TaskList
  */
 import type { JSX } from 'react';
+import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import { formatAbsolute, formatRelative, type TextLocale } from '../../time-utils.js';
 import type { ClientSchedule } from '../types.js';
 import type { SchedStrings } from '../strings.js';
@@ -64,7 +65,7 @@ export function TaskList({ items, now, deliveredIds, cancellingIds, onDelete, ti
                 onDelete(item.id);
               }}
             >
-              ✕
+              <IconCloseOutlineRegular size={14} />
             </button>
           </li>
         );

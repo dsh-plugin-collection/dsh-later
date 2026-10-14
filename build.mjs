@@ -54,7 +54,10 @@ const result = await build({
   // 全局 React.createElement，宿主无全局 React 导致渲染崩溃）。
   jsx: 'automatic',
   // react / react-dom 由 __ModuleLoader__ 的 require 从宿主解析（前端运行时提供）。
-  external: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/*'],
+  // @deepseek-ai/dsh-client-ui-primitives 是宿主 seed 模块表基线（PLATFORM_MODULES），
+  // 必须保持 external：内联会复制一份官方组件实例（模块身份/主题漂移），
+  // require 到宿主 seed 表才能拿到官方同一份（issue #19）。
+  external: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/*', '@deepseek-ai/dsh-client-ui-primitives'],
 });
 
 const body = result.outputFiles[0].text;
