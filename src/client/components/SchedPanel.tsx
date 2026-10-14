@@ -4,16 +4,28 @@
  * 结构：标题 → 快捷芯片（相对时长 / 固定时刻 / 自定义展开）→ 已设定任务 → 确认。
  * 内容直接取输入框草稿（PRD 本意：发送当前输入内容），无独立 textarea、
  * 无预览块、无时区选择（自动检测）、无静态时段展示。
+ *
+ * 外壳（抬升面 + 锚定 + 外部点击关闭）对齐官方 `PickerPopover`：portal 挂到
+ * `document.body`、背景 `--dsw-menu-surface-fill` + `--dsw-elevation-*` 描边阴影
+ * + 16px 圆角 + `blur(40px)` 毛玻璃、`z-index: 1100`。定位与关闭优先走 primitives
+ * 的官方 hook，旧代次宿主由 `primitives-compat.ts` 本地兜底（见该文件）。
  * @module dsh-later/client/components/SchedPanel
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
+import { createPortal } from 'react-dom';
+import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import { epochFromLocal, localFieldsOf, nextSmartAt, DEFAULT_SMART_WINDOW, type SmartWindowConfig } from '../../smart-window.js';
 import type { TextLocale } from '../../time-utils.js';
 import { formatAbsolute, formatRelative } from '../../time-utils.js';
 import { TaskList } from './TaskList.js';
 import { format, CLIENT_ERR, type SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
+import {
+  PANEL_MEASURE_STYLE,
+  hasOfficialAnchoredPosition,
+  usePanelAnchorPosition,
+} from '../primitives-compat.js';
 import type { ClientAtInput, ClientSchedule, CreateCommandPayload } from '../types.js';
 
 export interface SchedPanelProps {
@@ -31,8 +43,26 @@ export interface SchedPanelProps {
   onClose: () => void;
   onCreate: (input: CreateCommandPayload) => Promise<void>;
   onDelete: (id: string) => void;
-  /** 父组件提供的底部定位（相对视口），用于把面板浮在输入行上方。 */
+  /**
+   * 兜底定位：面板相对视口的下边距（相对视口）。
+   *
+   * 仅在旧代次宿主（无 primitives `useAnchoredPosition`）生效——那条路径没有
+   * 锚点元素可量，只能沿用 SchedButton 传入的 `bottom`。新代次走官方锚定，
+   * 本 prop 忽略。
+   */
   bottom: number;
+  /**
+   * 触发元素（输入行上的时钟按钮容器），官方锚定用它定位。
+   */
+  anchorRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * 面板自身的 ref 出参。
+   *
+   * 面板已 portal 到 `document.body`，因此不在按钮的 DOM 子树里——按钮侧的
+   * 「点击外面关闭」（官方 `useDismissOnOutsidePointer`）需要靠这个 ref 把面板
+   * 也认作「里面」，否则点面板自身就会被判成外部点击而关闭。
+   */
+  panelRef?: React.RefObject<HTMLDivElement | null>;
   /** 智能时段配置（设置页实时值，已清洗；缺省用内置默认）。 */
   smartWindow?: SmartWindowConfig;
   /** 提示字符上限（设置页实时值；缺省回退 1000）。 */
@@ -69,10 +99,43 @@ export function SchedPanel({
   onCreate,
   onDelete,
   bottom,
+  anchorRef,
+  panelRef: externalPanelRef,
   smartWindow = DEFAULT_SMART_WINDOW,
   promptLimits,
 }: SchedPanelProps): JSX.Element {
   const now = useNow(1000);
+  /**
+   * 面板 ref：优先用按钮传来的（供其 outside-pointer 判定），否则自持一个。
+   *
+   * ⚠️ 渲染时必须挂 `panelRef`（合并后的那个），**不能**只挂 `localPanelRef`：
+   * 官方 `useAnchoredPosition` 从 `panelRef.current` 量 `offsetWidth/offsetHeight`
+   * 决定「翻到上方」与视口夹取。挂错 ref 时它读到 null → 高度按 0 算 →
+   * `top = anchor.top - gap - 0`，面板直接压在触发按钮上并溢出视口底部
+   * （实测 653 − 4 = 649px，底边到 933px > 720px 视口）。这个 bug 只在按钮
+   * 靠近视口下沿时显形，很容易被当成「锚定就这样」而放过。
+   */
+  const localPanelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = externalPanelRef ?? localPanelRef;
+  /**
+   * 锚定位置：官方 hook 可用时按触发元素锚定，旧代次退回 `bottom` 兜底值。
+   *
+   * 兜底分支不能调 `usePanelAnchorPosition`（它是 hook）而新代次调了——那会让
+   * 同一组件在不同宿主上的 hook 序列不一致。故**始终**调用，取值时再选分支：
+   * 无官方锚定时返回 null，落到 `bottom` 的静态样式。
+   */
+  const anchored = usePanelAnchorPosition({
+    open: true,
+    anchorRef: anchorRef ?? { current: null },
+    panelRef,
+    side: 'top',
+    align: 'start',
+    gap: 4,
+    margin: 12,
+  });
+  const panelStyle = hasOfficialAnchoredPosition
+    ? (anchored ?? PANEL_MEASURE_STYLE)
+    : { bottom };
   const [selected, setSelected] = useState<string>('after-600');
   const [customDate, setCustomDate] = useState<string>(() => {
     const f = localFieldsOf(Date.now(), timeZone);
@@ -218,12 +281,27 @@ export function SchedPanel({
   const promptEmpty = defaultPrompt.trim().length === 0;
   const canConfirm = !busy && !promptEmpty && target !== null;
 
-  return (
-    <div className="ss-panel" data-ss-panel="" role="dialog" aria-label={t.panelTitle} style={{ bottom }}>
+  /**
+   * 面板本体：portal 到 `document.body`，祖先的 `overflow` 裁不到它。
+   *
+   * `onClick` 停止冒泡是配合官方 `useDismissOnOutsidePointer`——它在
+   * **pointerdown** 阶段判定，panel 上的 stopPropagation 只防止触发元素那侧的
+   * 「点在锚点内」重开逻辑被面板内部点击误触发（与官方 PickerPopover 同款写法）。
+   */
+  const panel = (
+    <div
+      ref={panelRef}
+      className="ss-panel"
+      data-ss-panel=""
+      role="dialog"
+      aria-label={t.panelTitle}
+      style={panelStyle}
+      onClick={(event) => event.stopPropagation()}
+    >
       <div className="ss-panel-header">
         <span className="ss-panel-title">{t.panelTitle}</span>
         <button type="button" className="ss-panel-close" aria-label={t.close} onClick={onClose}>
-          ✕
+          <IconCloseOutlineRegular size={14} />
         </button>
       </div>
 
@@ -309,6 +387,10 @@ export function SchedPanel({
       {promptEmpty && <div className="ss-hint" style={{ marginTop: 6 }}>{t.promptFromDraft}</div>}
     </div>
   );
+
+  // 非浏览器环境（如 SSR / 单测直接调用）没有 body：原地渲染，内容不丢。
+  if (typeof document === 'undefined') return panel;
+  return createPortal(panel, document.body);
 }
 
 /** 快捷选项的稳定 key。 */
