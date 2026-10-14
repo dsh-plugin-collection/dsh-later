@@ -5,8 +5,9 @@
  * 逻辑已抽取到 `useSchedules` hook；本组件只负责渲染。
  * @module dsh-later/client/components/SchedButton
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
+import { IconClockOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import { detectTimeZone } from '../../time-utils.js';
 import { useSchedT, type LocaleFaceLike } from '../useSchedT.js';
 import type { ClientSchedule, CreateCommandPayload } from '../types.js';
@@ -14,6 +15,7 @@ import type { CommandOutcome } from '../../command-outcome.js';
 import { SchedPanel } from './SchedPanel.js';
 import { useSchedules } from '../hooks/useSchedules.js';
 import { useSchedulerSettings, type SchedulerSettingsScopeLike } from '../hooks/useSchedulerSettings.js';
+import { useEscapeToClose, hasOfficialOutsideDismiss, usePanelOutsideDismiss } from '../primitives-compat.js';
 
 /** 应用层注入的调用能力。 */
 export interface SchedButtonInjected {
@@ -64,19 +66,27 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
     useInput,
   });
 
+  /**
+   * Esc 关闭从本组件移进 compat 层（`useEscapeToClose`），使 0.2.0+ 与旧代次走
+   * 同一条键盘路径。下方 `open` 副作用因此只保留 resize 重新定位。
+   */
+  useEscapeToClose(open, setOpen);
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
     reposition();
     window.addEventListener('resize', reposition);
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('keydown', onKey, true);
-    };
+    return () => window.removeEventListener('resize', reposition);
   }, [open, reposition]);
+
+  /**
+   * 点击「按钮 + 面板」之外关闭（官方 `useDismissOnOutsidePointer`）。
+   *
+   * 面板已 portal 到 `document.body`，不在 `rowRef` 子树内，故须把面板 ref 一并
+   * 交给它（官方 `Menu` 的 portal 用法同款）。旧代次无此 hook 时该调用是空实现，
+   * 关闭退回到下面的 `.ss-backdrop` 全屏遮罩。
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  usePanelOutsideDismiss(rowRef, open, setOpen, panelRef);
 
   // 设置「显示定时按钮」关闭时隐藏整个插槽条目（含面板入口）。
   // 提醒触发（宿主调度）与 dock 列表不受影响；所有 hook 均已在此前调用，
@@ -103,14 +113,19 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
         disabled={!enabled}
         onClick={() => setOpen((value) => !value)}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12 6 12 12 16 14"/>
-        </svg>
+        <IconClockOutlineRegular size={16} />
       </button>
       {open && (
         <>
-          <div className="ss-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
+          {/*
+            全屏遮罩**只在旧代次**渲染（官方 outside-pointer 不可用时）。
+            0.2.0+ 上它是多余的：面板已 portal 到 body，点击外面由
+            `usePanelOutsideDismiss` 判定，而这张 `inset: 0` 的透明层会
+            顺手拦掉页面滚动与焦点移动。
+          */}
+          {!hasOfficialOutsideDismiss && (
+            <div className="ss-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
+          )}
           <SchedPanel
             defaultPrompt={draft}
             schedules={schedules}
@@ -122,6 +137,8 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
             onCreate={handleCreateWithErrorBoundary}
             onDelete={(id) => void handleDelete(id)}
             bottom={anchorBottom}
+            anchorRef={rowRef}
+            panelRef={panelRef}
             smartWindow={smartWindow}
             promptLimits={promptLimits}
           />
