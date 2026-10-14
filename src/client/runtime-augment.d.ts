@@ -124,6 +124,7 @@ export interface ClientLocaleService {
     dictionaries: Readonly<Record<string, Record<string, string>>>,
   ): () => void;
   bind(namespace: string): (key: string) => string;
+  getSnapshot(): { active: string; revision: number };
 }
 
 declare module '@deepseek-ai/cordis' {

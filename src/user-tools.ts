@@ -48,8 +48,9 @@ import {
   recordPaused,
   removeOwnership,
   removePaused,
+  sanitizeAttachments,
 } from './ownership-store.js';
-import type { PausedEntry } from './ownership-store.js';
+import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
 import { detectTimeZone } from './time-utils.js';
 import { readInheritedEventCount, readOwnEvents } from './upstream-compat.js';
 
@@ -468,6 +469,14 @@ function buildScheduleRecord(input: UserScheduleCreateInput, id: ReturnType<type
 export interface UserScheduleCreateOptions {
   /** 可信通道显式声明的投递形态；未提供或非 'user' 一律按安全默认 'context'。 */
   readonly trustedDelivery?: UserScheduleDelivery;
+  /**
+   * 可信通道（人类显式输入的 `/later`）随命令提交的附件块。
+   *
+   * 与 `trustedDelivery` 同一道闸门：**只**接受选项传入，原始输入载荷里的
+   * `attachments` 字段不具任何效力——模型工具与 GUI JSON 载荷永远带不进附件，
+   * 防止任何通道夹带未准入的对象拼进代发消息。
+   */
+  readonly attachments?: readonly ScheduledAttachment[];
 }
 
 /** `user_schedule_create` 核心实现。 */
@@ -483,6 +492,9 @@ export async function userScheduleCreate(
   if (!validated.ok) return validated;
   // 只认可信通道显式声明的形态；输入载荷中的 delivery 字段不具任何效力。
   const trustedDelivery = options?.trustedDelivery === 'user' ? 'user' : 'context';
+  // 附件同理：仅取选项（可信通道）传入的块，并再过一次收窄（防御纵深——
+  // 命令框架的准入已保证形状，但 options 是跨模块边界，不假设上游不变式）。
+  const trustedAttachments = sanitizeAttachments(options?.attachments);
   return runUserScheduleTransaction(agent, async () => {
     const now = Date.now();
     let folded;
@@ -518,6 +530,7 @@ export async function userScheduleCreate(
       trustedDelivery,
       newTaskUid(),
       record.kind === 'after' ? record.afterSeconds : undefined,
+      trustedAttachments,
     );
     try {
       agent.session.append('schedule/change', {
@@ -739,6 +752,9 @@ export async function userScheduleEditPrompt(
       delivery,
       previousEntry?.uid,
       record.kind === 'after' ? record.afterSeconds : undefined,
+      // 附件跨「删旧建新」保留：编辑只换文案，随命令提交的图片/文件仍属于这条
+      // 提醒。新 id 无旧条目可回退，必须显式带上。
+      previousEntry?.attachments,
     );
     try {
       agent.session.append('schedule/change', { version: 1, operation: 'delete', id: scheduleId });
@@ -836,6 +852,9 @@ export async function userSchedulePause(
       ...(windowSeconds !== undefined ? { originalAfterSeconds: windowSeconds } : {}),
       lastScheduleId: scheduleId,
       pausedAt: now,
+      // 附件随条目冻结：pause 会把日志记录删除，留档是暂停项唯一的素材来源，
+      // 不带附件会让「暂停→恢复/插话」静默丢图。
+      ...(ownership?.attachments !== undefined ? { attachments: ownership.attachments } : {}),
     };
     // sidecar 先写（投影 delete 后按 lastScheduleId 挂回 paused 列表）
     recordPaused(sessionId, pausedEntry);
@@ -919,6 +938,7 @@ export async function userScheduleResume(
       paused.delivery,
       uid,
       paused.originalAfterSeconds ?? paused.remainingSeconds,
+      paused.attachments,
     );
     try {
       agent.session.append('schedule/change', {
