@@ -36,7 +36,7 @@ Click the **"Schedule send"** button to the right of the input box. The panel us
 
 ### Time formats
 
-All of these are accepted (`/schedule`, `/later`, and the panel's custom time share the same parser):
+All of these are accepted (`/schedule`, `/later`, and the panel's custom time share the same parser; the rows marked *commands only* are rejected by the panel):
 
 | Kind | Examples |
 |---|---|
@@ -44,8 +44,36 @@ All of these are accepted (`/schedule`, `/later`, and the panel's custom time sh
 | Time today | `15:32` · `9点` · `9点半` · `1532` |
 | Relative day + time | `明天9点` · `后天 10:00` |
 | Date + time | `8月21日 15:32` · `2026-08-21 15:32` · `0821-1532` |
+| Repeat, fixed interval (*commands only*) | `+1h*3 drink water` · `+30m×2 check build` |
+| Repeat, chained sequence (*commands only*) | `+1h+1h+0.5h watch the rollout` · `+1h +30m submit report` |
+| Anchor sequence (*commands only*) | `15:32+16:32+17:32 three meetings` · `9:00+1d+1d standup` · `明天9点+1h` |
+
+The three bolded rows above are **[Advanced syntax (Beta)](#configuration)** and can be switched off together in settings; every other form is unaffected.
 
 A bare time (like `1532`) rolls over to tomorrow if it has already passed today (up to 7 days). Writing `明天`/`后天` is taken literally — if that time has passed you are told to use a concrete date instead. A month/day only (like `8月21日`) rolls over to next year when this year's has passed.
+
+Multi-shot rules — **the first occurrence lands after the first interval**:
+
+| Input | Expands to |
+|---|---|
+| `+1h*3` | t+1h, t+2h, t+3h |
+| `+1h+1h+0.5h` | t+1h, t+2h, t+2.5h (chained — good for "2 h → 1 h → 30 min before the deadline" nagging) |
+| `15:32+16:32+17:32` | those three clock times today |
+| `23:00+01:00` | 23:00 today, **tomorrow** 01:00 (an earlier time in the chain rolls over, same rule as a single shot) |
+| `9:00+1d+1d` | 09:00 on three consecutive days |
+
+At most **10 tasks** per command, and multi-shot intervals must be **≥ 60 seconds** (single shots are unrestricted — `/later +5s` still works). `*`, `×` and `x` all work, an optional Chinese counter suffix is accepted (`*3次`), and the count must be followed by a space. Every occurrence is an **independent task**: cancel it, edit it or send it early on its own, and `/later` attachments are carried by each one. Absolute times (`15:32`, `明天9点`) do **not** accept `*count` — you get an explicit error instead of a silently wrong single task.
+
+Chains allow exactly **one direction: an absolute anchor, then forward accumulation.** `+1h+15:32` (a clock time after a duration) is rejected rather than guessed.
+
+One difference between anchor and relative chains (deliberate, not a bug):
+
+| Form | Stored as | Pausable | Across DST |
+|---|---|---|---|
+| `+1h*3` / `+1h+30m` (relative) | `after` | ✅ | —— |
+| `15:32+16:32` / `9:00+1d` (anchor) | `at` | ❌ (button disabled with a reason) | ✅ wall clock holds: on a fall-back day `9:00+1d` is **25 h** later and still 09:00, whereas adding 86400 s would drift to 08:00 |
+
+`+1d` advances by **calendar day**, not 86400 seconds — which is why `+1d*3` and `9:00+1d+1d` differ in zones with DST (the former counts real seconds, the latter counts wall clock). A wall clock that does not exist (the hour skipped by the spring-forward) is an error, never a silently shifted time.
 
 ### Commands
 
@@ -53,14 +81,18 @@ A bare time (like `1532`) rolls over to tomorrow if it has already passed today 
 |---|---|
 | `/schedule <time> <content>` | Create a reminder (shows up in the conversation when due) |
 | `/later <time> <content>` | Delayed send: deliver the content later as yourself |
-| `/schedule every <interval> <content>` | Recurring reminder (interval ≥ 5 min) |
+| `/later <time>*<count> <content>` | Same, expanded into N delayed sends (`+1h*3`) |
+| `/schedule <time>+<time> <content>` | Same, a chained sequence expanded into N reminders (`+1h+30m`) |
+| `/later <clock>+<clock> <content>` | Anchor sequence: expand by wall-clock instants (`15:32+16:32`, `9:00+1d+1d`) |
 
 ```
 /schedule 明天9点 提交周报
 /later 1532 提醒团队同步进度
+/later +1h*3 起来喝水
+/later +2h+1h+30m 催我交周报
 ```
 
-The model can also call user tools on your behalf to create/inspect/delete/edit reminders (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete` / `user_schedule_edit`).
+The model can also call user tools on your behalf to create/inspect/delete/edit reminders (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete` / `user_schedule_edit`). **Endlessly recurring** reminders (every hour, forever) are only reachable this way: ask the model "每小时提醒我喝水" and it creates an `every_seconds` schedule — such a task has no end condition and must be deleted by hand.
 
 ### Pending dock
 
@@ -186,6 +218,13 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | Allow long prompts | Lift the 1000-character default cap | Off |
 | Custom cap | Character cap when `allowLongPrompts` is on | 1000 |
 | Work hours / lunch / night quiet | Five HH:mm fields driving smart slots and auto-scheduling | See settings page |
+| Interjection delivery | Which queue "Send interjection" uses: own turn (default, safe) / current turn (faster, can drop in an edge case) | Own turn |
+| Delivery confirmation / on unconfirmed | Whether to verify a reminder really landed, and what to do when it isn't confirmed | On / keep |
+| Clock icon style | `auto` (by kernel version) / `modern` / `classic` | auto |
+| **Advanced syntax** (Beta) | Master switch for multi-shot forms: `+1h*3`, `+1h+1h+0.5h`, `15:32+16:32`, `9:00+1d`. When off, those forms are rejected with a pointer back to settings | **On** |
+
+> Advanced syntax is marked Beta not because it is untested (43 new unit tests cover it) but because **the expanded result still needs real-world observation**: whether 10 tasks flood the dock, and whether the 60-second floor and 10-task cap are the right sizes.
+> Turning it off does **not** restore the old silent mis-parse (`+1h*3 x` creating one task whose content is `*3 x`) — that was a bug, not a fallback. The residual-token guard is independent of this switch and always on.
 
 > Advanced: defaults can also be overridden at startup via `cordis.patch.yml` (e.g. `maxSchedules`) — see `docs/` and the schema.
 

@@ -141,6 +141,7 @@ reminders_json: [{"schedule_id":"schedule-2","occurrence_at":"2026-08-19T14:00:0
 | `lunchStart` | "午休开始" | "Lunch start" |
 | `lunchEnd` | "午休结束" | "Lunch end" |
 | `eveningEnd` | "晚间结束" | "Evening end" |
+| `advancedSyntax` | "启用多次写法（+1h*3 / 15:32+16:32）" | "Multi-shot syntax (+1h*3 / 15:32+16:32)" |
 
 ### 6.2 字段说明
 
@@ -149,8 +150,16 @@ reminders_json: [{"schedule_id":"schedule-2","occurrence_at":"2026-08-19T14:00:0
 | `maxSchedules` | "单个会话内允许创建的最大定时任务数量。" | "Maximum number of scheduled reminders allowed per session." |
 | `allowLongPrompts` | "解除默认 1000 字符的下限。开启后可用「提示字符上限」自定义最大长度。" | "Lift the default 1000-character cap. Once enabled, "Max prompt characters" lets you set a custom ceiling." |
 | `maxPromptChars` | "提醒内容最大字符数（仅在「允许长文本提醒」开启时生效）。" | "Maximum characters per reminder (takes effect only when "Allow long reminder prompts" is on)." |
+| `advancedSyntax` | "让 /later 与 /schedule 一次写多条：等间隔重复、相对序列、绝对锚点序列。每条都是可单独取消/编辑的独立任务；单次最多 10 条。" | "Let /later and /schedule create several tasks at once: fixed interval, relative chain, or anchored on a wall clock. Each occurrence is an independent task you can cancel or edit; up to 10 per command." |
 
-### 6.3 联动提示（maxPromptChars 禁用态）
+### 6.3 Beta 徽标与拒绝文案
+
+- Section 标题「高级语法」/ "Advanced syntax"，右侧徽标固定 `Beta`（不翻译，双语同一拼写）；`aria-label` 中文「Beta 功能，行为可能随版本调整」/ 英文 "Beta feature; behaviour may change between versions"。
+- 关闭该开关后的拒绝文案（`ADVANCED_SYNTAX_DISABLED`，中英暂同为中文——命令输出尚未 i18n）：
+  「多次写法（+1h\*3、+1h+1h+0.5h、15:32+16:32）属于 Beta 高级语法，当前已在设置中关闭。开启路径：设置 → 插件 → 定时提醒 → 高级语法。」
+- 拒绝文案必须**给出开启路径**，不能只说「不支持」：用户看到的是自己刚敲过的语法被拒，需要知道去哪儿改。
+
+### 6.4 联动提示（maxPromptChars 禁用态）
 
 - 中文："开启「允许长文本提醒」后可调。"
 - 英文："Adjustable after enabling "Allow long reminder prompts"."
