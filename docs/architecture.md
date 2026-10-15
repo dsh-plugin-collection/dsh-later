@@ -17,22 +17,26 @@ DSH Host
             │
             ▼ (WebSocket / HTTP)
 DSH Web Client
-└── conversation.input.right 插槽（order 50）
-    ├── SchedButton   ⏰ 打开面板
-    ├── SchedPanel    智能时段 / 自定义时间 / 预览 / 任务列表
-    └── CountdownChip 下次时间 (数量) [✕] 取消全部
+├── conversation.input.dock 插槽（id: later-dock, order 30）
+│   └── ScheduleDock  待发送提醒条：折叠头 + 每行「时间 · 倒计时 · 正文 · 进度条」+ 编辑/暂停/删除/插话
+│                     呈现对齐宿主 QueueDock，排在排队消息条之后（见 design-decisions.md §8）
+└── conversation.input.right 插槽（id: later, order 50）
+    ├── SchedButton   输入框右侧时钟按钮，打开面板
+    └── SchedPanel    智能时段 / 自定义时间 / 预览 / 任务列表（TaskList）
 ```
+
+> 侧栏会话行的状态点由 `client/session-presence.ts` 注入，不走上面两个插槽。它**不直接读** `sessions.list`，而是消费 `src/schedule-summary-store.ts`（该 store 才去读宿主 `session.list` 基线里的 `projectionValues.userSchedules`）。
 
 ## 数据流
 
 ```
 用户在面板确认
-  └─(/user-schedule:create {json})  → 宿主 handler
+  └─(/user-schedule-create {json})  → 宿主 handler
         ├─ schedule/change {create}      （dsh-schedule 可解码，互不干扰）
         └─ session-scheduler/user-schedule {add}（本插件自有）
   → session 事件日志（JSONL，服务端持久化）
   → 到期：dsh-schedule runMaintenance → followup() 注入用户角色消息
-  → 投影 userSchedules 推送 → GUI 芯片/列表更新
+  → 投影 userSchedules 推送 → dock 条与面板任务列表更新
 ```
 
 ## 调度器（`runtime.ts`）——为什么需要
@@ -58,12 +62,12 @@ dsh-later/
 │   ├── time-utils.ts         # 时间格式化（纯函数，host/client 共享；相对/绝对时间支持 zh/en）
 │   ├── owned-event-registration.ts  # 自有事件类型登记（避免历史日志拒读）
 │   └── client/
-│       ├── index.tsx         # 浏览器入口：input.right/dock 插槽注册 + 命令通道 + toast 宿主
-│       ├── styles.ts         # ss- 命名空间 Design Tokens + 组件样式 + toast/dock 编辑样式
+│       ├── index.tsx         # 浏览器入口：input.right / input.dock 两个插槽注册 + 命令通道
+│       ├── styles.ts         # ss- 命名空间组件样式（走宿主 --dsw-* / --dsh-composer-* 变量）+ dock 编辑样式
 │       ├── strings.ts        # 双语微文案字典（zh/en 键集一致）+ format 占位符
 │       ├── useSchedT.ts      # 跟随宿主 locale 的文案 hook（useSyncExternalStore）
-│       ├── toast.tsx         # 提醒到达横幅（投影差异检测触发）
-│       └── components/       # SchedButton / SchedPanel / ScheduleDock（含行内编辑）/ TaskList
+│       ├── session-presence.ts # 侧栏会话行状态点（消费 schedule-summary-store；源头是 userSchedules 投影）
+│       └── components/       # SchedButton / SchedPanel / ScheduleDock（含行内编辑）/ TaskList / SchedulerSettingsCard
 ├── tests/                    # 单元 + 集成测试（node:test，含 runtime 决策、投影形状回归、delivery 分流）
 ├── build.mjs                 # tsc(host) + 客户端类型检查 + esbuild(client)
 ├── build-client.mjs/.build-host.mjs  # 分端构建（watch 复用）
