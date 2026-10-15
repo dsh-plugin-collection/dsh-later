@@ -148,7 +148,7 @@ reminders_json: [{"schedule_id":"schedule-2","occurrence_at":"2026-08-19T14:00:0
 | key | 中文 hint | 英文 hint |
 |---|---|---|
 | `maxSchedules` | "单个会话内允许创建的最大定时任务数量。" | "Maximum number of scheduled reminders allowed per session." |
-| `allowLongPrompts` | "解除默认 1000 字符的下限。开启后可用「提示字符上限」自定义最大长度。" | "Lift the default 1000-character cap. Once enabled, "Max prompt characters" lets you set a custom ceiling." |
+| `allowLongPrompts` | "解除默认 1000 字符的上限。开启后可用「提示字符上限」自定义最大长度；关闭时该上限不生效，恒为 1000。" | "Lift the default 1000-character cap. Once enabled, "Max prompt characters" lets you set a custom ceiling; while disabled that ceiling has no effect and stays at 1000." |
 | `maxPromptChars` | "提醒内容最大字符数（仅在「允许长文本提醒」开启时生效）。" | "Maximum characters per reminder (takes effect only when "Allow long reminder prompts" is on)." |
 | `advancedSyntax` | "让 /later 与 /schedule 一次写多条：等间隔重复、相对序列、绝对锚点序列。每条都是可单独取消/编辑的独立任务；单次最多 10 条。" | "Let /later and /schedule create several tasks at once: fixed interval, relative chain, or anchored on a wall clock. Each occurrence is an independent task you can cancel or edit; up to 10 per command." |
 
