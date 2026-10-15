@@ -70,14 +70,14 @@ test('不留空类名：ss-pending 在 JSX 与 CSS 里都已消失（#32-②）'
 
 test('不可用原因走 Tooltip disabled + 原生 title，不在 aria-label 双写', () => {
   // 宿主模式：Tooltip 抑制气泡，title 承载原因，aria-label 只留动作名
-  assert.match(component, /<Tooltip label=\{t\.pauseTask\}[^>]*disabled=\{!canPauseNow\}/);
-  assert.match(component, /title=\{canPauseNow \? undefined : t\.pauseUnsupportedKind\}/);
+  assert.match(component, /<Tooltip label=\{t\('pauseTask'\)\}[^>]*disabled=\{!canPauseNow\}/);
+  assert.match(component, /title=\{canPauseNow \? undefined : t\('pauseUnsupportedKind'\)\}/);
   assert.doesNotMatch(
     component,
-    /aria-label=\{canPause\(item, now\) \? t\.pauseTask : t\.pauseUnsupportedKind\}/,
+    /aria-label=\{canPause\(item, now\) \? t\('pauseTask'\) : t\('pauseUnsupportedKind'\)\}/,
     'aria-label 不得再塞不可用原因',
   );
-  assert.match(component, /aria-label=\{t\.pauseTask\}/);
+  assert.match(component, /aria-label=\{t\('pauseTask'\)\}/);
 });
 
 test('动作区仍是同一层 DOM：四个按钮直接是 .ss-dock-actions 的子元素', () => {
