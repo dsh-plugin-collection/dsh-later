@@ -66,47 +66,47 @@
 
 ```
 dsh-later/
-├── index.js                    # Host 侧入口（注册用户工具）
-├── client.js                   # 浏览器侧入口（GUI 面板）
-├── cordis.patch.yml            # Cordis bundle patch
-├── package.json
+├── src/                          # 源码（Host + 浏览器两侧）
+│   ├── index.ts                  # Host 入口：用户工具 / 命令 / 投影 / 调度器装配
+│   ├── domain.ts                 # 事件与投影类型 + SessionEventMap/ProjectionMap/StateMap 扩展
+│   ├── user-tools.ts             # user_schedule_create / list / delete / edit + 投递 fold
+│   ├── commands.ts               # 客户端↔宿主变更通道（slash command）
+│   ├── projection.ts             # userSchedules 投影 fold（fork 隔离 + wire 契约）
+│   ├── runtime.ts                # 用户提醒调度器（武装 timer / 到期 dispatch / followup / 投递分流）
+│   ├── delivery.ts               # 投递方式分流（followup vs steer）
+│   ├── presence.ts               # Host 侧会话状态摘要（供侧栏状态点）
+│   ├── schedule-summary.ts       # 跨插件公共 API 的摘要形状
+│   ├── schedule-summary-store.ts # 摘要 store（sessions.list 基线 + 周期扫描）
+│   ├── ownership-store.ts        # 所有权 sidecar（暂停项留档）
+│   ├── smart-window.ts           # 智能时段计算（纯函数，两侧共享）
+│   ├── time-utils.ts             # 时间格式化与相对时间（两侧共享）
+│   ├── bar-geometry.ts           # dock 进度条窗口/比例（两侧共享）
+│   ├── strings.ts                # Host 侧用户可见文案（zh/en）
+│   ├── command-outcome.ts        # 命令受理语义（只回 matched）
+│   ├── owned-event-registration.ts / schedule-compat.ts / upstream-compat.ts  # 加载与跨代兼容
+│   └── client/
+│       ├── index.tsx             # 浏览器入口：conversation.input.right / input.dock 两个插槽注册 + 命令通道
+│       ├── styles.ts             # 单一注入的 ss- 命名空间样式串（走宿主 --dsw-* / --dsh-composer-* 变量）
+│       ├── strings.ts            # 浏览器侧双语微文案字典 + format 占位符
+│       ├── useSchedT.ts          # 跟随宿主 locale 的文案 hook
+│       ├── useCountdown.ts       # 1s tick
+│       ├── useScheduleSummary.ts # 摘要订阅
+│       ├── session-presence.ts   # 侧栏会话行状态点
+│       ├── local-store.ts        # localStorage 暂存（面板草稿兜底）
+│       ├── primitives-compat.ts  # primitives 能力探测（旧宿主回退）
+│       ├── types.ts / runtime-augment.d.ts
+│       ├── hooks/                # useSchedules.ts · useSchedulerSettings.ts
+│       └── components/           # SchedButton · SchedPanel · ScheduleDock · TaskList · SchedulerSettingsCard
 │
-├── lib/
-│   ├── user-tools.js           # user_schedule_create/list/delete
-│   ├── smart-window.js         # 智能时段计算
-│   ├── time-utils.js           # 时间工具函数
-│   └── validation.js           # 输入验证
-│
-├── client/
-│   ├── components/
-│   │   ├── SchedButton.tsx     # 输入框右侧按钮
-│   │   ├── SchedPanel.tsx      # 配置面板
-│   │   ├── TaskList.tsx        # 任务列表
-│   │   ├── CountdownChip.tsx   # 倒计时芯片
-│   │   └── DateTimePicker.tsx  # 日期时间选择器
-│   │
-│   ├── hooks/
-│   │   ├── useSchedules.ts     # 任务列表状态
-│   │   ├── useCountdown.ts     # 倒计时逻辑
-│   │   └── useTimeZone.ts      # 时区状态
-│   │
-│   └── styles/
-│       ├── tokens.css          # Design Tokens
-│       ├── components.css      # 组件样式
-│       └── themes/
-│           ├── light.css       # 浅色主题
-│           └── dark.css        # 深色主题
-│
-└── tests/
-    ├── unit/
-    │   ├── validation.test.js
-    │   ├── smart-window.test.js
-    │   └── time-utils.test.js
-    └── integration/
-        ├── create-flow.test.js
-        ├── dispatch-flow.test.js
-        └── recovery.test.js
+├── lib/                          # 构建产物（tsc + esbuild），不要手改、也不是源码目录
+├── tests/                        # node:test，*.test.mjs 平铺 + tests/helpers
+├── docs/                         # 本文档树
+├── build.mjs / build-client.mjs / build-host.mjs / watch.mjs
+├── cordis.patch.yml              # Cordis bundle patch
+└── package.json
 ```
+
+> 本节早期版本描述的是设计稿结构（`index.js` + `client.js` 双入口、`lib/*.js` 当源码、`CountdownChip.tsx`、`DateTimePicker.tsx`、`client/styles/*.css`、`tests/unit|integration` 分层）——这些在现仓库里都不存在：源码统一在 `src/` 下，样式是 `src/client/styles.ts` 的一个注入串，测试平铺为 `tests/*.test.mjs`，倒计时芯片已被 dock 取代。
 
 ---
 
@@ -222,43 +222,22 @@ export async function userScheduleCreate(input, ctx) {
 }
 ```
 
-### 5.3 Client 侧面板
+### 5.3 Client 侧：插槽条目 + 宿主投影 + 命令通道
 
-```javascript
-// client.js 核心逻辑
-function SchedPanel({ ctx }) {
-  const slots = ctx.get('slots');
-  const [schedules, setSchedules] = useState([]);
-  const [mode, setMode] = useState('smart');
-  
-  // 订阅 session 事件日志
-  useEffect(() => {
-    const unsub = ctx.sessions.subscribe((events) => {
-      const userSchedules = events
-        .filter(e => e.type === 'schedule/change' && e.data.source === 'user-tool')
-        .reduce(foldScheduleReducer, [])
-        .filter(s => s.state === 'scheduled' || s.state === 'overdue');
-      setSchedules(userSchedules);
-    });
-    return unsub;
-  }, []);
-  
-  // 渲染面板
-  return (
-    <Popover>
-      <Tabs>
-        <Tab label="智能时段">
-          <SmartWindow onConfirm={handleCreate} />
-        </Tab>
-        <Tab label="自定义时间">
-          <DateTimePicker onConfirm={handleCreate} />
-        </Tab>
-      </Tabs>
-      <TaskList items={schedules} onDelete={handleDelete} />
-    </Popover>
-  );
-}
-```
+> 本节此前是一段设计稿代码（`ctx.sessions.subscribe` / `foldScheduleReducer` / `Popover`+`Tabs`+`DateTimePicker`）。这些标识符在仓库里**都不存在**（`grep -rn "foldScheduleReducer" src/` = 0，`grep -rn "sessions.subscribe" src/client/` 只命中摘要/locale 的订阅，不是会话事件订阅），现按实现改写。
+
+浏览器侧不订阅会话事件日志、也不自己 fold 事件——**状态一律读宿主投影**：
+
+| 关注点 | 实现位置（按标识符找，别按行号） |
+|---|---|
+| 两个插槽条目 | `src/client/index.tsx`：`conversation.input.right`（`id: 'later'`, `order: 50`）挂 `SchedButton`；`conversation.input.dock`（`id: 'later-dock'`, `order: 30`）挂 `ScheduleDock`，即排在宿主排队消息条之后 |
+| 读任务列表 | 宿主渲染器绑定的标准 hook：`useProjection('userSchedules')`（`ScheduleDock.tsx` 与 `hooks/useSchedules.ts` 各调一次）。投影单元由 Host 侧 `src/index.ts` 经 `sessionProjections.register(userSchedulesProjectionUnit)` 注册，`src/projection.ts` 负责 fold |
+| 写（创建/删除/改/暂停/恢复/插话） | `callCommand(sessionId, line)` → `sessions.scope(sessionId)` → `sessions.sessionOf(actx)` → `face.command(line)`；创建行由 `hooks/useSchedules.ts` 的 `createLine()` 拼成 `/user-schedule-create {json}`。命令通道**只回 `{matched}`**（受理语义，见 `src/command-outcome.ts`），业务结果一律以投影为准 |
+| 面板浮层 | `SchedPanel.tsx` 用 `createPortal` 挂到 `document.body`；锚定走 `primitives-compat.ts` 的 `hasOfficialAnchoredPosition` 探测 + `usePanelAnchorPosition`（旧宿主回退分支不调 hook，保证 hook 调用序列恒定） |
+| dock 行内容 | 「`HH:MM` · 倒计时 · 正文」一行 + 进度条一行；动作为 编辑 / 暂停·恢复 / 删除 / 插话发送（`kind === 'every'` 不渲染插话） |
+| 倒计时与进度条 | `useCountdown.ts` 的 1s tick；条形的窗口/比例数学在 `src/bar-geometry.ts`（两侧共享），推进交给 CSS 动画，参数以 `--ss-bar-duration` / `--ss-bar-delay` 内联注入 |
+
+呈现层与宿主 QueueDock 的对齐边界（可复用面 / 不可顶替的原因 / 逐项漂移）见 [设计决策 §8](../design-decisions.md) 与 [notes/dock-alignment.md](../notes/dock-alignment.md)。
 
 ---
 
