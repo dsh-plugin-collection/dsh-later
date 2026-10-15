@@ -9,7 +9,7 @@
  *  - 每条可单独取消；可点击编辑图标进入行内修改内容（保留原时刻）
  * @module dsh-later/client/components/ScheduleDock
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
 import {
   IconChevronDownOutlineRegular,
@@ -216,6 +216,8 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   );
 
   const [collapsed, setCollapsed] = useState(true);
+  /** 折叠头与列表的关联 id（`aria-controls` ↔ `id`），宿主同款做法。 */
+  const listId = useId();
   /**
    * 全局唯一在途标记（issue #31/#32 收敛，对齐宿主 `busy: MessageId | null`，
    * client.js:15409 与 :15417 的 `setBusy((current) => current === itemId ? null : current)`）。
@@ -355,10 +357,48 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
     if (changed) firstSeenRef.current = next;
   }, [byId]);
 
-  // 只剩一条时回到直出态。
+  /**
+   * `editingId` 的清理（issue #31）。
+   *
+   * 编辑行是条件挂载的：`editingId` 指向的行一旦被收起、从投影里消失，或随会话切换
+   * 离开，编辑器就没了，但 `editingId` 还留着旧草稿。可复现的表现是「收起再展开 →
+   * 旧输入复活」，用户以为已经丢弃的文本会在下一次保存时被写回。
+   *
+   * 四条退出路径，各自都有归宿：
+   *  - 保存成功 → `submitEdit` 末尾调 `cancelEdit()`；
+   *  - 取消（按钮或 Esc）→ `cancelEdit()`；
+   *  - 该行从投影消失 → 下面第一个 effect；
+   *  - 切换会话 → 下面第二个 effect（`sessionId` 变化）。
+   *
+   * 判据用 `schedules`（已过滤/已排序的渲染源）而不是原始投影，与宿主一致：宿主也
+   * 是拿它渲染中的那份队列判断行是否还在（client.js:15397-15401）。
+   */
   useEffect(() => {
-    if (schedules.length <= 1) setCollapsed(true);
-  }, [schedules.length]);
+    if (editingId === null) return;
+    if (schedules.some((item) => item.id === editingId)) return;
+    setEditingId(null);
+    setEditingText('');
+    setEditErr(null);
+    setSaving(false);
+  }, [editingId, schedules]);
+
+  useEffect(() => {
+    // 会话切换：投影换成了另一整套行，旧草稿不属于这个会话。
+    setEditingId(null);
+    setEditingText('');
+    setEditErr(null);
+    setSaving(false);
+  }, [sessionId]);
+
+  /**
+   * 折叠态复位口径（issue #31/#32）：与宿主对齐后**不再需要 effect**。
+   *
+   * 旧实现的条件是 `schedules.length <= 1`，但单条本来就被 `expanded` 强制直出，
+   * 复位与不复位对界面无差异；反而是「多条展开 → 删到一条 → 再加回多条」这条路会
+   * 把用户自己展开的状态被抹掉。宿主的复位条件是队列为空（client.js:15397-15401），
+   * 而本组件在 `length === 0` 时整体返回 null（卸载），复位自然由下一次挂载的初始
+   * 值 `true` 完成——与宿主同形，所以这里两条路径都不需要 effect。
+   */
 
   if (schedules.length === 0 || sessionId === undefined) return null;
 
@@ -378,7 +418,14 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   const releaseBusy = (id: string): void => {
     setBusyId((current) => (current === id ? null : current));
   };
-  const expanded = schedules.length === 1 || !collapsed;
+  /**
+   * 交互进行中：正在编辑，或有命令在途。宿主用的是同一条判据
+   * （client.js:15405-15407 `interactionActive`），它同时做两件事——强制展开列表，
+   * 并禁用折叠头。少了后者才会有 #31 那个缺陷：编辑中点折叠把编辑器卸载，
+   * 而 `editingId` 与草稿都还在。
+   */
+  const interactionActive = editingId !== null || busy;
+  const expanded = schedules.length === 1 || !collapsed || interactionActive;
 
   const handleCancel = (id: string, status?: 'active' | 'paused'): void => {
     setBusyId(id);
@@ -671,19 +718,50 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
           <button
             type="button"
             className="ss-dock-header"
-            aria-expanded={!collapsed}
+            aria-expanded={expanded}
+            aria-controls={listId}
+            disabled={interactionActive}
             onClick={() => setCollapsed((value) => !value)}
           >
             <span className="ss-dock-lead" aria-hidden="true">
               <IconClockOutlineRegular size={16} />
             </span>
             <span className="ss-dock-count">{t('panelCount', { n: schedules.length })}</span>
+            {/*
+              折叠态也要播报异常（issue #31）：收起恰恰发生在用户不想看细节的时候，
+              而「投递未确认」正是最需要被看见的状态。位置与优先级对齐宿主 header 里的
+              `queue.sending`（client.js:15455-15458）：未确认优先于在途。
+            */}
+            {!expanded && steerUnconfirmed.size > 0 && (
+              <span className="ss-dock-status" role="status">
+                {t('statusUnconfirmed', { n: steerUnconfirmed.size })}
+              </span>
+            )}
+            {!expanded && steerUnconfirmed.size === 0 && busy && (
+              <span className="ss-dock-status" role="status">{t('sending')}</span>
+            )}
             <span className={expanded ? 'ss-dock-chevron ss-open' : 'ss-dock-chevron'} aria-hidden="true">
               <IconChevronDownOutlineRegular size={14} />
             </span>
           </button>
         )}
-        {expanded && <ul className="ss-dock-list">{schedules.map(renderRow)}</ul>}
+        {/*
+          列表常驻 DOM、用 `hidden` 控可见（宿主同款：client.js:15466-15468），这样
+          `aria-controls` 永远指向一个真实存在的目标，读屏也能跳到它。
+
+          代价与对策：进度条是 CSS 动画推进的，`display:none` 期间动画不跑，重新显示时
+          会按**挂载那一刻冻结的负 delay** 起算而偏旧（正是 #13/#16 反复处理过的相位问题）。
+          所以这里给 `<ul>` 挂一个随展开态变化的 `key`：展开即整列重挂载，`MultiBar` 的
+          相位按当前时刻重算——效果与「收起即卸载」的旧行为等价，同时保住 aria-controls 的有效性。
+        */}
+        <ul
+          id={listId}
+          className="ss-dock-list"
+          key={expanded ? 'open' : 'closed'}
+          hidden={!expanded}
+        >
+          {schedules.map(renderRow)}
+        </ul>
       </div>
     </div>
   );
