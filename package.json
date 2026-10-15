@@ -16,11 +16,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dsh-plugins/dsh-later.git"
+    "url": "git+https://github.com/dsh-plugin-collection/dsh-later.git"
   },
-  "homepage": "https://github.com/dsh-plugins/dsh-later",
+  "homepage": "https://github.com/dsh-plugin-collection/dsh-later",
   "bugs": {
-    "url": "https://github.com/dsh-plugins/dsh-later/issues"
+    "url": "https://github.com/dsh-plugin-collection/dsh-later/issues"
   },
   "type": "module",
   "main": "lib/index.js",
