@@ -749,10 +749,12 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
           列表常驻 DOM、用 `hidden` 控可见（宿主同款：client.js:15466-15468），这样
           `aria-controls` 永远指向一个真实存在的目标，读屏也能跳到它。
 
-          代价与对策：进度条是 CSS 动画推进的，`display:none` 期间动画不跑，重新显示时
-          会按**挂载那一刻冻结的负 delay** 起算而偏旧（正是 #13/#16 反复处理过的相位问题）。
-          所以这里给 `<ul>` 挂一个随展开态变化的 `key`：展开即整列重挂载，`MultiBar` 的
-          相位按当前时刻重算——效果与「收起即卸载」的旧行为等价，同时保住 aria-controls 的有效性。
+          代价与对策：进度条的相位是在**挂载那一刻**冻结的（见本文件头部 #13/#16 那条结论：
+          「CSS 动画在元素被重建时会从头播放」）。列表常驻 DOM 后，收起/展开不再触发重挂载，
+          相位就停在第一次挂载时的值。`display:none` 期间动画究竟推不推进，我没有在本机验证
+          （规范页取不到：w3.org 403、drafts.csswg.org 404），因此不作断言——但两种行为下这个
+          `key` 都是对的：展开即整列重挂载、`MultiBar` 相位按当前时刻重算，与「收起即卸载」的
+          旧行为等价，同时保住 `aria-controls` 指向一个真实存在的列表。
         */}
         <ul
           id={listId}
