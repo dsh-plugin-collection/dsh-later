@@ -8,6 +8,20 @@
  *  2. 任一动作在途时整块 dock 的动作按钮都禁用——宿主 `disabled: busy !== null` 的语义（#32-①）；
  *  3. 不留「JSX 挂了但 CSS 没有定义」的空类名（#32-②，`.ss-pending` 就是前车之鉴）；
  *  4. 不可用的原因走宿主那套分工（Tooltip `disabled` + 原生 `title`），不在 `aria-label` 里双写。
+ *
+ * 断言范围的纪律：凡是**计数类**（几处 tooltip、几个按钮引用 busy）都切到 `DockActions`
+ * 函数体里数，不在整文件数。否则 dock-editor 给保存按钮加一层 Tooltip、或 task-5 把
+ * 编辑行也接进单一 busy，都会变成**别人任务里的假失败**。全域禁令只留给
+ * `ss-dock-tip` / `ss-pending` 这类「本次明确废除、不该再出现」的名字。
+ *
+ * 层级与气泡表现**已可静态核实**（primitives 的 `files` 收录了 `lib` 目录下的 `.css`，
+ * `lib/Tooltip.module.css` 就在本机）：
+ *   - `.bubble{position:fixed; z-index:100}`，`.bubble[data-portal]{z-index:1100}`
+ *     → 我们传了 `portal`，档位与被删掉的自研气泡（1100）**一致**，不是丢失；
+ *   - `max-width:50vw` + `white-space:pre-line` + `overflow-wrap:break-word`
+ *     + `@keyframes tooltip-in` 150ms 与 `prefers-reduced-motion` 关闭——逐条同值；
+ *   - 水平 clamp 与 bottom/top 翻转走 `edgeMargin = 12`，与自研实现的 12px 同算法。
+ * 所以真机项只剩「遮挡表现」，不再需要核对数值。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,37 +35,61 @@ const styles = read('client/styles.ts');
 /** 数一下 `needle` 出现的次数（用 split，避免正则转义噪音）。 */
 const count = (haystack, needle) => haystack.split(needle).length - 1;
 
+/**
+ * `DockActions` 函数体的源码切片。
+ *
+ * 切到下一个**顶格**的顶层声明为止（顶格很关键：函数体内的 const/function 都带缩进，
+ * 不会被误判为边界），所以将来在别人后面追加顶层符号也不会串味。
+ */
+const sliceFrom = (source, marker, label) => {
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `缺少 ${label}（${marker}）`);
+  const rest = source.slice(start);
+  const nextTop = /\n(?:function |const |export |\/\* =)/.exec(rest.slice(1));
+  return nextTop ? rest.slice(0, nextTop.index + 1) : rest;
+};
+
+const actions = sliceFrom(component, 'function DockActions(', 'DockActions 函数');
+
 test('tooltip 走 primitives 的 Tooltip，自研 DockTip 已彻底移除（#29）', () => {
   // 从 primitives 具名导入，且不再从 react-dom 走 portal
   assert.match(component, /Tooltip,\n\} from '@deepseek-ai\/dsh-client-ui-primitives'/);
-  assert.doesNotMatch(component, /from 'react-dom'/, 'dock 内不应再直接用 createPortal');
-  assert.doesNotMatch(component, /function DockTip\b/);
-  assert.doesNotMatch(component, /<DockTip\b/);
-  // 组件与样式两侧都不能再留有 ss-dock-tip（自研气泡的类名）
-  assert.doesNotMatch(component, /ss-dock-tip/);
-  assert.doesNotMatch(styles, /\.ss-dock-tip\b|ss-dock-tip-in|ss-dock-tip-anchor/);
+  assert.doesNotMatch(component, /from 'react-dom'/, 'dock 内不应再直接用 createPortal（#29 改用 Tooltip 的 portal）');
+  assert.doesNotMatch(component, /function DockTip\b/, '自研 DockTip 不得复活（#29）');
+  assert.doesNotMatch(component, /<DockTip\b/, '自研 DockTip 不得复活（#29）');
+  // 这两条**故意做成全域禁令**：ss-dock-tip 是 #29 明确废除的自研气泡类名，出现在任何
+  // 位置都说明有人把 tooltip 又写回了自己实现，而不是说有人新加了一个正常样式。
+  assert.doesNotMatch(component, /ss-dock-tip/, '自研气泡类名不得再出现（#29 的决定，非本次改动的 bug）');
+  assert.doesNotMatch(styles, /\.ss-dock-tip\b|ss-dock-tip-in|ss-dock-tip-anchor/, '自研气泡 CSS 不得再出现（#29）');
 });
 
 test('Tooltip 参数与宿主 dock 一致：side bottom / delayMs 500 / portal', () => {
-  // 源码里 5 个包裹：编辑 / 恢复 / 暂停 / 删除 / 插话。暂停与恢复互斥，所以任一行渲染 4 个。
-  assert.equal(count(component, '<Tooltip label='), 5, '动作区应有 5 处 Tooltip 包裹（暂停/恢复互斥）');
-  assert.equal(count(component, 'side="bottom" delayMs={500} portal'), 5);
-  // 焦点延迟与宽度上限都留默认（宿主 dock 两处都没传），不要自作数值
-  assert.doesNotMatch(component, /focusDelayMs=\{/, 'focusDelayMs 应留默认 0，与宿主 dock 一致');
-  assert.doesNotMatch(component, /maxWidth=\{/, 'maxWidth 应留默认，与宿主 dock 一致');
-  assert.doesNotMatch(component, /z-index: 1100|zIndex/, '不得照抄宿主未公开的气层级数值');
+  // 计数只在动作区切片内做。源码里 5 个包裹：编辑 / 恢复 / 暂停 / 删除 / 插话；
+  // 暂停与恢复互斥，所以任一行渲染 4 个。
+  assert.equal(count(actions, '<Tooltip label='), 5, '动作区应有 5 处 Tooltip 包裹（暂停/恢复互斥）');
+  assert.equal(count(actions, 'side="bottom" delayMs={500} portal'), 5);
+  // 动作区这 5 处不自作焦点延迟与宽度上限（宿主 dock 两处都没传；50vw 上限由
+  // Tooltip.module.css 自带）。别处要用 maxWidth 不受这条约束——所以禁令也只落在切片上。
+  assert.doesNotMatch(actions, /focusDelayMs=\{/, '动作区 focusDelayMs 留默认 0，与宿主 dock 一致');
+  assert.doesNotMatch(actions, /maxWidth=\{/, '动作区 maxWidth 留默认（Tooltip.module.css 已给 max-width:50vw）');
+  // 层级由 Tooltip.module.css 承担：portal 档 1100，与被删的自研气泡同值（见文件头核实记录），
+  // 所以这里禁的是「插件侧再自己声明一层」，而不是「层级无法得知」。
+  assert.doesNotMatch(actions, /zIndex|z-index/, '层级归 Tooltip 自带，动作区不该再声明');
 });
 
 test('任一动作在途时整块 dock 的动作按钮都不可点（#32-① 全局 busy 锁）', () => {
-  // busy 由现成的在途集合派生，不新增状态；且不纳入 cancelling（其清尾有 2.5s 延时）
+  // busy 由现成的在途集合派生，不新增状态；且不纳入 cancelling（其清尾有 2.5s 延时）。
+  // ⚠ task-5（单一 busy 收敛）**故意**会把这几条改写掉：那正是本测试想守住的取舍被
+  //   推翻的时刻，请在改代码的同一次提交里显式更新这里，不要当假失败删掉断言。
   assert.match(
     component,
     /busy=\{steering\.size > 0 \|\| pausing\.size > 0 \|\| resuming\.size > 0 \|\| saving\}/,
     'busy 需覆盖插话/暂停/恢复/编辑保存四类在途',
   );
   assert.doesNotMatch(component, /busy=\{[^}]*cancelling/, 'cancelling 有 2.5s 清尾，不得进全局锁');
-  // 四个动作全部引用 busy
-  assert.equal(count(component, 'disabled={busy'), 4, '编辑/恢复/删除/插话都要引用全局 busy');
+  // 四个动作全部引用 busy——只在动作区切片内数：dock-editor 若把保存按钮也接进 busy，
+  // 该引用出现在编辑行（他的区），不该让这里的计数假失败。
+  assert.equal(count(actions, 'disabled={busy'), 4, '编辑/恢复/删除/插话都要引用全局 busy');
   // 删除按钮此前「只写不读」：现在必须真正参与禁用
   assert.match(component, /disabled=\{busy \|\| cancellingNow\}/);
   assert.match(component, /cancellingNow=\{cancelling\.has\(item\.id\)\}/, 'cancelling 必须被读取，否则又是死状态');
