@@ -87,3 +87,39 @@ test('动作区仍是同一层 DOM：四个按钮直接是 .ss-dock-actions 的�
   // 完成态的着色仍挂在动作按钮类上（自研气泡删除时容易顺手带歪这条规则）
   assert.match(styles, /\.ss-dock-action-steer\.ss-done \{ color: var\(--dsw-alias-state-success-primary\); \}/);
 });
+
+/** 取 styles.ts 里某条规则的源码片段（数组元素拼接，故按标记行切）。 */
+const ruleSlice = (from, to) => {
+  const start = styles.indexOf(from);
+  const end = to === null ? styles.length : styles.indexOf(to);
+  assert.notEqual(start, -1, `缺少规则 ${from}`);
+  assert.ok(end > start, `规则 ${from} 之后找不到 ${to}`);
+  return styles.slice(start, end);
+};
+
+test('#32 两条 CSS 像素漂移已对齐宿主：corner-shape 与两层描边（task-7）', () => {
+  // ① .ss-dock-action 显式声明 corner-shape: round（宿主 ._action 有这条）。round 本就是
+  //    该属性的初始值，所以这条是**逐字对齐**、不是视觉修复；断言只保证它存在且确实落在这条
+  //    规则里，别被挪到别的规则上。
+  assert.match(styles, /\.ss-dock-action \{',\n' {2}corner-shape: round;/);
+
+  // ② 描边从 ::before 挪到 ::after，粗细改宿主 hairline；::before 只剩背景层。
+  const beforeBlock = ruleSlice("'.ss-dock-body::before {", "'.ss-dock-body::after {");
+  assert.doesNotMatch(beforeBlock, /border:/, '::before 只该画背景，不得再带描边');
+  assert.match(beforeBlock, /background: var\(--dsw-specific-menu\)/);
+  assert.match(beforeBlock, /backdrop-filter: var\(--dsw-menu-backdrop-filter\)/);
+  assert.match(beforeBlock, /z-index: -1/);
+
+  const afterBlock = ruleSlice("'.ss-dock-body::after {", "'.ss-dock-header");
+  assert.match(afterBlock, /border: \.5px solid var\(--dsw-alias-border-l1\); border-bottom: none;/);
+  assert.match(afterBlock, /border-radius: inherit/);
+  assert.match(afterBlock, /position: absolute; inset: 0;/);
+  assert.match(afterBlock, /pointer-events: none/);
+
+  // dock 面板这两层里都不该再留 1px 的 alias-border-l1 描边（其它组件的 1px 不在此范围）
+  assert.doesNotMatch(
+    ruleSlice("'.ss-dock-body::before {", "'.ss-dock-header"),
+    /border: 1px solid var\(--dsw-alias-border-l1\)/,
+    'dock 面板描边必须是 .5px，与宿主一致',
+  );
+});
