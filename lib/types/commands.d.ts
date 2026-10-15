@@ -142,12 +142,12 @@ export declare function userScheduleCommands(ctx: Context, getSettings?: number 
     allowLongPrompts?: boolean;
     maxPromptChars?: number;
     advancedSyntax?: boolean;
-}), onUserChange?: UserChangeNotifier, onUserSteer?: UserSteerHandler): CommandDefinition[];
+}), onUserChange?: UserChangeNotifier, onUserSteer?: UserSteerHandler, getLocale?: () => string | undefined): CommandDefinition[];
 /** 注册三个命令，返回统一 disposer。 */
 export declare function registerUserScheduleCommands(ctx: Context, getSettings?: number | (() => number) | (() => {
     maxSchedules: number;
     allowLongPrompts?: boolean;
     maxPromptChars?: number;
     advancedSyntax?: boolean;
-}), onUserChange?: UserChangeNotifier, onUserSteer?: UserSteerHandler): () => void;
+}), onUserChange?: UserChangeNotifier, onUserSteer?: UserSteerHandler, getLocale?: () => string | undefined): () => void;
 export {};
