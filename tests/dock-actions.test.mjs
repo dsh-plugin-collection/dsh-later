@@ -78,25 +78,50 @@ test('Tooltip 参数与宿主 dock 一致：side bottom / delayMs 500 / portal',
 });
 
 test('任一动作在途时整块 dock 的动作按钮都不可点（#32-① 全局 busy 锁）', () => {
-  // busy 由现成的在途集合派生，不新增状态；且不纳入 cancelling（其清尾有 2.5s 延时）。
-  // ⚠ task-5（单一 busy 收敛）**故意**会把这几条改写掉：那正是本测试想守住的取舍被
-  //   推翻的时刻，请在改代码的同一次提交里显式更新这里，不要当假失败删掉断言。
+  /*
+   * ⚠ 本条断言在 task-5（issue #31/#32）被**显式改写**，不是被删：原写法守的是
+   * 「busy 由 steering/pausing/resuming 派生，且故意不含 cancelling（它有 2.5s 清尾）」
+   * 这个取舍。单一 busyId 收敛把这个取舍废掉了——2.5s 尾巴删掉后，cancelling 并入
+   * 全局锁不再有「一次删除锁死整块 dock 2.5 秒」的代价，于是三个行内标记也同时失去
+   * 用处（禁用判据已被 busy 覆盖，而「本行在途」早在 #32-② 就没了视觉承载）。
+   * 现在守的是更强的性质：**在途只有一条规则**，容不得第二套回来。
+   */
+  // 全局锁的唯一定义：busyId（四类动作共用）+ 编辑保存中。
   assert.match(
     component,
-    /busy=\{steering\.size > 0 \|\| pausing\.size > 0 \|\| resuming\.size > 0 \|\| saving\}/,
-    'busy 需覆盖插话/暂停/恢复/编辑保存四类在途',
+    /const busy = busyId !== null \|\| saving;/,
+    'busy 需覆盖插话/暂停/恢复/删除四类在途 + 编辑保存',
   );
-  assert.doesNotMatch(component, /busy=\{[^}]*cancelling/, 'cancelling 有 2.5s 清尾，不得进全局锁');
+  assert.match(component, /busy=\{busy\}/, '调用点复用同一条派生，不再内联抄第二遍');
+  // 按 id 释放：迟到的回执不得顶掉期间新发起的请求（宿主同形，client.js:15417）。
+  assert.match(
+    component,
+    /setBusyId\(\(current\) => \(current === id \? null : current\)\)/,
+    '释放必须按 id，否则并发的旧回执会误清新的锁',
+  );
+  assert.match(component, /\.finally\(\(\) => releaseBusy\(id\)\)/, '删除要在 finally 里走同一条释放路径');
+  // 2.5s 清尾必须消失，否则删除会把整块 dock 锁住 2.5 秒。
+  assert.doesNotMatch(component, /\}, 2500\);/, 'handleCancel 的 2.5s 尾巴应随收敛一起删除');
+  // 按**代码形状**禁令，不按 token 禁令：组件里留着解释这段沿革的注释，提到旧名字是
+  // 故意的（lead 要求不得静默删注释），全局 token 禁令会把说明文字也判成违规。
+  assert.doesNotMatch(
+    component,
+    /const \[(cancelling|steering|pausing|resuming),/,
+    '分动作的在途集合不得复活（它们最容易漏读，见 #32-①）',
+  );
+  assert.doesNotMatch(
+    actions,
+    /\|\| (cancellingNow|resumingNow|pausingNow|steeringNow)\}/,
+    '动作区不得再叠加第二套行内在途判据',
+  );
   // 四个动作全部引用 busy——只在动作区切片内数：dock-editor 若把保存按钮也接进 busy，
   // 该引用出现在编辑行（他的区），不该让这里的计数假失败。
   assert.equal(count(actions, 'disabled={busy'), 4, '编辑/恢复/删除/插话都要引用全局 busy');
-  // 删除按钮此前「只写不读」：现在必须真正参与禁用
-  assert.match(component, /disabled=\{busy \|\| cancellingNow\}/);
-  assert.match(component, /cancellingNow=\{cancelling\.has\(item\.id\)\}/, 'cancelling 必须被读取，否则又是死状态');
-  // 各自的行内在途标记仍叠加在 busy 之上（语义冗余但保留可读性）
-  assert.match(component, /disabled=\{busy \|\| resumingNow\}/);
-  assert.match(component, /disabled=\{!canPauseNow \|\| busy \|\| pausingNow\}/);
-  assert.match(component, /disabled=\{busy \|\| steeringNow \|\| steerDone\}/);
+  // 删除按钮此前「只写不读」；现在它由全局锁直接禁用。
+  assert.match(actions, /disabled=\{busy\}[\s\S]{0,60}onClick=\{onDelete\}/, '删除按钮必须真正参与禁用');
+  // 暂停保留自身可用性判据、插话保留完成态，二者都再叠 busy。
+  assert.match(actions, /disabled=\{!canPauseNow \|\| busy\}/);
+  assert.match(actions, /disabled=\{busy \|\| steerDone\}/);
 });
 
 test('不留空类名：ss-pending 在 JSX 与 CSS 里都已消失（#32-②）', () => {
