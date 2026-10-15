@@ -516,7 +516,17 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     setSaving(false);
   };
 
-  const submitEdit = (id: string): void => {
+  /**
+   * 保存行内编辑。**入参是整条任务**而不是 id：只有暂停项才需要本地文案覆盖。
+   *
+   * 长度上限**不在这里校验**，也不该由输入框 `maxLength` 截断——1000 在仓内已是
+   * 第三处硬编码（另两处 `src/commands.ts:718/875/884`），而 host 有
+   * `allowLongPrompts` / `maxPromptChars` 设置（`src/index.ts:64-65`）。客户端静默
+   * 截断、创建路径不截，同一字段就会有两套规则。改成不设上限，交给 host 的
+   * `validatePrompt`（`src/user-tools.ts:93-110`：超限回 `invalid_prompt` + 实际
+   * 上限数字）判定。
+   */
+  const submitEdit = (item: ClientSchedule): void => {
     const trimmed = editingText.trim();
     if (trimmed.length === 0) {
       setEditErr(t.editErrEmpty);
@@ -524,13 +534,27 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     }
     setSaving(true);
     setEditErr(null);
-    void callCommand(sessionId, editLine(id, trimmed)).then((outcome) => {
+    void callCommand(sessionId, editLine(item.id, trimmed)).then((outcome) => {
       if (!outcome.matched) {
         setEditErr(format(t.editErrFailed, { message: t.editErrNotAccepted }));
         return;
       }
-      // 编辑暂停项时宿主不写会话事件 → 投影仍是旧文案，本地先覆盖以立刻反映新内容。
-      setPromptOverrides((current) => new Map(current).set(id, trimmed));
+      /**
+       * 只有暂停项需要本地覆盖，未暂停的一律交给投影。
+       *
+       * 暂停项的编辑只改 sidecar、**不写会话事件** → 不会有新投影帧，行内会一直显示
+       * 旧文案，所以本地先覆盖（失效条件见上方 `promptOverrides` 的 effect：投影一旦
+       * 采纳同一文案就自动退场）。
+       *
+       * 未暂停的项相反：成功必有 `schedule/change` 帧、投影就是权威文案；被拒（例如
+       * 超长）则不会有帧。两种情况都**不能**盖本地覆盖——客户端拿不到业务结果
+       * （`RemoteResult<{matched}>`，见 `src/command-outcome.ts`），一旦被拒还把用户
+       * 刚输入的文案贴到行上，界面就在宣称「改好了」而 host 里仍是旧值。宁可显示
+       * 未变的旧文案。
+       */
+      if (item.status === 'paused') {
+        setPromptOverrides((current) => new Map(current).set(item.id, trimmed));
+      }
       cancelEdit();
     }).catch(() => {
       setEditErr(format(t.editErrFailed, { message: t.editErrCommandFailed }));
@@ -543,25 +567,19 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     if (editingId === item.id) {
       return (
         <li key={item.id} className="ss-dock-row ss-editing" data-ss-dock-row={item.id}>
-          <input
-            className="ss-dock-edit-input"
-            value={editingText}
-            maxLength={1000}
-            autoFocus
+          <DockEditor
+            text={editingText}
+            label={t.editTask}
             disabled={saving}
-            onChange={(event) => setEditingText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') submitEdit(item.id);
-              else if (event.key === 'Escape') cancelEdit();
-              event.stopPropagation();
-            }}
-            aria-label={`${t.editTask}: ${item.prompt}`}
+            onChange={setEditingText}
+            onSave={() => submitEdit(item)}
+            onCancel={cancelEdit}
           />
           <button
             type="button"
             className="ss-dock-row-save"
             disabled={saving || editingText.trim().length === 0}
-            onClick={() => submitEdit(item.id)}
+            onClick={() => submitEdit(item)}
           >
             {saving ? '…' : t.editSave}
           </button>
@@ -899,5 +917,93 @@ function DockTip({ label, children }: { label: string; children: JSX.Element }) 
           document.body
         )}
     </>
+  );
+}
+
+/* ==================== DockEditor：行内编辑器（宿主 QueueDock 的 QueueEditor 同款） ==================== */
+
+/**
+ * dock 的行内编辑器。为什么单独成组件、为什么必须是 `textarea`、为什么没有
+ * `stopPropagation()`：
+ *
+ *  - **textarea 而非 input**：HTML 会从单行 `input` 的 value 里剥掉换行，于是「编辑
+ *    一条多行提醒」实际等于把它改写成一整行——正文被静默改坏。宿主 QueueEditor 的
+ *    注释写明了同一点（`@deepseek-ai/dsh-client-ui-conversation`，QueueDock.js）。
+ *
+ *  - **自适应高度用宿主算法**：先 `height='auto'`，再回填 `scrollHeight + offsetHeight
+ *    - clientHeight`（= 内容高度 + 边框/上下 padding 的差额）。上限交给 CSS
+ *    `max-height`（宿主 127px），到顶后 textarea 自己滚动，行高不再长。
+ *
+ *  - **IME 守卫**：`Enter` 保存必须先挡 `event.nativeEvent.isComposing`。中文输入法
+ *    里「按 Enter 把候选词上屏」与「按 Enter 提交」是同一个 keydown，缺这道守卫就会
+ *    在打完第一个词时把半截正文提交掉（#30 的核心缺陷）。`shiftKey` 走换行、不提交。
+ *
+ *  - **不调 `stopPropagation()`**（旧代码有、宿主没有）。逐条查过：它挡不住任何本该
+ *    挡的东西，却会挡住不该挡的东西。
+ *    1) composer 的 Enter 提交绑在草稿编辑器元素上（`ui-conversation` 里的
+ *       `keyboard.submit(…)`），而 dock 是 `.composerStack` 下 `inputBar` 的**兄弟**
+ *       子树（`renderSlot("conversation.input.dock", zone)`），事件不会经过它；
+ *    2) 全局快捷键监听在 window **捕获阶段**（`dsh-client-shortcuts`：
+ *       `addEventListener("keydown", capture, true)`），冒泡阶段的 stopPropagation
+ *       对已经执行完的捕获监听无效；且它自带 `region: "editable"` 判定
+ *       （`closest("input, textarea, select, [contenteditable…]")`），裸 Enter 也不在
+ *       允许注册的组合里；
+ *    3) 反过来，冒泡阶段的 document 监听**确实**会被掐掉——宿主 ContextMeter 的 Esc、
+ *       agent-team 的 dismiss、`ui-schedule` 的 document keydown 都在这一层。旧写法把
+ *       它放在 if/else **之外**，等于编辑框里每一个键（含普通打字与 Esc）都不再冒泡到
+ *       document。
+ *
+ *    所以只保留 `preventDefault()`（不加的话 textarea 的 Enter 默认会往正文里插一个
+ *    换行），去掉 `stopPropagation()`。
+ */
+function DockEditor({
+  text,
+  label,
+  disabled,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  /** 当前编辑中的正文。 */
+  text: string;
+  /** 无障碍标签：与宿主一致只描述动作，正文本身就在框里，不重复进标签。 */
+  label: string;
+  /** 提交在途：禁编辑，避免重复提交。 */
+  disabled: boolean;
+  /** 正文变化。 */
+  onChange: (value: string) => void;
+  /** Enter 或保存按钮。 */
+  onSave: () => void;
+  /** Esc。 */
+  onCancel: () => void;
+}): JSX.Element {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    /* v8 ignore next -- ref 在 layout effect 之前已经挂上 */
+    if (node === null) return;
+    node.style.height = 'auto';
+    node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
+  }, [text]);
+  return (
+    <textarea
+      ref={ref}
+      autoFocus
+      rows={1}
+      className="ss-dock-edit-input"
+      aria-label={label}
+      value={text}
+      disabled={disabled}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          onCancel();
+          return;
+        }
+        if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        onSave();
+      }}
+    />
   );
 }
