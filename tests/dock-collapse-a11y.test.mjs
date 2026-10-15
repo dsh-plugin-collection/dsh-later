@@ -47,8 +47,9 @@ test('折叠头与列表建立 ARIA 关联，列表常驻 DOM（#31）', () => {
   // 用 hidden 保 DOM（宿主同款），不是条件卸载——否则折叠时 aria-controls 指向空引用。
   assert.match(root, /hidden=\{!expanded\}/, '列表应常驻 DOM，用 hidden 控制可见性');
   assert.doesNotMatch(root, /\{expanded && <ul/, '不得退回「折叠即卸载列表」的旧写法');
-  // 相位补偿：收起时 CSS 动画不推进，重展开要按当前时刻重算，故整列随展开态换 key 重挂载。
-  assert.match(root, /key=\{expanded \? 'open' : 'closed'\}/, '重展开需重挂载，否则进度条相位停在旧时刻');
+  // 相位补偿：进度条的相位在**挂载那一刻**冻结（组件头部 #13/#16 的结论），列表常驻 DOM 后
+  // 展开不再触发重挂载，所以随展开态换 key 强制重挂载——与旧的「收起即卸载」等价。
+  assert.match(root, /key=\{expanded \? 'open' : 'closed'\}/, '重展开需重挂载，否则相位停在第一次挂载时');
 });
 
 test('编辑或命令在途时强制展开，并禁用折叠头（#31 根因）', () => {
