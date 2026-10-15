@@ -66,6 +66,8 @@ const zh = {
   dueAnyMoment: '即将发送',
   /** 状态 */
   sending: '正在发送…',
+  /** dock 折叠头的状态摘要（issue #31：收起时也要播报「未确认」） */
+  statusUnconfirmed: '{n} 条未确认',
   /** 确认按钮 */
   confirmAdd: '加入 · {time} 发送',
   confirmAddNoTime: '选择发送时间',
@@ -144,6 +146,8 @@ const en: { [K in keyof typeof zh]: string } = {
   countdownLeft: 'in',
   dueAnyMoment: 'Sending soon',
   sending: 'Sending…',
+  /** dock collapsed-header status summary (issue #31) */
+  statusUnconfirmed: '{n} unconfirmed',
   confirmAdd: 'Add · send at {time}',
   confirmAddNoTime: 'Pick a send time',
   promptFromDraft: 'The composer draft will be used as the reminder content',
