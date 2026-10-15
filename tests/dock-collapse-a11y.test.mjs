@@ -10,7 +10,9 @@
  *  3. `editingId` 的四条退出路径都有归宿，不留活口；
  *  4. 折叠态要播报「未确认」，且优先级高于「处理中」——收起恰恰发生在用户不想看
  *     细节的时候，最需要看见的东西不能只在展开时可见；
- *  5. 折叠复位不再用 `schedules.length <= 1` 那条旧 effect（与宿主归一条件不一致）。
+ *  5. 折叠复位不再用 `schedules.length <= 1` 那条旧 effect（与宿主归一条件不一致）；
+ *  6. 折叠态摘要在 `styles.ts` 里**有自己的规则**——JSX 挂上 class 不代表样式存在，
+ *     本轮就出现过 `.ss-dock-status` 只有 JSX、CSS 里零定义的情况。
  *
  * 断言范围纪律同 `dock-actions.test.mjs`：计数类只在对应切片内做，全域禁令只留给
  * 本次明确废除的写法。
@@ -24,6 +26,7 @@ const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), 'u
 
 const component = read('client/components/ScheduleDock.tsx');
 const strings = read('client/strings.ts');
+const styles = read('client/styles.ts');
 
 /** 数一下 `needle` 出现的次数。 */
 const count = (haystack, needle) => haystack.split(needle).length - 1;
@@ -124,4 +127,15 @@ test('折叠复位口径与宿主一致，旧的 length<=1 effect 不得复活�
   );
   // 列表为空时整块返回 null（卸载），复位由下次挂载的初始值完成——与宿主同形。
   assert.match(component, /if \(schedules\.length === 0 \|\| sessionId === undefined\) return null;/);
+});
+
+test('折叠态摘要必须有自己的 CSS 规则，逐值对齐宿主 .status（#31/#32）', () => {
+  // 闭合用 `'},` 而不是 `}`：styles.ts 里 CSS 是数组元素，规则的收尾行带引号。
+  // 早先 panelRule() 就是因为找 `\n\}` 而一路吃到文件末尾，把断言作用域整虚了。
+  const rule = /\.ss-dock-status \{([\s\S]*?)\n'}/.exec(styles);
+  assert.ok(rule !== null, 'styles.ts 要有 .ss-dock-status——缺了它摘要按继承样式渲染，等于没设计');
+  const body = rule[1];
+  assert.match(body, /color: var\(--dsw-alias-label-tertiary\)/, '色档对齐宿主 .status');
+  assert.match(body, /font: var\(--dsw-font-xs-13\)/, '字号对齐宿主 .status');
+  assert.match(body, /white-space: nowrap; flex: none;/, '不换行，否则窄输入框下会顶高 36px 的 header');
 });
