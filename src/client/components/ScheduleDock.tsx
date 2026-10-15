@@ -9,7 +9,7 @@
  *  - 每条可单独取消；可点击编辑图标进入行内修改内容（保留原时刻）
  * @module dsh-later/client/components/ScheduleDock
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
 import {
   IconChevronDownOutlineRegular,
@@ -216,14 +216,26 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   );
 
   const [collapsed, setCollapsed] = useState(true);
-  const [cancelling, setCancelling] = useState<ReadonlySet<string>>(new Set());
+  /** 折叠头与列表的关联 id（`aria-controls` ↔ `id`），宿主同款做法。 */
+  const listId = useId();
+  /**
+   * 全局唯一在途标记（issue #31/#32 收敛，对齐宿主 `busy: MessageId | null`，
+   * client.js:15409 与 :15417 的 `setBusy((current) => current === itemId ? null : current)`）。
+   *
+   * 旧形态是四个按动作分开的 id 集合（`cancelling`/`steering`/`pausing`/`resuming`）。
+   * 它们只有两个用处：派生全局锁、标注「本行在途」；而后者早已没有视觉承载
+   * （#32-② 清掉的那三个空挂类名），留着只是两套规则的风险面——
+   * `cancelling` 当初正因漏被读取而变成死状态（#32-①），它的清尾又带 2.5s 延时，
+   * 并入全局锁会让一次删除把整块 dock 锁死 2.5 秒。宿主没这个负担：一条命令在途、
+   * 其余全部禁用、回执落地立即释放。这里照同一形态做。
+   */
+  const [busyId, setBusyId] = useState<string | null>(null);
   // 行内编辑状态：正在编辑的 schedule id → 当前输入
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [editErr, setEditErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // 插话发送：tracking 每个 id 的状态（idle / pending / done / failed-with-code）。
-  const [steering, setSteering] = useState<ReadonlySet<string>>(new Set());
+  // 插话发送的完成/失败态跟踪（在途态已并入上面的 `busyId`）。
   const [steerDone, setSteerDone] = useState<ReadonlySet<string>>(new Set());
   const [steerErr, setSteerErr] = useState<ReadonlyMap<string, string>>(new Map());
   /**
@@ -287,9 +299,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
     return () => window.clearTimeout(timer);
   }, [steerDone, projection]);
 
-  // 暂停 / 恢复
-  const [pausing, setPausing] = useState<ReadonlySet<string>>(new Set());
-  const [resuming, setResuming] = useState<ReadonlySet<string>>(new Set());
+  // 暂停 / 恢复的失败原因（在途标记已并入 `busyId`）。
   const [pauseErr, setPauseErr] = useState<ReadonlyMap<string, string>>(new Map());
 
   // 进度条起点：首次见到任务 id 的本地时刻（仅 at 类任务需要）。
@@ -347,19 +357,78 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
     if (changed) firstSeenRef.current = next;
   }, [byId]);
 
-  // 只剩一条时回到直出态。
+  /**
+   * `editingId` 的清理（issue #31）。
+   *
+   * 编辑行是条件挂载的：`editingId` 指向的行一旦被收起、从投影里消失，或随会话切换
+   * 离开，编辑器就没了，但 `editingId` 还留着旧草稿。可复现的表现是「收起再展开 →
+   * 旧输入复活」，用户以为已经丢弃的文本会在下一次保存时被写回。
+   *
+   * 四条退出路径，各自都有归宿：
+   *  - 保存成功 → `submitEdit` 末尾调 `cancelEdit()`；
+   *  - 取消（按钮或 Esc）→ `cancelEdit()`；
+   *  - 该行从投影消失 → 下面第一个 effect；
+   *  - 切换会话 → 下面第二个 effect（`sessionId` 变化）。
+   *
+   * 判据用 `schedules`（已过滤/已排序的渲染源）而不是原始投影，与宿主一致：宿主也
+   * 是拿它渲染中的那份队列判断行是否还在（client.js:15397-15401）。
+   */
   useEffect(() => {
-    if (schedules.length <= 1) setCollapsed(true);
-  }, [schedules.length]);
+    if (editingId === null) return;
+    if (schedules.some((item) => item.id === editingId)) return;
+    setEditingId(null);
+    setEditingText('');
+    setEditErr(null);
+    setSaving(false);
+  }, [editingId, schedules]);
+
+  useEffect(() => {
+    // 会话切换：投影换成了另一整套行，旧草稿不属于这个会话。
+    setEditingId(null);
+    setEditingText('');
+    setEditErr(null);
+    setSaving(false);
+  }, [sessionId]);
+
+  /**
+   * 折叠态复位口径（issue #31/#32）：与宿主对齐后**不再需要 effect**。
+   *
+   * 旧实现的条件是 `schedules.length <= 1`，但单条本来就被 `expanded` 强制直出，
+   * 复位与不复位对界面无差异；反而是「多条展开 → 删到一条 → 再加回多条」这条路会
+   * 把用户自己展开的状态被抹掉。宿主的复位条件是队列为空（client.js:15397-15401），
+   * 而本组件在 `length === 0` 时整体返回 null（卸载），复位自然由下一次挂载的初始
+   * 值 `true` 完成——与宿主同形，所以这里两条路径都不需要 effect。
+   */
 
   if (schedules.length === 0 || sessionId === undefined) return null;
 
   const next = schedules[0];
   if (next === undefined) return null;
-  const expanded = schedules.length === 1 || !collapsed;
+  /**
+   * 整块 dock 是否有命令在途——宿主的同一条判据（`disabled: busy !== null`）。
+   * `saving` 是行内编辑的「保存中」标记，属 dock-editor 的区，这里只读并入。
+   */
+  const busy = busyId !== null || saving;
+  /**
+   * 释放全局锁。**按 id 释放**：迟到的回执只能清掉自己那一次，不得顶掉期间新发起的
+   * 请求（宿主同款写法，client.js:15417）。这也是去掉删除的 2.5s 尾巴后仍然安全的
+   * 前提——`handleCancel` 的 `restore()` 回滚与 `finally` 走同一条释放路径，
+   * 不会留下永久禁用的按钮。
+   */
+  const releaseBusy = (id: string): void => {
+    setBusyId((current) => (current === id ? null : current));
+  };
+  /**
+   * 交互进行中：正在编辑，或有命令在途。宿主用的是同一条判据
+   * （client.js:15405-15407 `interactionActive`），它同时做两件事——强制展开列表，
+   * 并禁用折叠头。少了后者才会有 #31 那个缺陷：编辑中点折叠把编辑器卸载，
+   * 而 `editingId` 与草稿都还在。
+   */
+  const interactionActive = editingId !== null || busy;
+  const expanded = schedules.length === 1 || !collapsed || interactionActive;
 
   const handleCancel = (id: string, status?: 'active' | 'paused'): void => {
-    setCancelling((current) => new Set(current).add(id));
+    setBusyId(id);
     /** 撤销本地摘除（命令未被受理时回滚，避免行无谓消失）。 */
     const restore = (): void => {
       setDismissedPaused((current) => {
@@ -379,15 +448,15 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
         if (!outcome.matched) restore();
       })
       .catch(restore)
-      .finally(() => {
-        window.setTimeout(() => {
-          setCancelling((current) => {
-            const nextSet = new Set(current);
-            nextSet.delete(id);
-            return nextSet;
-          });
-        }, 2500);
-      });
+      /**
+       * 回执落地**立即**释放全局锁，不再等 2.5s。
+       *
+       * 那 2.5s 原本是留给「删除暂停项 → 本地摘除 → 投影帧收敛」的观察窗，但暂停项的
+       * 摘除已由 `dismissedPaused` 的粘性保证、未被受理时 `restore()` 又会把行放回来，
+       * 锁不需要替它代班。并入 `busy` 之后若还留这条尾巴，一次删除会把整块 dock
+       * 按住 2.5 秒——比它原本要防的问题更糟（issue #31/#32）。
+       */
+      .finally(() => releaseBusy(id));
   };
 
   /**
@@ -406,7 +475,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   const handleSteer = (item: ClientSchedule): void => {
     const id = item.id;
     const wasPaused = item.status === 'paused';
-    setSteering((current) => new Set(current).add(id));
+    setBusyId(id);
     setSteerErr((current) => {
       const next = new Map(current);
       next.delete(id);
@@ -431,13 +500,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
       .catch(() => {
         setSteerErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setSteering((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(id));
   };
 
   /**
@@ -466,7 +529,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   const handlePause = (item: ClientSchedule): void => {
     const id = item.id;
     if (!canPause(item, now)) return;
-    setPausing((current) => new Set(current).add(id));
+    setBusyId(id);
     setPauseErr((current) => {
       const next = new Map(current);
       next.delete(id);
@@ -481,18 +544,12 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
       .catch(() => {
         setPauseErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setPausing((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(id));
   };
 
   const handleResume = (item: ClientSchedule): void => {
     const uid = item.id;
-    setResuming((current) => new Set(current).add(uid));
+    setBusyId(uid);
     setPauseErr((current) => {
       const next = new Map(current);
       next.delete(uid);
@@ -507,13 +564,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
       .catch(() => {
         setPauseErr((current) => new Map(current).set(uid, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setResuming((current) => {
-          const next = new Set(current);
-          next.delete(uid);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(uid));
   };
 
   const startEdit = (item: ClientSchedule): void => {
@@ -648,11 +699,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
           t={t}
           paused={isPaused}
           canPauseNow={canPause(item, now)}
-          busy={steering.size > 0 || pausing.size > 0 || resuming.size > 0 || saving}
-          pausingNow={pausing.has(item.id)}
-          resumingNow={resuming.has(item.id)}
-          steeringNow={steering.has(item.id)}
-          cancellingNow={cancelling.has(item.id)}
+          busy={busy}
           steerDone={steerDone.has(item.id)}
           onEdit={() => startEdit(item)}
           onPause={() => handlePause(item)}
@@ -671,19 +718,52 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
           <button
             type="button"
             className="ss-dock-header"
-            aria-expanded={!collapsed}
+            aria-expanded={expanded}
+            aria-controls={listId}
+            disabled={interactionActive}
             onClick={() => setCollapsed((value) => !value)}
           >
             <span className="ss-dock-lead" aria-hidden="true">
               <IconClockOutlineRegular size={16} />
             </span>
             <span className="ss-dock-count">{t('panelCount', { n: schedules.length })}</span>
+            {/*
+              折叠态也要播报异常（issue #31）：收起恰恰发生在用户不想看细节的时候，
+              而「投递未确认」正是最需要被看见的状态。位置与优先级对齐宿主 header 里的
+              `queue.sending`（client.js:15455-15458）：未确认优先于在途。
+            */}
+            {!expanded && steerUnconfirmed.size > 0 && (
+              <span className="ss-dock-status" role="status">
+                {t('statusUnconfirmed', { n: steerUnconfirmed.size })}
+              </span>
+            )}
+            {!expanded && steerUnconfirmed.size === 0 && busy && (
+              <span className="ss-dock-status" role="status">{t('sending')}</span>
+            )}
             <span className={expanded ? 'ss-dock-chevron ss-open' : 'ss-dock-chevron'} aria-hidden="true">
               <IconChevronDownOutlineRegular size={14} />
             </span>
           </button>
         )}
-        {expanded && <ul className="ss-dock-list">{schedules.map(renderRow)}</ul>}
+        {/*
+          列表常驻 DOM、用 `hidden` 控可见（宿主同款：client.js:15466-15468），这样
+          `aria-controls` 永远指向一个真实存在的目标，读屏也能跳到它。
+
+          代价与对策：进度条的相位是在**挂载那一刻**冻结的（见本文件头部 #13/#16 那条结论：
+          「CSS 动画在元素被重建时会从头播放」）。列表常驻 DOM 后，收起/展开不再触发重挂载，
+          相位就停在第一次挂载时的值。`display:none` 期间动画究竟推不推进，我没有在本机验证
+          （规范页取不到：w3.org 403、drafts.csswg.org 404），因此不作断言——但两种行为下这个
+          `key` 都是对的：展开即整列重挂载、`MultiBar` 相位按当前时刻重算，与「收起即卸载」的
+          旧行为等价，同时保住 `aria-controls` 指向一个真实存在的列表。
+        */}
+        <ul
+          id={listId}
+          className="ss-dock-list"
+          key={expanded ? 'open' : 'closed'}
+          hidden={!expanded}
+        >
+          {schedules.map(renderRow)}
+        </ul>
       </div>
     </div>
   );
@@ -824,22 +904,18 @@ interface DockActionsProps {
   /** 本行此刻是否可暂停（与 host 校验一致，由调用方算好）。 */
   canPauseNow: boolean;
   /**
-   * 整块 dock 是否有请求在途。对齐宿主 QueueDock 的 `disabled: busy !== null`
-   * （client.js:15523/15552/15571/15592）：任一动作在途时**所有**行的动作按钮都不可点，
-   * 避免两条命令并发提交。
+   * 整块 dock 是否有命令在途。对齐宿主 QueueDock 的 `disabled: busy !== null`
+   * （client.js:15523/15552/15571/15592）：任一动作在途时**所有**行的动作按钮都不可点。
+   *
+   * **口径变更（issue #31/#32，勿当成误删）**：这里曾有 `pausingNow` / `resumingNow` /
+   * `steeringNow` / `cancellingNow` 四个「本行在途」标记，其中 `cancellingNow` 是
+   * **故意不并入**全局锁的——删除的清尾带着命令返回后 2.5s 的延时，并入会让一次删除
+   * 把整块 dock 锁住 2.5 秒。现在那条尾巴已去掉、在途标记收敛成单一 `busyId`
+   * （按 id 释放，见组件内 `releaseBusy`），四个标记同时失去了两个用处：禁用判据
+   * `busy` 已覆盖它们，而「本行在途」早没有视觉承载（#32-② 清掉了那几个空挂类名）。
+   * 留着只会长出第二套规则——`cancelling` 变成死状态（#32-①）就是这么来的。
    */
   busy: boolean;
-  /** 以下三个是本行对应动作的在途标记（与 `busy` 叠加，语义上冗余但保留各自的可读性）。 */
-  pausingNow: boolean;
-  resumingNow: boolean;
-  steeringNow: boolean;
-  /**
-   * 本行删除是否在途。
-   *
-   * **不并入全局 `busy`**：`cancelling` 的清尾是命令返回后 2.5s（见 `handleCancel` 的
-   * `finally`），纳入全局锁会让一次删除把整块 dock 锁住 2.5 秒。所以它只禁用本行的删除按钮。
-   */
-  cancellingNow: boolean;
   /** 本行是否已插话成功（按钮转完成态并禁用）。 */
   steerDone: boolean;
   onEdit: () => void;
@@ -855,10 +931,6 @@ function DockActions({
   paused,
   canPauseNow,
   busy,
-  pausingNow,
-  resumingNow,
-  steeringNow,
-  cancellingNow,
   steerDone,
   onEdit,
   onPause,
@@ -885,7 +957,7 @@ function DockActions({
             type="button"
             className="ss-dock-action ss-paused-active"
             aria-label={t('resumeTask')}
-            disabled={busy || resumingNow}
+            disabled={busy}
             onClick={onResume}
           >
             <IconPlayOutlineRegular size={16} />
@@ -900,7 +972,7 @@ function DockActions({
             className="ss-dock-action"
             aria-label={t('pauseTask')}
             title={canPauseNow ? undefined : t('pauseUnsupportedKind')}
-            disabled={!canPauseNow || busy || pausingNow}
+            disabled={!canPauseNow || busy}
             onClick={onPause}
           >
             <IconPauseOutlineRegular size={16} />
@@ -912,7 +984,7 @@ function DockActions({
           type="button"
           className="ss-dock-action"
           aria-label={t('deleteTask')}
-          disabled={busy || cancellingNow}
+          disabled={busy}
           onClick={onDelete}
         >
           <IconTrashOutlineRegular size={14} />
@@ -924,7 +996,7 @@ function DockActions({
             type="button"
             className={`ss-dock-action ss-dock-action-steer${steerDone ? ' ss-done' : ''}`}
             aria-label={steerDone ? t('steerAlreadySent') : t('steerTask')}
-            disabled={busy || steeringNow || steerDone}
+            disabled={busy || steerDone}
             onClick={onSteer}
           >
             <IconSendOutlineRegular size={16} />
