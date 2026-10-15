@@ -40,6 +40,7 @@ import type {
 } from './user-tools.js';
 import { name, SETTINGS_NAMESPACE } from './domain.js';
 import { registerOwnedSessionEventType } from './owned-event-registration.js';
+import { hostDictFor, hostFormat } from './strings.js';
 
 /** 插件配置 schema（全可选，默认开箱即用；经 cordis config 覆盖）。 */
 /**
@@ -125,7 +126,7 @@ export const Config: z = s.object({
 const SchedulerSettingsSchema = Config;
 
 /** 所需服务（延后激活，缺失时插件不加载）。 */
-export const inject = ['agents', 'sessions', 'tools', 'commands', 'settings'];
+export const inject = ['agents', 'sessions', 'tools', 'commands', 'settings', 'locale'];
 
 /** 解析配置（容错非法值回落默认）。 */
 function resolveMaxSchedules(value: number | undefined): number {
@@ -220,29 +221,30 @@ function registerUserScheduleTools(
   toolCtx: Context,
   agent: Agent,
   getSettings: () => SchedulerSettings,
+  getLocale: () => string | undefined,
   onUserChange: (agent: Agent) => void,
 ): () => void {
   const dispose = () => undefined;
   try {
+    const t = hostDictFor(getLocale());
+    const maxChars = resolveSchedulerPromptLimits(getSettings()).maxChars;
     const disposers = [
       toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_create',
-          // description 在每次 register 时按当前 settings 生成：
+          // description 在每次 register 时按当前 settings + locale 生成：
           // 模型看到的字符上限始终与宿主实际校验一致，避免描述与实现脱节。
-          description:
-            '为用户创建一条当前会话内的定时提醒。必须提供非空提示与恰好一个选择器：after_seconds（正整数延时秒）、at（显式偏移时间或 {date,time,time_zone} 本地时间）、every_seconds（≥300 的固定间隔秒）。time_zone 可选，缺省用会话检测时区。创建来源被标记为用户工具，GUI 面板会展示。' +
-            'every_seconds 是**无结束条件**的固定间隔（会一直发下去，直到用户删除）；用户说了次数上限（如「每小时提醒我一次，持续 3 次」）时不要用 every_seconds，改为**逐条调用本工具 N 次**、每次用 at 给出对应的绝对时刻（t+1h、t+2h、t+3h）。',
+          description: t.toolCreateDesc,
           parameters: {
             prompt: {
               type: 'string',
               required: true,
-              description: `提醒内容（trim 后非空，≤${resolveSchedulerPromptLimits(getSettings()).maxChars} 字符；超过会返回 invalid_prompt）。`,
+              description: hostFormat(t.paramPromptDesc, { maxChars }),
             },
-            after_seconds: { type: 'number', description: '正整数延时秒数。' },
-            every_seconds: { type: 'number', description: '固定间隔秒数，至少 300；无结束条件（有次数上限请改为逐条创建 at）。' },
+            after_seconds: { type: 'number', description: t.paramAfterSecondsDesc },
+            every_seconds: { type: 'number', description: t.paramEverySecondsDesc },
             at: {
-              description: '绝对目标：显式偏移的 RFC 3339 字符串，或 {date, time, time_zone} 本地日历对象。',
+              description: t.paramAtDesc,
               oneOf: [
                 { type: 'string' },
                 {
@@ -256,7 +258,7 @@ function registerUserScheduleTools(
                 },
               ],
             },
-            time_zone: { type: 'string', description: 'IANA 时区（如 Asia/Shanghai）；可选，缺省用会话检测时区。' },
+            time_zone: { type: 'string', description: t.paramTimeZoneDesc },
           },
           output: {
             schema: { type: 'string' },
@@ -282,13 +284,13 @@ function registerUserScheduleTools(
             }
             return JSON.stringify(result);
           },
-          presentCall: (args) => present('创建定时提醒', 'other', (args as { prompt?: unknown })?.prompt),
+          presentCall: (args) => present(t.presentCreate, 'other', (args as { prompt?: unknown })?.prompt),
         }),
       ),
       toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_list',
-          description: '列出当前会话内用户创建的活动定时提醒（含 id、UTC 目标、scheduled/overdue 状态、投递模式）。',
+          description: t.toolListDesc,
           parameters: {},
           output: {
             schema: { type: 'string' },
@@ -299,15 +301,15 @@ function registerUserScheduleTools(
             const result = await userScheduleList(agent, rootCtx);
             return JSON.stringify(result);
           },
-          presentCall: () => present('列出定时提醒', 'read'),
+          presentCall: () => present(t.presentList, 'read'),
         }),
       ),
       toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_delete',
-          description: '按 user_schedule_create / user_schedule_list 返回的精确 id 删除一条活动提醒；未知或已结束返回 deleted:false。',
+          description: t.toolDeleteDesc,
           parameters: {
-            id: { type: 'string', required: true, description: '精确会话内 schedule id。' },
+            id: { type: 'string', required: true, description: t.paramIdDesc },
           },
           output: {
             schema: { type: 'string' },
@@ -325,7 +327,7 @@ function registerUserScheduleTools(
             }
             return JSON.stringify(result);
           },
-          presentCall: (args) => present('删除定时提醒', 'other', (args as { id?: unknown })?.id),
+          presentCall: (args) => present(t.presentDelete, 'other', (args as { id?: unknown })?.id),
         }),
       ),
     ];
@@ -524,7 +526,10 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
 
   // 2. slash 命令（客户端变更通道），全局注册一次。
   ctx.effect(
-    () => registerUserScheduleCommands(ctx, getSettings, notifyUserChange, notifyUserSteer),
+    () => {
+      const getLocale = () => ctx.get('locale')?.getSnapshot().active;
+      return registerUserScheduleCommands(ctx, getSettings, notifyUserChange, notifyUserSteer, getLocale);
+    },
     'later.commands()',
   );
 
@@ -539,7 +544,8 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
       let cleanup: () => void = () => undefined;
       try {
         cleanup = agent.ctx.effect(() => {
-          const disposeTools = registerUserScheduleTools(ctx, agent.ctx, agent, getSettings, notifyUserChange);
+          const getLocale = () => ctx.get('locale')?.getSnapshot().active;
+          const disposeTools = registerUserScheduleTools(ctx, agent.ctx, agent, getSettings, getLocale, notifyUserChange);
           const stopStatus = agent.ctx.on('agent/status', ({ status }: { status: string }) => {
             // 自愈：agent 转 idle 时重算（与 dsh-schedule 同构），覆盖被遗漏的重驱。
             if (status === 'idle') runtime.requestDrive();

@@ -27,6 +27,7 @@ import type { PromptLimits } from './user-tools.js';
 import { DEFAULT_MAX_SCHEDULES } from './user-tools.js';
 import { epochFromLocal, localFieldsOf } from './smart-window.js';
 import { detectTimeZone, formatAbsolute, formatHhmm, formatRelative } from './time-utils.js';
+import { hostDictFor } from './strings.js';
 
 /** 用户创建/删除成功后的通知回调（宿主用它重驱用户调度器）。 */
 export type UserChangeNotifier = (agent: Agent) => void;
@@ -864,7 +865,9 @@ export function userScheduleCommands(
     | (() => { maxSchedules: number; allowLongPrompts?: boolean; maxPromptChars?: number; advancedSyntax?: boolean }) = DEFAULT_MAX_SCHEDULES,
   onUserChange?: UserChangeNotifier,
   onUserSteer?: UserSteerHandler,
+  getLocale?: () => string | undefined,
 ): CommandDefinition[] {
+  const t = hostDictFor(getLocale?.());
   const resolveSettings = (): { maxSchedules: number; limits: PromptLimits; advancedSyntax: boolean } => {
     if (typeof getSettings === 'function') {
       const value = getSettings();
@@ -882,7 +885,7 @@ export function userScheduleCommands(
   };
   const create: CommandDefinition = {
     name: `${PREFIX}-create`,
-    description: '创建一条会话内定时提醒（GUI 内部通道）。',
+    description: t.cmdLaterDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = parsePayload(invocation.rawInput);
@@ -903,7 +906,7 @@ export function userScheduleCommands(
 
   const list: CommandDefinition = {
     name: `${PREFIX}-list`,
-    description: '列出当前会话用户创建的定时提醒（GUI 内部通道）。',
+    description: t.cmdListDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const result = await userScheduleList(invocation.agent, ctx);
@@ -916,7 +919,7 @@ export function userScheduleCommands(
 
   const del: CommandDefinition = {
     name: `${PREFIX}-delete`,
-    description: '删除一条会话内定时提醒（GUI 内部通道）。',
+    description: t.cmdDeleteDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = parsePayload(invocation.rawInput);
@@ -939,7 +942,7 @@ export function userScheduleCommands(
 
   const edit: CommandDefinition = {
     name: `${PREFIX}-edit`,
-    description: '修改一条会话内定时提醒的内容（保留原时刻；GUI 内部通道）。',
+    description: t.cmdEditDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = parsePayload(invocation.rawInput);
@@ -962,7 +965,7 @@ export function userScheduleCommands(
   /** 暂停 after 提醒：sidecar 留档 + 日志 delete（GUI ⏸）。 */
   const pause: CommandDefinition = {
     name: `${PREFIX}-pause`,
-    description: '暂停一条 after 类定时提醒（仅 GUI 内部通道；已到点不可暂停）。',
+    description: t.cmdPauseDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = parsePayload(invocation.rawInput);
@@ -984,7 +987,7 @@ export function userScheduleCommands(
   /** 恢复暂停项：after_seconds=remaining 重建；uid 不变、日志 id 会变。 */
   const resume: CommandDefinition = {
     name: `${PREFIX}-resume`,
-    description: '恢复一条已暂停的 after 提醒（仅 GUI 内部通道）。',
+    description: t.cmdResumeDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = parsePayload(invocation.rawInput);
@@ -1009,7 +1012,7 @@ export function userScheduleCommands(
   // 仅 one-shot 支持；every 类提醒因 batch framing 需要更多 plumbing 暂未开放。
   const steer: CommandDefinition = {
     name: `${PREFIX}-steer-now`,
-    description: '插话发送：把指定 id 的提醒立即推给 agent（仅 one-shot；GUI 内部通道）。',
+    description: t.cmdSteerDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       if (onUserSteer === undefined) {
@@ -1163,8 +1166,9 @@ export function registerUserScheduleCommands(
     | (() => { maxSchedules: number; allowLongPrompts?: boolean; maxPromptChars?: number; advancedSyntax?: boolean }) = DEFAULT_MAX_SCHEDULES,
   onUserChange?: UserChangeNotifier,
   onUserSteer?: UserSteerHandler,
+  getLocale?: () => string | undefined,
 ): () => void {
-  const disposers = userScheduleCommands(ctx, getSettings, onUserChange, onUserSteer).map((definition) => {
+  const disposers = userScheduleCommands(ctx, getSettings, onUserChange, onUserSteer, getLocale).map((definition) => {
     try {
       return ctx.commands.register(definition);
     } catch (error) {
