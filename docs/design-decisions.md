@@ -89,3 +89,66 @@ dsh-schedule 的 runtime 只在其自身工具变更 / agent 转 idle 时重驱�
 1. `domain.ts` 同时扩展 `SessionProjectionMap` 与 `SessionProjectionStateMap`；投影单元按 rc.2 形状写（`stateSchema` + `wire`）。
 2. `package.json` 的 `@deepseek-ai/dsh-session-projection` 对齐 `^0.1.1-rc.2`（peer + dev）。
 3. `tests/projection-unit.test.mjs` **运行时**锁定形状（旧形状会被判为 NOT client-visible），不依赖 registry 是否装得上 rc.2 类型。
+
+## 8. dock 对齐宿主的边界：抄什么 / 不抄什么 / 为什么顶替不了宿主条目
+
+「待发送提醒 dock 呈现对齐宿主 QueueDock」这条约束此前**只活在源码注释里**（`ScheduleDock.tsx` 文件头、`styles.ts` 的分节注释），全仓 md 无一处提及。本节把它固化，并记录 2026-10 对「能不能直接复用宿主那块」的实测结论。
+
+> 下文宿主事实基于安装态 `@deepseek-ai/dsh-client-ui-*@0.2.0-rc.2`。引用宿主时优先用**导出名 / CSS 类语义 / 选择器**这类不随版本漂移的锚；bundle 行号只作定位辅助，rc 升级后会变。
+
+### 8.1 三条实测结论（决定了后面的做法）
+
+**结论一：宿主 `QueueDock` 组件本体拿不到。**
+
+| 检查 | 结果 |
+|---|---|
+| 运行时导出面 | `dsh-client-ui-conversation/lib/client.js` 尾部 `exports.` 名单为 `apply / inject / Config / ConversationController / ConversationDefinitionRegistry / ConversationEventRegistry / ConversationLocationIndex / ConversationNodeAssembler / ConversationViewRegistry / UiConversation / EMPTY_CONVERSATION_SNAPSHOT / UnsupportedImageMediaTypeError / conversationPhase / inspectRequestPrompt` —— **没有 `QueueDock`，也没有 `queueDockEntry`** |
+| 类型 ≠ 实现 | `lib/types/client/queue/QueueDock.d.ts` 随包发布，但同目录**没有同名运行时 `.js`**；实现只存在于 bundle 内部（深路径 import 只会拿到类型） |
+| `./src/*` 导出 | `package.json` 的 `exports` 声明了 `"./src/*"`，而 `files` 只含 `lib/index.js`、`lib/client.js`、`lib/types/**/*.d.ts` → 安装包里**没有 src 目录**，该导出是 monorepo 用的死路径 |
+| 类名 | CSS module 构建期哈希（`_7yHdaG_dock` 这类），唯一稳定 hook 是属性 `[data-queue-dock]` |
+
+**结论二：插槽层面也顶替不了宿主的队列条。** `list` 槽的注册冲突判据是**「同 `id` 且同 `priority`」**（`dsh-client-ui-slots` 的 `SlotCore.register()`，`case "list"` 分支）；priority 不同则两条都收进 entries，按 `priority → order` 升序**全部渲染**。也就是说插件用 `id: 'queue'` 换个 priority 注册，得到的是**两条队列条**，不是替换。`single` / `keyed` 才有 shadow 语义，`list` 没有；也没有从外部 dispose 别家条目的 API。
+
+**结论三：宿主自己也没在复用外壳。** 同一个 `conversation.input.dock` 里的三个宿主 occupants —— `todo`（order 0）、`goal`（order 10）、`queue`（order 20）—— 各自实现一份壳、各自一份 CSS module；`dsh-client-ui-goal` 的 dock 同样自己引用 `--dsh-composer-dock-inset` / `--dsh-composer-side-clearance`。它们只共享 **CSS 变量契约**，不共享组件。
+
+> 由此：**插件复制一份 dock 壳，是 0.2.0-rc.2 的官方用法**，不是走偏。代价没有消失，只是转移成「宿主壳一改就得人工追平」——所以本节同时确立 8.4 的核对表与 8.5 的护栏。
+
+### 8.2 抄什么（有契约保障，可直接依赖）
+
+| 可复用面 | 依据 |
+|---|---|
+| 插槽与位置：`conversation.input.dock`（`kind: list, scope: session`），本插件 `id: 'later-dock'`、`order: 30`，排在队列条之后 | 宿主 `SlotMap` 声明；三个宿主 occupants 的 order 构成 0/10/20 的既有梯度 |
+| 外壳几何变量：`--dsh-composer-side-clearance` / `--dsh-composer-dock-inset` / `--dsh-composer-card-max-width` / `--dsh-composer-stack-gap`，含负下边距贴进 composer 栈 + 顶部圆角 + 留底边开口 | 宿主 `.dock` / `.panel` 用的就是这几个变量，插件按同一 calc 抄 |
+| 设计 token：全部走 `--dsw-*`（描边、圆角、字体、菜单面、focus ring、滚动条别名），插件不自定义色值 | `styles.ts` dock 段实测只出现 `--dsw-*` / `--ds-*` / `--dsh-composer-*` 与三个 `--ss-bar-*` |
+| session 标准件：`sessionId`、`useProjection` 由渲染器绑定后作为 props 下发 | `dsh-client-ui-renderer` 的 `standardKit()` |
+| 基元：`@deepseek-ai/dsh-client-ui-primitives` 的图标、`Tooltip`、`projectUserText`、`FileTypeIcon` | `Tooltip` 是公共导出；其 `TooltipSuppression` context 默认值为 `null`，**无 provider 也能独立使用** |
+
+### 8.3 不抄什么（条目模型不同，硬套会更糟）
+
+宿主的队列是 **turn-scoped**：条目来自 `inbox["next-turn"]` 投影，在下一个 turn 边界被消费（宿主 `busyEnter` 只有 `queue` / `steer` 两档）。本插件的提醒是 **clock-scoped**，且有宿主动作面没有的状态。
+
+- 宿主条目模型是固定的 `content blocks`，**没有 `scheduledAt` / `status` / `paused_remaining_seconds` 可挂**；`QueueAction` 只有 `edit` / `remove` / `steer` 三个动作，没有暂停/恢复。
+- 宿主 `SlotMap` 里**没有任何行级插槽**（`conversation.*` 下只有 dock 级 list），所以「给宿主每一行加时间/倒计时/暂停」在现有 API 下只能靠 DOM 注水。
+- 宿主 dock 的动作受 `queueMutable`（子会话地址是否可续写）与 `running` 门控；把提醒挂进去会让可用性被会话态意外接管。
+- 因此**保留**插件自有的：时间显示、倒计时、`role="progressbar"` 的进度条（`bar-geometry.ts` 的窗口/冻结比与 CSS 动画相位）、暂停/恢复、投递未确认的观察窗对账。
+- 同样**不**把 `locale` 绑到宿主 `conversation` NS 复用 `queue.*` 词条：那些串写着「排队消息」，语义不对，且属宿主私有 key 面（见 #28）。
+
+### 8.4 差异核对表在哪
+
+像素与行为级差异逐项记在 **[notes/dock-alignment.md](./notes/dock-alignment.md)**（宿主值 / 插件现值 / 处置 / 谁改）。新增 dock 样式前先查那张表；改动宿主壳的对齐项时同步更新它，不要只改代码。
+
+### 8.5 #32 这一轮的执行分工（2026-10，避免与并行改动撞车）
+
+Gitea #32 原是一条混合 issue，按区域归属拆开执行：
+
+| #32 的条目 | 本轮归属 | 说明 |
+|---|---|---|
+| `cancelling` 死状态（只写不读，删除按钮无在途反馈）、`.ss-pending` 有 JSX 无 CSS | **动作区**（#29 Tooltip 那条分支一并处理） | 都在 `ss-dock-actions` 的按钮渲染里，与 Tooltip 替换同区 |
+| 像素漂移（描边 `.5px` vs `1px`、row 圆角字面 `8px` vs `var(--dsw-radius-md)`、`corner-shape: round`、chevron 换图标 vs `rotate(180deg)`） | **Lead，集成后统一改** | 跨 `styles.ts` 与组件两处，避免三个分支各自改 CSS 造成合并冲突 |
+| 词条迁移进 `locale.register` + 插槽 `locale` seat | #28 | |
+| 行内编辑 textarea + IME 守卫 | #30 | |
+| 折叠 / `aria-controls` / `hidden` / header 禁用 / 折叠态状态播报 | #31 | |
+| 本 ADR、`notes/dock-alignment.md`、过期文档同步 | #32 文档部分（本节） | |
+
+**护栏**：`[data-queue-dock]` 是宿主唯一稳定的选择器 hook。做任何 dock 对齐改动时，把真队列条与提醒条**同屏**截图比对（`scripts/capture/` 可复用），而不是只对着单条 dock 调 —— 上一轮「1px vs .5px 描边」这类漂移就是这么漏掉的。
+
