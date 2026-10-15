@@ -216,14 +216,24 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   );
 
   const [collapsed, setCollapsed] = useState(true);
-  const [cancelling, setCancelling] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * 全局唯一在途标记（issue #31/#32 收敛，对齐宿主 `busy: MessageId | null`，
+   * client.js:15409 与 :15417 的 `setBusy((current) => current === itemId ? null : current)`）。
+   *
+   * 旧形态是四个按动作分开的 id 集合（`cancelling`/`steering`/`pausing`/`resuming`）。
+   * 它们只有两个用处：派生全局锁、标注「本行在途」；而后者早已没有视觉承载
+   * （#32-② 清掉的那三个空挂类名），留着只是两套规则的风险面——
+   * `cancelling` 当初正因漏被读取而变成死状态（#32-①），它的清尾又带 2.5s 延时，
+   * 并入全局锁会让一次删除把整块 dock 锁死 2.5 秒。宿主没这个负担：一条命令在途、
+   * 其余全部禁用、回执落地立即释放。这里照同一形态做。
+   */
+  const [busyId, setBusyId] = useState<string | null>(null);
   // 行内编辑状态：正在编辑的 schedule id → 当前输入
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [editErr, setEditErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // 插话发送：tracking 每个 id 的状态（idle / pending / done / failed-with-code）。
-  const [steering, setSteering] = useState<ReadonlySet<string>>(new Set());
+  // 插话发送的完成/失败态跟踪（在途态已并入上面的 `busyId`）。
   const [steerDone, setSteerDone] = useState<ReadonlySet<string>>(new Set());
   const [steerErr, setSteerErr] = useState<ReadonlyMap<string, string>>(new Map());
   /**
@@ -287,9 +297,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
     return () => window.clearTimeout(timer);
   }, [steerDone, projection]);
 
-  // 暂停 / 恢复
-  const [pausing, setPausing] = useState<ReadonlySet<string>>(new Set());
-  const [resuming, setResuming] = useState<ReadonlySet<string>>(new Set());
+  // 暂停 / 恢复的失败原因（在途标记已并入 `busyId`）。
   const [pauseErr, setPauseErr] = useState<ReadonlyMap<string, string>>(new Map());
 
   // 进度条起点：首次见到任务 id 的本地时刻（仅 at 类任务需要）。
@@ -356,10 +364,24 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
 
   const next = schedules[0];
   if (next === undefined) return null;
+  /**
+   * 整块 dock 是否有命令在途——宿主的同一条判据（`disabled: busy !== null`）。
+   * `saving` 是行内编辑的「保存中」标记，属 dock-editor 的区，这里只读并入。
+   */
+  const busy = busyId !== null || saving;
+  /**
+   * 释放全局锁。**按 id 释放**：迟到的回执只能清掉自己那一次，不得顶掉期间新发起的
+   * 请求（宿主同款写法，client.js:15417）。这也是去掉删除的 2.5s 尾巴后仍然安全的
+   * 前提——`handleCancel` 的 `restore()` 回滚与 `finally` 走同一条释放路径，
+   * 不会留下永久禁用的按钮。
+   */
+  const releaseBusy = (id: string): void => {
+    setBusyId((current) => (current === id ? null : current));
+  };
   const expanded = schedules.length === 1 || !collapsed;
 
   const handleCancel = (id: string, status?: 'active' | 'paused'): void => {
-    setCancelling((current) => new Set(current).add(id));
+    setBusyId(id);
     /** 撤销本地摘除（命令未被受理时回滚，避免行无谓消失）。 */
     const restore = (): void => {
       setDismissedPaused((current) => {
@@ -379,15 +401,15 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
         if (!outcome.matched) restore();
       })
       .catch(restore)
-      .finally(() => {
-        window.setTimeout(() => {
-          setCancelling((current) => {
-            const nextSet = new Set(current);
-            nextSet.delete(id);
-            return nextSet;
-          });
-        }, 2500);
-      });
+      /**
+       * 回执落地**立即**释放全局锁，不再等 2.5s。
+       *
+       * 那 2.5s 原本是留给「删除暂停项 → 本地摘除 → 投影帧收敛」的观察窗，但暂停项的
+       * 摘除已由 `dismissedPaused` 的粘性保证、未被受理时 `restore()` 又会把行放回来，
+       * 锁不需要替它代班。并入 `busy` 之后若还留这条尾巴，一次删除会把整块 dock
+       * 按住 2.5 秒——比它原本要防的问题更糟（issue #31/#32）。
+       */
+      .finally(() => releaseBusy(id));
   };
 
   /**
@@ -406,7 +428,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   const handleSteer = (item: ClientSchedule): void => {
     const id = item.id;
     const wasPaused = item.status === 'paused';
-    setSteering((current) => new Set(current).add(id));
+    setBusyId(id);
     setSteerErr((current) => {
       const next = new Map(current);
       next.delete(id);
@@ -431,13 +453,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
       .catch(() => {
         setSteerErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setSteering((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(id));
   };
 
   /**
@@ -466,7 +482,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
   const handlePause = (item: ClientSchedule): void => {
     const id = item.id;
     if (!canPause(item, now)) return;
-    setPausing((current) => new Set(current).add(id));
+    setBusyId(id);
     setPauseErr((current) => {
       const next = new Map(current);
       next.delete(id);
@@ -481,18 +497,12 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
       .catch(() => {
         setPauseErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setPausing((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(id));
   };
 
   const handleResume = (item: ClientSchedule): void => {
     const uid = item.id;
-    setResuming((current) => new Set(current).add(uid));
+    setBusyId(uid);
     setPauseErr((current) => {
       const next = new Map(current);
       next.delete(uid);
@@ -507,13 +517,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
       .catch(() => {
         setPauseErr((current) => new Map(current).set(uid, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setResuming((current) => {
-          const next = new Set(current);
-          next.delete(uid);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(uid));
   };
 
   const startEdit = (item: ClientSchedule): void => {
@@ -648,11 +652,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
           t={t}
           paused={isPaused}
           canPauseNow={canPause(item, now)}
-          busy={steering.size > 0 || pausing.size > 0 || resuming.size > 0 || saving}
-          pausingNow={pausing.has(item.id)}
-          resumingNow={resuming.has(item.id)}
-          steeringNow={steering.has(item.id)}
-          cancellingNow={cancelling.has(item.id)}
+          busy={busy}
           steerDone={steerDone.has(item.id)}
           onEdit={() => startEdit(item)}
           onPause={() => handlePause(item)}
@@ -824,22 +824,18 @@ interface DockActionsProps {
   /** 本行此刻是否可暂停（与 host 校验一致，由调用方算好）。 */
   canPauseNow: boolean;
   /**
-   * 整块 dock 是否有请求在途。对齐宿主 QueueDock 的 `disabled: busy !== null`
-   * （client.js:15523/15552/15571/15592）：任一动作在途时**所有**行的动作按钮都不可点，
-   * 避免两条命令并发提交。
+   * 整块 dock 是否有命令在途。对齐宿主 QueueDock 的 `disabled: busy !== null`
+   * （client.js:15523/15552/15571/15592）：任一动作在途时**所有**行的动作按钮都不可点。
+   *
+   * **口径变更（issue #31/#32，勿当成误删）**：这里曾有 `pausingNow` / `resumingNow` /
+   * `steeringNow` / `cancellingNow` 四个「本行在途」标记，其中 `cancellingNow` 是
+   * **故意不并入**全局锁的——删除的清尾带着命令返回后 2.5s 的延时，并入会让一次删除
+   * 把整块 dock 锁住 2.5 秒。现在那条尾巴已去掉、在途标记收敛成单一 `busyId`
+   * （按 id 释放，见组件内 `releaseBusy`），四个标记同时失去了两个用处：禁用判据
+   * `busy` 已覆盖它们，而「本行在途」早没有视觉承载（#32-② 清掉了那几个空挂类名）。
+   * 留着只会长出第二套规则——`cancelling` 变成死状态（#32-①）就是这么来的。
    */
   busy: boolean;
-  /** 以下三个是本行对应动作的在途标记（与 `busy` 叠加，语义上冗余但保留各自的可读性）。 */
-  pausingNow: boolean;
-  resumingNow: boolean;
-  steeringNow: boolean;
-  /**
-   * 本行删除是否在途。
-   *
-   * **不并入全局 `busy`**：`cancelling` 的清尾是命令返回后 2.5s（见 `handleCancel` 的
-   * `finally`），纳入全局锁会让一次删除把整块 dock 锁住 2.5 秒。所以它只禁用本行的删除按钮。
-   */
-  cancellingNow: boolean;
   /** 本行是否已插话成功（按钮转完成态并禁用）。 */
   steerDone: boolean;
   onEdit: () => void;
@@ -855,10 +851,6 @@ function DockActions({
   paused,
   canPauseNow,
   busy,
-  pausingNow,
-  resumingNow,
-  steeringNow,
-  cancellingNow,
   steerDone,
   onEdit,
   onPause,
@@ -885,7 +877,7 @@ function DockActions({
             type="button"
             className="ss-dock-action ss-paused-active"
             aria-label={t('resumeTask')}
-            disabled={busy || resumingNow}
+            disabled={busy}
             onClick={onResume}
           >
             <IconPlayOutlineRegular size={16} />
@@ -900,7 +892,7 @@ function DockActions({
             className="ss-dock-action"
             aria-label={t('pauseTask')}
             title={canPauseNow ? undefined : t('pauseUnsupportedKind')}
-            disabled={!canPauseNow || busy || pausingNow}
+            disabled={!canPauseNow || busy}
             onClick={onPause}
           >
             <IconPauseOutlineRegular size={16} />
@@ -912,7 +904,7 @@ function DockActions({
           type="button"
           className="ss-dock-action"
           aria-label={t('deleteTask')}
-          disabled={busy || cancellingNow}
+          disabled={busy}
           onClick={onDelete}
         >
           <IconTrashOutlineRegular size={14} />
@@ -924,7 +916,7 @@ function DockActions({
             type="button"
             className={`ss-dock-action ss-dock-action-steer${steerDone ? ' ss-done' : ''}`}
             aria-label={steerDone ? t('steerAlreadySent') : t('steerTask')}
-            disabled={busy || steeringNow || steerDone}
+            disabled={busy || steerDone}
             onClick={onSteer}
           >
             <IconSendOutlineRegular size={16} />
