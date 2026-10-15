@@ -9,9 +9,8 @@
  *  - 每条可单独取消；可点击编辑图标进入行内修改内容（保留原时刻）
  * @module dsh-later/client/components/ScheduleDock
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
-import { createPortal } from 'react-dom';
 import {
   IconChevronDownOutlineRegular,
   IconClockOutlineRegular,
@@ -21,6 +20,7 @@ import {
   IconPlayOutlineRegular,
   IconSendOutlineRegular,
   IconTrashOutlineRegular,
+  Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
 import { format, type SchedStrings } from '../strings.js';
@@ -613,66 +613,23 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
           )}
         </div>
         {/* 图标：编辑 → 暂停/恢复 → 删除 → 插话（暂停保留槽位宽度） */}
-        <div className="ss-dock-actions">
-          <DockTip label={t.editTask}>
-            <button
-              type="button"
-              className="ss-dock-action"
-              aria-label={t.editTask}
-              onClick={() => startEdit(item)}
-            >
-              <IconEditOutlineRegular size={14} />
-            </button>
-          </DockTip>
-          {isPaused ? (
-            <DockTip label={t.resumeTask}>
-              <button
-                type="button"
-                className={`ss-dock-action ss-paused-active${resuming.has(item.id) ? ' ss-pending' : ''}`}
-                aria-label={t.resumeTask}
-                disabled={resuming.has(item.id)}
-                onClick={() => handleResume(item)}
-              >
-                <IconPlayOutlineRegular size={16} />
-              </button>
-            </DockTip>
-          ) : (
-            <DockTip label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}>
-              <button
-                type="button"
-                className={`ss-dock-action${pausing.has(item.id) ? ' ss-pending' : ''}`}
-                aria-label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}
-                disabled={!canPause(item, now) || pausing.has(item.id)}
-                onClick={() => handlePause(item)}
-              >
-                <IconPauseOutlineRegular size={16} />
-              </button>
-            </DockTip>
-          )}
-          <DockTip label={t.deleteTask}>
-            <button
-              type="button"
-              className="ss-dock-action"
-              aria-label={t.deleteTask}
-              onClick={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
-            >
-              <IconTrashOutlineRegular size={14} />
-            </button>
-          </DockTip>
-          {item.kind !== 'every' && (
-            <DockTip label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}>
-              <button
-                type="button"
-                className={`ss-dock-action ss-dock-action-steer${steering.has(item.id) ? ' ss-pending' : ''}${steerDone.has(item.id) ? ' ss-done' : ''}`}
-                aria-label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}
-                disabled={steering.has(item.id) || steerDone.has(item.id)}
-                onClick={() => handleSteer(item)}
-              >
-                <IconSendOutlineRegular size={16} />
-              </button>
-            </DockTip>
-          )}
-        </div>
+        <DockActions
+          item={item}
+          t={t}
+          paused={isPaused}
+          canPauseNow={canPause(item, now)}
+          busy={steering.size > 0 || pausing.size > 0 || resuming.size > 0 || saving}
+          pausingNow={pausing.has(item.id)}
+          resumingNow={resuming.has(item.id)}
+          steeringNow={steering.has(item.id)}
+          cancellingNow={cancelling.has(item.id)}
+          steerDone={steerDone.has(item.id)}
+          onEdit={() => startEdit(item)}
+          onPause={() => handlePause(item)}
+          onResume={() => handleResume(item)}
+          onDelete={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
+          onSteer={() => handleSteer(item)}
+        />
       </li>
     );
   };
@@ -811,93 +768,139 @@ function MultiBar({
   );
 }
 
-/* ==================== DockTip：对齐官方 Tooltip 组件（primitives）的自定义实现 ==================== */
-/* 官方 QueueDock 用 Tooltip({ portal: true, label, side: "bottom", delayMs: 500 }) 包裹每个 action button。
- * 图标已直接 import primitives（issue #19）；Tooltip 仍为自定义实现（官方 Tooltip 的
- * 完整 API 依赖宿主 slots/portal 上下文），用 createPortal + fixed 定位实现相同视觉效果。
- *  - 500ms 延迟显示
- *  - 150ms 淡入动画
- *  - 固定定位，z-index 1100（portal 层）
- *  - 超出视口自动翻转（bottom → top）
- *  - 水平方向 clamp 到视口边缘 12px
+/* ==================== DockActions：动作按钮区（tooltip 用 primitives 的官方 Tooltip） ==================== */
+/**
+ * 宿主 QueueDock 给每个动作按钮包的是 `Tooltip({ portal: true, side: "bottom", delayMs: 500 })`，
+ * 这里换成同一个官方组件（issue #29），原先自研的 `DockTip` 已删除。
+ *
+ * 顺带纠正一处旧注释的错误说法：「官方 Tooltip 的完整 API 依赖宿主 slots/portal 上下文」
+ * **不成立**——它内部只 `useContext(TooltipSuppression)`，而该 context 默认值是 `null`，
+ * 没有 provider 时照常工作（宿主 ui-goal / ui-conversation 的 dock 都是直接这么用的）。
+ *
+ * 两个影响布局与状态的行为值得记下：
+ *  - Tooltip 用 `cloneElement` 把 ref 与 hover/focus handler 注到**子元素自身**，不额外插
+ *    包装节点。因此 `.ss-dock-actions` 的 flex 子元素仍是这四个按钮、`gap: 10px` 不变
+ *    （原先为自研气泡加的包装 span 连同其 CSS 一起删除）。
+ *  - `portal` 把气泡挂到 `document.body`，隐藏时也不会变成 dock 的 flex 子项。
+ *  - `focusDelayMs` 与 `maxWidth` 都留默认，与宿主 dock 一致（宿主两处都没传）。
  */
-function DockTip({ label, children }: { label: string; children: JSX.Element }) {
-  const anchorRef = useRef<HTMLSpanElement>(null);
-  const bubbleRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number; side: 'bottom' | 'top' } | null>(null);
-  const timerRef = useRef<number | null>(null);
+interface DockActionsProps {
+  /** 本行任务；只用 `kind` 决定插话按钮是否出现（`every` 不支持）。 */
+  item: ClientSchedule;
+  /** 文案字典。 */
+  t: SchedStrings;
+  /** 本行是否处于暂停态（决定渲染「恢复」还是「暂停」）。 */
+  paused: boolean;
+  /** 本行此刻是否可暂停（与 host 校验一致，由调用方算好）。 */
+  canPauseNow: boolean;
+  /**
+   * 整块 dock 是否有请求在途。对齐宿主 QueueDock 的 `disabled: busy !== null`
+   * （client.js:15523/15552/15571/15592）：任一动作在途时**所有**行的动作按钮都不可点，
+   * 避免两条命令并发提交。
+   */
+  busy: boolean;
+  /** 以下三个是本行对应动作的在途标记（与 `busy` 叠加，语义上冗余但保留各自的可读性）。 */
+  pausingNow: boolean;
+  resumingNow: boolean;
+  steeringNow: boolean;
+  /**
+   * 本行删除是否在途。
+   *
+   * **不并入全局 `busy`**：`cancelling` 的清尾是命令返回后 2.5s（见 `handleCancel` 的
+   * `finally`），纳入全局锁会让一次删除把整块 dock 锁住 2.5 秒。所以它只禁用本行的删除按钮。
+   */
+  cancellingNow: boolean;
+  /** 本行是否已插话成功（按钮转完成态并禁用）。 */
+  steerDone: boolean;
+  onEdit: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onDelete: () => void;
+  onSteer: () => void;
+}
 
-  const cancel = () => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  const show = () => {
-    const el = anchorRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setPos({ left: r.left + r.width / 2, top: r.bottom + 8, side: 'bottom' });
-  };
-
-  const enter = () => {
-    cancel();
-    timerRef.current = window.setTimeout(show, 500);
-  };
-
-  const leave = () => {
-    cancel();
-    setPos(null);
-  };
-
-  useEffect(() => cancel, []);
-
-  // 渲染后测量气泡尺寸，clamp 水平位置，必要时翻转到上方
-  useLayoutEffect(() => {
-    if (!pos || !bubbleRef.current) return;
-    const b = bubbleRef.current;
-    const w = b.offsetWidth;
-    const h = b.offsetHeight;
-    const edge = 12;
-    let left = pos.left;
-    let top = pos.top;
-    let side = pos.side;
-    // 水平 clamp
-    left = Math.max(edge + w / 2, Math.min(left, window.innerWidth - edge - w / 2));
-    // 垂直翻转：下方放不下则翻到上方
-    if (side === 'bottom' && top + h > window.innerHeight - edge) {
-      const anchorEl = anchorRef.current!;
-      const r = anchorEl.getBoundingClientRect();
-      top = r.top - 8;
-      side = 'top';
-    }
-    b.style.left = `${left}px`;
-    b.style.top = `${top}px`;
-    b.dataset.side = side;
-    b.style.visibility = 'visible';
-  }, [pos]);
-
+function DockActions({
+  item,
+  t,
+  paused,
+  canPauseNow,
+  busy,
+  pausingNow,
+  resumingNow,
+  steeringNow,
+  cancellingNow,
+  steerDone,
+  onEdit,
+  onPause,
+  onResume,
+  onDelete,
+  onSteer,
+}: DockActionsProps): JSX.Element {
   return (
-    <>
-      <span
-        ref={anchorRef}
-        className="ss-dock-tip-anchor"
-        onPointerEnter={enter}
-        onPointerLeave={leave}
-        onFocus={enter}
-        onBlur={leave}
-      >
-        {children}
-      </span>
-      {pos &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div ref={bubbleRef} className="ss-dock-tip" style={{ left: pos.left, top: pos.top, visibility: 'hidden' }}>
-            {label}
-          </div>,
-          document.body
-        )}
-    </>
+    <div className="ss-dock-actions">
+      <Tooltip label={t.editTask} side="bottom" delayMs={500} portal>
+        <button
+          type="button"
+          className="ss-dock-action"
+          aria-label={t.editTask}
+          disabled={busy}
+          onClick={onEdit}
+        >
+          <IconEditOutlineRegular size={14} />
+        </button>
+      </Tooltip>
+      {paused ? (
+        <Tooltip label={t.resumeTask} side="bottom" delayMs={500} portal>
+          <button
+            type="button"
+            className="ss-dock-action ss-paused-active"
+            aria-label={t.resumeTask}
+            disabled={busy || resumingNow}
+            onClick={onResume}
+          >
+            <IconPlayOutlineRegular size={16} />
+          </button>
+        </Tooltip>
+      ) : (
+        /* 不可用的原因走宿主那套分工：Tooltip `disabled` 抑制气泡，原生 `title` 承载原因，
+         * `aria-label` 只留动作名——避免同一句话在气泡与读屏里各念一遍。 */
+        <Tooltip label={t.pauseTask} side="bottom" delayMs={500} portal disabled={!canPauseNow}>
+          <button
+            type="button"
+            className="ss-dock-action"
+            aria-label={t.pauseTask}
+            title={canPauseNow ? undefined : t.pauseUnsupportedKind}
+            disabled={!canPauseNow || busy || pausingNow}
+            onClick={onPause}
+          >
+            <IconPauseOutlineRegular size={16} />
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip label={t.deleteTask} side="bottom" delayMs={500} portal>
+        <button
+          type="button"
+          className="ss-dock-action"
+          aria-label={t.deleteTask}
+          disabled={busy || cancellingNow}
+          onClick={onDelete}
+        >
+          <IconTrashOutlineRegular size={14} />
+        </button>
+      </Tooltip>
+      {item.kind !== 'every' && (
+        <Tooltip label={steerDone ? t.steerAlreadySent : t.steerTask} side="bottom" delayMs={500} portal>
+          <button
+            type="button"
+            className={`ss-dock-action ss-dock-action-steer${steerDone ? ' ss-done' : ''}`}
+            aria-label={steerDone ? t.steerAlreadySent : t.steerTask}
+            disabled={busy || steeringNow || steerDone}
+            onClick={onSteer}
+          >
+            <IconSendOutlineRegular size={16} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
   );
 }
