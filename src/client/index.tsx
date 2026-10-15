@@ -26,8 +26,9 @@
  * @module dsh-later/client
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { ClientConfigForm, ClientSettingsScope } from './runtime-augment.js';
+import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from './runtime-augment.js';
 import { name } from '../domain.js';
+import { schedDicts } from './strings.js';
 import { injectStyles } from './styles.js';
 import { SchedButton } from './components/SchedButton.js';
 import { ScheduleDock } from './components/ScheduleDock.js';
@@ -52,6 +53,16 @@ const inject = ['slots', 'sessions', 'conversation', 'locale'];
 
 /** Locale 字典命名空间（locale 命名空间允许点分）。 */
 const NS = 'settings.plugins.later';
+
+/**
+ * 编译期哨兵（issue #28）。
+ *
+ * dock 的词条能不能取到，取决于 `LocaleNamespaceMap` 的合并值是 **string 联合**
+ * 而不是字典形状；写错的后果不是「编译不过」而是 `t` 吃掉所有 key 却返回 never，
+ * 所以这里正向要求它为 `true`。断言体与它的局限（本仓无 slots 类型包 ⇒ 镜像断言）
+ * 都写在 runtime-augment.d.ts。
+ */
+const _dockSeatProbe: LaterDockSeatProbe = true;
 
 /** Settings 命名空间（必须与 host 端注册的字符串一致：dsh-later）。 */
 const SETTINGS_NS = 'dsh-later';
@@ -122,10 +133,27 @@ function apply(ctx: Context): void {
     'dsh-later: presence',
   );
 
-  // 注册 locale 字典
+  /**
+   * 注册 locale 字典（issue #28：dock 改用插槽 `t` seat 的前提）。
+   *
+   * 三条不可破坏的约定：
+   *  1. **必须单次合并注册**。宿主对同一 NS 的同一 locale 二次 `register` 直接抛
+   *     `locale namespace "…" already has locale "zh"`（dsh-client-locale
+   *     client.js:1395），所以 UI 词条（`schedDicts`，61 个）与下面的设置卡词条
+   *     必须在一个对象里给完，不能拆成两次注册。
+   *  2. **字典要先于任何使用 `t` 的插槽条目落位**。`ctx.effect` 的 execute 是同步跑的
+   *     （cordis lib/index.js:1249 `task = this._execute(runner)` → :1141
+   *     `runner.execute.call(this)`），本段又排在下方 dock 注册之前，故顺序成立。
+   *     把本段挪到任何插槽注册之后就会破坏它——这里不做无谓搬移，靠注释钉住不变量。
+   *  3. 顺序对了仍有两条真实路径会露裸 key，都与顺序无关，由 `useSchedT.schedTranslate`
+   *     兜底：(a) 旧 renderer 不认条目的 `locale` 声明、压根不给 seat 的 `t`；
+   *     (b) `locale === undefined` 的旧宿主组合——此时本段整块不执行。宿主
+   *     `translate` 的链尾是 `?? key`：漏注册不报错，只把 key 名渲染到界面上。
+   */
   if (locale !== undefined) {
     ctx.effect(() => locale.register(NS, {
       zh: {
+        ...schedDicts.zh,
         title: '定时提醒',
         description: '配置会话内定时提醒的参数。',
         pendingBadge: '未保存',
@@ -186,6 +214,7 @@ function apply(ctx: Context): void {
         showInSettingsHint: '在设置对话框中显示本插件的设置页（刷新页面后生效）',
       },
       en: {
+        ...schedDicts.en,
         title: 'Session Scheduler',
         description: 'Configure in-session scheduled reminders.',
         pendingBadge: 'Unsaved',
@@ -269,8 +298,20 @@ function apply(ctx: Context): void {
     }
   };
 
-  // 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，
-  // 不依赖设置服务，因此在顶层无条件注册。
+  /**
+   * 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，
+   * 不依赖设置服务，因此在顶层无条件注册。
+   *
+   * `locale: NS` 让宿主渲染器把 `t` 挂进标准件（dsh-client-ui-renderer
+   * lib/client.js:727-731 `kit["t"] = localeSeat(face, entry.locale)`），dock 因此
+   * 不再需要注入原始 `locale` 服务；seat 的 `t` 会随宿主 locale revision 换引用
+   * （同文件 :528-542 的缓存），语言切换自动重渲染，无需组件内自行订阅。
+   *
+   * ⚠️ 声明 `locale` 的前提是模块级 `inject` 数组里 `locale` 还在（本文件顶部）：
+   * 渲染器在 face 缺失时是**抛 SlotAssemblyError**，不是静默跳过。那条 inject 是
+   * fiber 激活门控——没有 locale 服务的旧宿主根本不会激活本插件，dock 也就不注册，
+   * 所以这里不会炸。若日后把 `locale` 从 inject 里摘掉，必须同时退回手动注入。
+   */
   ctx.slots.inject(
     'conversation.input.dock',
     () =>
@@ -279,7 +320,8 @@ function apply(ctx: Context): void {
           name: 'conversation.input.dock',
           id: 'later-dock',
           order: 30,
-          inject: () => ({ callCommand, locale } as ScheduleDockInjected),
+          locale: NS,
+          inject: () => ({ callCommand } as ScheduleDockInjected),
         },
         ScheduleDock,
       ),

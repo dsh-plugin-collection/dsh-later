@@ -95,16 +95,26 @@ function planBarAnimationFor(
 export interface ScheduleDockInjected {
   /** 向宿主执行一条 slash 命令；返回是否受理（`matched`）。 */
   callCommand: (sessionId: string, line: string) => Promise<CommandOutcome>;
-  /** 宿主 locale 服务（跟随 DSH 界面语言；缺失回退中文）。 */
-  locale?: LocaleFaceLike;
 }
 
+/**
+ * dock 的取词函数类型：`SchedStrings` 的键集卡住 key。
+ *
+ * 这是本次「属性式取词改成函数式取词」机械迁移的主要防错手段——拼错的键会在这里编译
+ * 失败，而不是把键名（`panelCount`）直接渲染到界面上。
+ */
+export type ScheduleDockTranslate = (key: keyof SchedStrings, params?: Record<string, string | number>) => string;
+
 /** 会话作用域插槽条目收到的标准 props + 注入。 */
-export interface ScheduleDockProps extends Omit<ScheduleDockInjected, 'locale'> {
-  /** 向宿主执行一条 slash 命令；返回是否受理（`matched`）。 */
-  callCommand: (sessionId: string, line: string) => Promise<CommandOutcome>;
-  /** 宿主 locale 服务（跟随 DSH 界面语言；缺失回退中文）。 */
-  locale?: LocaleFaceLike;
+export interface ScheduleDockProps extends ScheduleDockInjected {
+  /**
+   * 宿主 locale seat 给的取值函数（条目声明了 `locale: NS` 才会被挂上，见
+   * index.tsx 的 dock 注册）。形状镜像 `useSchedT.SeatTranslate`。
+   *
+   * 声明为可选：旧 renderer 不认 `locale` 声明、压根不给 seat；此时整体回落
+   * strings.ts 的本地字典（见 useSchedT.schedTranslate）。
+   */
+  t?: (key: string, params?: Record<string, unknown>) => string;
   /** 会话作用域标准 hook：读取投影。 */
   useProjection?: (key: string) => { schedules?: readonly ClientSchedule[] } | undefined;
   /** 会话 id。 */
@@ -133,9 +143,11 @@ function canPause(item: ClientSchedule, now: number): boolean {
   return Number.isFinite(epoch) && epoch > now;
 }
 
-export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: ScheduleDockProps): JSX.Element | null {
+export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
   const now = useNow(1000);
-  const { t } = useSchedT(locale);
+  // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
+  // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
+  const { tr: t } = useSchedT(undefined, seatT);
   const projection = typeof useProjection === 'function' ? useProjection('userSchedules') : undefined;
   /**
    * 删除暂停项的本地摘除集合。
@@ -413,11 +425,11 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
             setDismissedPaused((current) => new Set(current).add(id));
           }
         } else {
-          setSteerErr((current) => new Map(current).set(id, t.editErrNotAccepted));
+          setSteerErr((current) => new Map(current).set(id, t('editErrNotAccepted')));
         }
       })
       .catch(() => {
-        setSteerErr((current) => new Map(current).set(id, t.editErrCommandFailed));
+        setSteerErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
       .finally(() => {
         setSteering((current) => {
@@ -463,11 +475,11 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     void callCommand(sessionId, pauseLine(id))
       .then((outcome) => {
         if (!outcome.matched) {
-          setPauseErr((current) => new Map(current).set(id, t.editErrNotAccepted));
+          setPauseErr((current) => new Map(current).set(id, t('editErrNotAccepted')));
         }
       })
       .catch(() => {
-        setPauseErr((current) => new Map(current).set(id, t.editErrCommandFailed));
+        setPauseErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
       .finally(() => {
         setPausing((current) => {
@@ -489,11 +501,11 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     void callCommand(sessionId, resumeLine(uid))
       .then((outcome) => {
         if (!outcome.matched) {
-          setPauseErr((current) => new Map(current).set(uid, t.editErrNotAccepted));
+          setPauseErr((current) => new Map(current).set(uid, t('editErrNotAccepted')));
         }
       })
       .catch(() => {
-        setPauseErr((current) => new Map(current).set(uid, t.editErrCommandFailed));
+        setPauseErr((current) => new Map(current).set(uid, t('editErrCommandFailed')));
       })
       .finally(() => {
         setResuming((current) => {
@@ -519,21 +531,21 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
   const submitEdit = (id: string): void => {
     const trimmed = editingText.trim();
     if (trimmed.length === 0) {
-      setEditErr(t.editErrEmpty);
+      setEditErr(t('editErrEmpty'));
       return;
     }
     setSaving(true);
     setEditErr(null);
     void callCommand(sessionId, editLine(id, trimmed)).then((outcome) => {
       if (!outcome.matched) {
-        setEditErr(format(t.editErrFailed, { message: t.editErrNotAccepted }));
+        setEditErr(t('editErrFailed', { message: t('editErrNotAccepted') }));
         return;
       }
       // 编辑暂停项时宿主不写会话事件 → 投影仍是旧文案，本地先覆盖以立刻反映新内容。
       setPromptOverrides((current) => new Map(current).set(id, trimmed));
       cancelEdit();
     }).catch(() => {
-      setEditErr(format(t.editErrFailed, { message: t.editErrCommandFailed }));
+      setEditErr(t('editErrFailed', { message: t('editErrCommandFailed') }));
     }).finally(() => setSaving(false));
   };
 
@@ -555,7 +567,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
               else if (event.key === 'Escape') cancelEdit();
               event.stopPropagation();
             }}
-            aria-label={`${t.editTask}: ${item.prompt}`}
+            aria-label={`${t('editTask')}: ${item.prompt}`}
           />
           <button
             type="button"
@@ -563,9 +575,9 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
             disabled={saving || editingText.trim().length === 0}
             onClick={() => submitEdit(item.id)}
           >
-            {saving ? '…' : t.editSave}
+            {saving ? '…' : t('editSave')}
           </button>
-          <button type="button" className="ss-dock-action" onClick={cancelEdit} aria-label={t.editCancel}>
+          <button type="button" className="ss-dock-action" onClick={cancelEdit} aria-label={t('editCancel')}>
             <IconCloseOutlineRegular size={14} />
           </button>
           {editErr !== null && <span className="ss-dock-edit-err">{editErr}</span>}
@@ -577,10 +589,10 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
       ? (item.remaining_seconds ?? 0) * 1000
       : epoch - now;
     const countdownText = isPaused
-      ? t.pausedLabel
+      ? t('pausedLabel')
       : state === 'overdue'
-        ? t.dueAnyMoment
-        : `${t.countdownLeft} ${formatCountdown(Math.max(0, frozenLeft))}`;
+        ? t('dueAnyMoment')
+        : `${t('countdownLeft')} ${formatCountdown(Math.max(0, frozenLeft))}`;
     return (
       <li
         key={item.id}
@@ -605,31 +617,31 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
           */}
           {steerUnconfirmed.has(item.id) && (
             <span className="ss-dock-steer-warn" role="status">
-              <span>{t.steerUnconfirmed}</span>
+              <span>{t('steerUnconfirmed')}</span>
               <button type="button" className="ss-dock-steer-retry" onClick={() => handleSteerRetry(item)}>
-                {t.steerRetry}
+                {t('steerRetry')}
               </button>
             </span>
           )}
         </div>
         {/* 图标：编辑 → 暂停/恢复 → 删除 → 插话（暂停保留槽位宽度） */}
         <div className="ss-dock-actions">
-          <DockTip label={t.editTask}>
+          <DockTip label={t('editTask')}>
             <button
               type="button"
               className="ss-dock-action"
-              aria-label={t.editTask}
+              aria-label={t('editTask')}
               onClick={() => startEdit(item)}
             >
               <IconEditOutlineRegular size={14} />
             </button>
           </DockTip>
           {isPaused ? (
-            <DockTip label={t.resumeTask}>
+            <DockTip label={t('resumeTask')}>
               <button
                 type="button"
                 className={`ss-dock-action ss-paused-active${resuming.has(item.id) ? ' ss-pending' : ''}`}
-                aria-label={t.resumeTask}
+                aria-label={t('resumeTask')}
                 disabled={resuming.has(item.id)}
                 onClick={() => handleResume(item)}
               >
@@ -637,11 +649,11 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
               </button>
             </DockTip>
           ) : (
-            <DockTip label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}>
+            <DockTip label={canPause(item, now) ? t('pauseTask') : t('pauseUnsupportedKind')}>
               <button
                 type="button"
                 className={`ss-dock-action${pausing.has(item.id) ? ' ss-pending' : ''}`}
-                aria-label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}
+                aria-label={canPause(item, now) ? t('pauseTask') : t('pauseUnsupportedKind')}
                 disabled={!canPause(item, now) || pausing.has(item.id)}
                 onClick={() => handlePause(item)}
               >
@@ -649,22 +661,22 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
               </button>
             </DockTip>
           )}
-          <DockTip label={t.deleteTask}>
+          <DockTip label={t('deleteTask')}>
             <button
               type="button"
               className="ss-dock-action"
-              aria-label={t.deleteTask}
+              aria-label={t('deleteTask')}
               onClick={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
             >
               <IconTrashOutlineRegular size={14} />
             </button>
           </DockTip>
           {item.kind !== 'every' && (
-            <DockTip label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}>
+            <DockTip label={steerDone.has(item.id) ? t('steerAlreadySent') : t('steerTask')}>
               <button
                 type="button"
                 className={`ss-dock-action ss-dock-action-steer${steering.has(item.id) ? ' ss-pending' : ''}${steerDone.has(item.id) ? ' ss-done' : ''}`}
-                aria-label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}
+                aria-label={steerDone.has(item.id) ? t('steerAlreadySent') : t('steerTask')}
                 disabled={steering.has(item.id) || steerDone.has(item.id)}
                 onClick={() => handleSteer(item)}
               >
@@ -690,7 +702,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
             <span className="ss-dock-lead" aria-hidden="true">
               <IconClockOutlineRegular size={16} />
             </span>
-            <span className="ss-dock-count">{format(t.panelCount, { n: schedules.length })}</span>
+            <span className="ss-dock-count">{t('panelCount', { n: schedules.length })}</span>
             <span className={expanded ? 'ss-dock-chevron ss-open' : 'ss-dock-chevron'} aria-hidden="true">
               <IconChevronDownOutlineRegular size={14} />
             </span>
@@ -720,7 +732,7 @@ function MultiBar({
   item: ClientSchedule;
   now: number;
   firstSeen: ReadonlyMap<string, number>;
-  t: SchedStrings;
+  t: ScheduleDockTranslate;
   frozen?: boolean;
   frozenLeftMs?: number;
   /** 客户端已渲染过的最新时刻；冻结帧据此钳位，避免暂停瞬间条长跳增。 */
@@ -792,7 +804,7 @@ function MultiBar({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(totalRatio * 100)}
-      aria-label={t.panelTitle}
+      aria-label={t('panelTitle')}
     >
       <div className="ss-dock-bar">
         {/* 分隔线先画：跨整个 bar、画 N-1 条等比分隔；fill 之后用 z-index 盖住「已填充段」上的分隔线，只剩「轨道段」上可见刻度 */}
