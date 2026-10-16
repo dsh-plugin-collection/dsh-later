@@ -99,6 +99,11 @@ const zh = {
   relTomorrow: '明天 {time}',
   relDate: '{date} {time}',
   relClock: '{time}',
+  /** 附件带 a11y（#38）：措辞结构对齐宿主 `queue.image` / `queue.file`，但把「排队」换成「提醒」。 */
+  attachmentImage: '提醒图片',
+  attachmentFile: '提醒文件 {name}',
+  attachmentUnavailable: '图片不可用',
+  attachmentMore: '另有 {n} 个附件未列出',
 } as const;
 
 /** 客户端本地错误令牌：hook 层抛出、组件层经字典翻译（避免 hook 依赖 locale）。 */
@@ -172,6 +177,10 @@ const en: { [K in keyof typeof zh]: string } = {
   relTomorrow: 'Tomorrow {time}',
   relDate: '{date} {time}',
   relClock: '{time}',
+  attachmentImage: 'Reminder image',
+  attachmentFile: 'Reminder file {name}',
+  attachmentUnavailable: 'Image unavailable',
+  attachmentMore: '{n} more attachment(s)',
 };
 
 /** 单语言文案字典类型（宽化为 string，zh/en 通用）。 */

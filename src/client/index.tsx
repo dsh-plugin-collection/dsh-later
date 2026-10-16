@@ -35,6 +35,7 @@ import { ScheduleDock } from './components/ScheduleDock.js';
 import { SchedulerSettingsCard } from './components/SchedulerSettingsCard.js';
 import type { SchedButtonInjected } from './components/SchedButton.js';
 import type { ScheduleDockInjected } from './components/ScheduleDock.js';
+import type { ClientAttachment } from './types.js';
 import type { CommandOutcome } from '../command-outcome.js';
 import { mountSessionPresence, type PresenceLocaleLike } from './session-presence.js';
 import {
@@ -311,6 +312,51 @@ function apply(ctx: Context): void {
   };
 
   /**
+   * 把一条附件引用解析成浏览器可显示的 URL（issue #38）。
+   *
+   * 走宿主 `uiConversation.imageUrl(sessionId, ref)`。三点必须注意：
+   *
+   * 1. **`uiConversation` 绝不进模块级 `inject`**。顶层 inject 是 cordis 的**激活
+   *    门控**：服务不来，整个入口永久 pending，`/later`、`/schedule`、
+   *    `/user-schedule-*` 会集体消失——就是 issue #34 修掉的真实事故（宿主日志
+   *    当时写的是 `later (dsh-later): pending (waiting for service: locale)`）。
+   *    所以这里用 `ctx.get(...)` 可选取，取不到就 reject，由组件侧降级成
+   *    「文字 + 文件 chip、无缩略图」，**不得**整块不渲染。
+   * 2. **形状必须显式转换**：宿主收的是 camelCase 的 `ImageAttachmentRef`
+   *    （`{attachmentId, mediaType, bytes, width, height}`），而 dock 手上是投影 wire
+   *    的 snake_case `ClientAttachment`（`attachment_id` / `media_type` …）。直接把
+   *    wire 对象丢进去，宿主按 `attachment.attachmentId` 取缓存键会拿到 `undefined`
+   *    ——所有图片共用同一把键，表现为串图或永远加载不出来（静默错，比抛错难查）。
+   * 3. **返回的 URL 是会话绑定的**：宿主内部是 `binding.session.readAttachment(...)`
+   *    + `URL.createObjectURL`，绑定释放后会被 revoke。所以每次渲染重新解析是可接受
+   *    的（宿主自己也有同名的 `peekImageUrl` 同步缓存路径），但组件侧必须带 `alive`
+   *    标志，卸载后不能再 setState。
+   *
+   * 签名带 `sessionId` 而不是在 inject 里绑死：本仓的 `ClientSlotDeclaration.inject`
+   * 镜像声明是 `() => object`（不收参数），而 `callCommand` 已经是「首参传 sessionId、
+   * inject 零参」的既有形状（见上）。宿主自己的 queueDockEntry 走的是
+   * `inject: (sessionId) => …`——那条路要先把镜像声明改宽才类型安全，属另一处修正。
+   */
+  const loadAttachmentUrl = (
+    sessionId: string,
+    ref: ClientAttachment,
+  ): Promise<string> => {
+    const face = ctx.get('uiConversation') as {
+      imageUrl?(id: string, attachment: Record<string, unknown>): Promise<string>;
+    } | undefined;
+    if (typeof face?.imageUrl !== 'function') {
+      return Promise.reject(new Error('later-dock: uiConversation.imageUrl unavailable'));
+    }
+    return face.imageUrl(sessionId, {
+      attachmentId: ref.attachment_id,
+      ...(ref.media_type !== undefined ? { mediaType: ref.media_type } : {}),
+      ...(ref.bytes !== undefined ? { bytes: ref.bytes } : {}),
+      ...(ref.width !== undefined ? { width: ref.width } : {}),
+      ...(ref.height !== undefined ? { height: ref.height } : {}),
+    });
+  };
+
+  /**
    * 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，
    * 不依赖设置服务，因此在顶层无条件注册。
    *
@@ -333,7 +379,10 @@ function apply(ctx: Context): void {
           id: 'later-dock',
           order: 30,
           locale: NS,
-          inject: () => ({ callCommand } as ScheduleDockInjected),
+          // `loadImage` 是**可选**注入：内部按 `ctx.get('uiConversation')` 取，取不到
+          // 时组件自动降级（见 loadAttachmentUrl 的注释）。它不构成激活依赖，所以 dock
+          // 仍在顶层无条件注册——**不要**因此把 `uiConversation` 加进模块级 inject。
+          inject: () => ({ callCommand, loadImage: loadAttachmentUrl } as ScheduleDockInjected),
         },
         ScheduleDock,
       ),
