@@ -1,6 +1,13 @@
 /**
  * 客户端微文案字典（双语：跟随宿主 DSH 的 locale 设置）。
  *
+ * 这份字典是**唯一事实源**，有两个出口（issue #28）：
+ *  1. 由 `src/client/index.tsx` 合进 `locale.register(NS, …)` 交进宿主 locale 服务，
+ *     组件再用插槽给的 `t('key')` 取值——active locale 选择与 `{param}` 插值都由宿主负责；
+ *  2. 留在本地作**兜底**：宿主 `translate` 对未注册的 key 是**返回 key 本身**（不抛错，
+ *     dsh-client-locale `translate` 的链尾 `?? key`），旧宿主组合还可能根本不给 `t`。
+ *     两种情况都回落到这里，见 `useSchedT.ts` 的 {@link schedTranslate}。
+ *
  * 语言解析：`useSchedT(locale)` 读取宿主 locale 服务的 active id（zh/en），
  * 从这里取对应字典；locale 服务缺失或 id 未收录时回退中文（v1 默认语言）。
  * @module dsh-later/client/strings
@@ -59,6 +66,8 @@ const zh = {
   dueAnyMoment: '即将发送',
   /** 状态 */
   sending: '正在发送…',
+  /** dock 折叠头的状态摘要（issue #31：收起时也要播报「未确认」） */
+  statusUnconfirmed: '{n} 条未确认',
   /** 确认按钮 */
   confirmAdd: '加入 · {time} 发送',
   confirmAddNoTime: '选择发送时间',
@@ -137,6 +146,8 @@ const en: { [K in keyof typeof zh]: string } = {
   countdownLeft: 'in',
   dueAnyMoment: 'Sending soon',
   sending: 'Sending…',
+  /** dock collapsed-header status summary (issue #31) */
+  statusUnconfirmed: '{n} unconfirmed',
   confirmAdd: 'Add · send at {time}',
   confirmAddNoTime: 'Pick a send time',
   promptFromDraft: 'The composer draft will be used as the reminder content',
@@ -165,6 +176,17 @@ const en: { [K in keyof typeof zh]: string } = {
 
 /** 单语言文案字典类型（宽化为 string，zh/en 通用）。 */
 export type SchedStrings = { [K in keyof typeof zh]: string };
+
+/**
+ * 本插件 UI 词条的键联合（与官方 `ConversationKey = keyof typeof …` 同形）。
+ *
+ * 用途有两个，都不是装饰：
+ *  - 合进宿主 `LocaleNamespaceMap`，让插槽的 `PropsLocale<NS>` 真的给出 `t`
+ *    （写成对象/字典形状会直接塌成 `object`，`t` 压根不进 props 类型，见
+ *    dsh-client-ui-slots `LocaleKeysOf` / `PropsLocale`）；
+ *  - 约束兜底取值函数的 key，拼错 key 在 typecheck 就失败，而不是静默显示原文。
+ */
+export type SchedUIKey = keyof SchedStrings;
 
 /** 全部 locale 字典（键集一致，由 en 的映射类型保证）。 */
 export const schedDicts: Record<SchedLocaleId, SchedStrings> = { zh, en };
