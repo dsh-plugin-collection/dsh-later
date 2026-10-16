@@ -46,6 +46,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "deploy": "node build.mjs --deploy",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node --test \"tests/*.test.mjs\"",
     "prepublishOnly": "npm run build",
