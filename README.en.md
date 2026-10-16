@@ -276,6 +276,30 @@ Contract notes:
   60s `session.list` read RPC (visible-page only).
 - Consumers must tolerate `undefined` (dsh-later not installed/enabled) and degrade silently.
 
+### The folded-group badge: we register the facet ourselves (issue #36)
+
+"How many sessions in this group have scheduled reminders" is now owned end to end: dsh-later
+registers `dsh-later.schedule` inside its own client `apply`, following
+[the facet protocol v1](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md),
+and hands over fold / merge / label / renderIcon. The counting basis (sessions **with** schedules),
+the tone (purple scheduled / orange urgent / red overdue), the pulse (only urgent and overdue
+blink), the wording (`N 定时任务` / `N Scheduled`) and the glyph (the official outline clock at
+14px) are all decided here — the consumer only honours the protocol shape.
+
+- **dsh-group-status is an optional partner.** When it is not installed or not enabled,
+  `require('dsh-group-status/client')` throws; we catch it and skip registration. That is why it is
+  in **neither** `dsh.client.external` **nor** the module-level `inject` — the top-level `inject`
+  is an activation gate, and a hard dependency there would leave this plugin permanently pending
+  whenever the partner is absent (the issue #34 P0).
+- A protocol-version mismatch is skipped **visibly** (one `console.warn`): "I registered it, why is
+  nothing showing" has to be diagnosable.
+- Every field matches the consumer's former stopgap adapter, and
+  `tests/group-status-facet.test.mjs` keeps a copy of that adapter's algorithm as the oracle.
+  Changing the display semantics now has to clear that baseline instead of drifting silently.
+
+The summary API above stays available for consumers that read numbers directly (session rows,
+hover cards); both paths read the same store.
+
 ## Technical documentation
 
 Developer- and maintainer-oriented content has moved out of this README:
