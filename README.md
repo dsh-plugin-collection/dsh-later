@@ -187,7 +187,15 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 # 重启 dsh web 后生效
 ```
 
-> 开发提示：`npm run watch` 监听 `src/` 自动重建并跑形状回归测试，改动即时生效。
+> 开发提示：`npm run watch` 监听 `src/` 自动重建并跑形状回归测试。
+>
+> 注意它**不再自动改 GUI 里跑的那份**（issue #46：旧行为会把未合并代码静默部署到所有
+> profile，多 worktree 并发时还会互相覆盖）。要在界面上看到效果，二选一：
+>
+> ```sh
+> npm run deploy                     # 手动同步一次
+> DSH_LATER_RELINK=1 npm run watch   # 恢复「每次改动即部署」的旧行为
+> ```
 
 ### 第一条提醒
 

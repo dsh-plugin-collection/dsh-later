@@ -4,6 +4,31 @@
 
 ## 未发布
 
+- **fix** `npm run build` 不再静默部署到 `~/.dsh/profiles`（issue #46）。构建与部署拆开：
+  `npm run build` 只写本地 `lib/`，要同步给运行中的 DSH 需显式 `npm run deploy`
+  （或 `node build.mjs --deploy` / `DSH_LATER_RELINK=1`）。
+  - 原先重链是 build 的**默认副作用**，两层代价：① 未合并、未评审的分支只要 build
+    一次就进到运行中的 host；② 多个 worktree 经 profile **共享 inode**，彼此静默覆盖。
+    后者已实际发生过：主 worktree 的一次 build 把未合并的修复写进了另一个会话的工作树
+    （`wt-issue-36/lib/user-tools.js` 与主树同 inode、内容含 4 处 resolver 而它自己
+    HEAD 只有 3 处，而那个会话自身一行未改）。
+  - **`npm run watch` 是最严重的形态**：它每次文件变动都 `execSync('npm run build')`
+    （`watch.mjs:45`），等于**持续自动部署**。现在 watch 复用同一策略，默认不再外溢；
+    要保留旧行为用 `DSH_LATER_RELINK=1 npm run watch`（子进程继承环境变量）。
+  - 跳过部署时**必须打印提示**并给出三条显式路径 —— 否则「build 完 GUI 没变化」会被
+    当成构建失效去排查，而 #11 当初引入重链正是为了治这个。行为变了，噪音也得跟着变。
+  - 决策抽成纯函数 `scripts/relink-policy.mjs`：`build.mjs` 是带副作用的顶层脚本
+    （tsc/esbuild/linkSync），测试导入它会**真的改写 profiles**，所以「要不要重链」
+    必须能在不执行构建的前提下被钉死。优先级 `--no-deploy` > `--deploy` > 环境变量 >
+    **默认关**。
+  - 测试：新增 9 条（`tests/build-no-silent-deploy.test.mjs`）—— 策略穷举（默认关、
+    显式开、`--no-deploy` 最高优先、跳过提示含三条路径）、接线守卫（build 必经策略、
+    watch 不得自建重链、package.json 有 deploy）、以及一条**端到端**：造假 `HOME`
+    放哨兵产物，默认构建后哨兵必须原样在、`--deploy` 后才被替换。
+    端到端做过**变异验证**：把把关改成恒不成立 → 结构守卫与端到端双双变红。
+    （第一次变异写错了 —— `if (!gate) {提示} else if (true) {重链}` 里 else 根本不会
+    执行，测试全绿是假阴性；这也说明「测试通过」本身不构成证据。）
+
 - **fix** dock 行内编辑改文案静默失败（issue #44）：在待发列表里改一条提醒的文案并保存，
   宿主返回 `schedule_not_found`，用户以为已经改好了。
   - 根因是**一处漏改**：投影有意把 uid 当作 `id` 暴露给客户端
