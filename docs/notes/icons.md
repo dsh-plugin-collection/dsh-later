@@ -1,156 +1,68 @@
 # 插件图标清单
 
-## 1. 主 Logo
+> 本文只记「图标从哪来、什么颜色」。dock 与宿主 QueueDock 的样式差异另见 [dock-alignment.md](./dock-alignment.md)。
 
-### 当前 Logo (`docs/logo.svg`)
-- **尺寸**: 512×512
-- **描述**: 聊天气泡 + 琥珀色时钟
-- **用途**: README、文档、npm 包封面
+## 1. 主 Logo / 包图标
 
-### 透明背景版 (`docs/logo-transparent.svg`)
-- **尺寸**: 512×512
-- **描述**: 无背景，仅保留聊天气泡和时钟
-- **用途**: 需要透明背景的场景
+| 文件 | 用途 |
+|---|---|
+| `icon.svg`（仓库根） | 包图标，`package.json` 的 `"icon": "./icon.svg"` 指向它 |
+| `assets/brand/logo.svg` | 品牌 Logo（气泡 + 琥珀色时钟） |
+| `assets/icons/*.svg` | README 与文档用的静态展示图；**组件运行时不再内联这些 path** |
 
----
+> 旧文档里提到的 `docs/logo.svg` / `docs/logo-transparent.svg` 已不存在。
 
-## 2. 输入框按钮图标
-
-### SchedButton 时钟图标
-**文件**: `src/client/components/SchedButton.tsx` (行 105-108)
-**尺寸**: 16×16
-**用途**: 输入框右侧的定时提醒按钮
-
-```svg
-<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-  <circle cx="12" cy="12" r="10"/>
-  <polyline points="12 6 12 12 16 14"/>
-</svg>
-```
+`assets/icons/` 现有：`icon-bubble` · `icon-clock` · `icon-delete` · `icon-edit` · `icon-send` · `icon-schedule-btn` · `icon-presence` · `icon-presence-scheduled` · `icon-presence-urgent` · `icon-presence-overdue`。README 首屏用的是 `assets/icons/icon-presence-scheduled.svg`。
 
 ---
 
-## 3. Dock 图标（来自 ScheduleDock.tsx）
+## 2. 组件图标：全部来自官方图标集
 
-### 3.1 时钟图标 (QueueClockIcon)
-**文件**: `src/client/components/ScheduleDock.tsx` (行 408-414)
-**尺寸**: 14×14
-**用途**: 折叠头部左侧的时钟标识
+自 1.3.0 起，UI 图标统一改用 `@deepseek-ai/dsh-client-ui-primitives`，手写内联 SVG 已从组件中删除（Gitea issue #19）。下表按各组件的 import 实测：
 
-```svg
-<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <path d="M7.00049 0.199829C3.24488 0.199829 0.199952 3.24408 0.199707 6.99963C0.199707 8.0414 0.434087 9.03061 0.854004 9.91467L1.11279 10.4576L2.19775 9.94202L1.94092 9.39905L1.81787 9.12268C1.5498 8.46885 1.40186 7.75171 1.40186 6.99963C1.4021 3.90808 3.90888 1.40198 7.00049 1.40198C10.0919 1.40219 12.5979 3.90821 12.5981 6.99963C12.5981 10.0913 10.0921 12.5981 7.00049 12.5983C6.36734 12.5983 5.90348 12.5535 5.49268 12.4401C5.08803 12.3283 4.7041 12.1414 4.24463 11.8209C3.57111 11.3511 2.60588 11.1855 1.81006 11.6881L1.79736 11.6959L1.78467 11.7047L1.25537 12.0778L1.65381 13.2672L2.46045 12.6989C2.75029 12.5214 3.18004 12.5442 3.55615 12.8063C4.10063 13.1861 4.60863 13.4423 5.17334 13.5983C5.73194 13.7525 6.31665 13.8004 7.00049 13.8004C10.7561 13.8002 13.8003 10.7553 13.8003 6.99963C13.8 3.24421 10.7559 0.200041 7.00049 0.199829ZM3.81201 7.47327V8.67542H7.11572V7.47327H3.81201ZM3.81201 6.34924H10.2173V5.14709H3.81201V6.34924Z" fill="currentColor" />
-</svg>
-```
+| 组件 | 从 primitives 导入 |
+|---|---|
+| `ScheduleDock` | `IconClockOutlineRegular`（折叠头 lead）、`IconChevronDownOutlineRegular`（展开/收起）、`IconEditOutlineRegular`、`IconTrashOutlineRegular`、`IconPauseOutlineRegular` / `IconPlayOutlineRegular`（暂停·恢复）、`IconSendOutlineRegular`（插话发送）、`IconCloseOutlineRegular`（取消编辑） |
+| `SchedButton` | `IconClockOutlineRegular` |
+| `SchedPanel` | `IconCloseOutlineRegular` |
+| `TaskList` | `IconCloseOutlineRegular` |
+| `SchedulerSettingsCard` | `IconInfoOutlineRegular` |
 
-### 3.2 下箭头图标 (QueueChevronIcon)
-**文件**: `src/client/components/ScheduleDock.tsx` (行 417-423)
-**尺寸**: 14×14
-**用途**: 折叠头部右侧的展开/收起箭头
+尺寸：dock 的编辑/删除/取消用 `size={14}`，暂停/恢复/插话用 `size={16}`，折叠头 lead 为 `IconClockOutlineRegular size={16}`，chevron 为 `size={14}`（图标尺寸与宿主 `.chevron` 的 14×14 一致）。
 
-```svg
-<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <path d="M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z" fill="currentColor" />
-</svg>
-```
-
-### 3.3 编辑图标 (QueueEditIcon)
-**文件**: `src/client/components/ScheduleDock.tsx` (行 426-432)
-**尺寸**: 16×16
-**用途**: 行内编辑按钮
-
-```svg
-<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <path d="M9.94076 1.34942C10.7047 0.90231 11.6503 0.902415 12.4143 1.34942C12.7061 1.52015 12.9688 1.79118 13.3104 2.13284C13.6521 2.47448 13.9231 2.73721 14.0939 3.02894C14.5408 3.79294 14.5409 4.73856 14.0939 5.50251C13.9231 5.79415 13.652 6.05704 13.3104 6.39861L6.65932 13.0497C6.28068 13.4284 6.00695 13.7108 5.66543 13.9097C5.32391 14.1085 4.94315 14.2074 4.42705 14.3498L3.24394 14.6761C2.77527 14.8054 2.34538 14.9262 2.00131 14.9684C1.65196 15.0112 1.17964 15.0013 0.810764 14.6325C0.441921 14.2637 0.432107 13.7913 0.47486 13.442C0.517035 13.0979 0.6379 12.668 0.767181 12.1993L1.09352 11.0162C1.23588 10.5001 1.33481 10.1193 1.5336 9.77784C1.7325 9.43632 2.0149 9.1626 2.39355 8.78395L9.04466 2.13284C9.38625 1.79126 9.64911 1.52016 9.94076 1.34942ZM15.5427 14.8398H7.55223L8.96707 13.425H15.5427V14.8398ZM3.39382 9.78422C2.965 10.213 2.84244 10.3436 2.75709 10.49C2.67183 10.6366 2.61862 10.8079 2.45733 11.3925L2.13099 12.5756C2.00183 13.0439 1.92194 13.3419 1.88863 13.5536C2.10041 13.5204 2.39872 13.4416 2.86764 13.3123L4.05075 12.9859C4.63544 12.8246 4.80669 12.7715 4.95323 12.6862C5.09968 12.6008 5.23022 12.4783 5.65905 12.0494L10.721 6.98644L8.45577 4.72121L3.39382 9.78422ZM11.7 2.57079C11.3774 2.38198 10.9777 2.38198 10.6551 2.57079C10.5602 2.62647 10.4487 2.72931 10.0449 3.13311L9.45604 3.72094L11.7213 5.98617L12.3102 5.39833C12.7139 4.99457 12.8168 4.88307 12.8725 4.78818C13.0613 4.46561 13.0612 4.06585 12.8725 3.74326C12.8169 3.64827 12.7146 3.53752 12.3102 3.13311C11.9057 2.72863 11.795 2.6264 11.7 2.57079Z" fill="currentColor" />
-</svg>
-```
-
-### 3.4 删除图标 (QueueDeleteIcon)
-**文件**: `src/client/components/ScheduleDock.tsx` (行 435-441)
-**尺寸**: 16×16
-**用途**: 删除任务按钮
-
-```svg
-<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <path d="M14.4782 4.84067L14.2138 10.1152C14.1102 12.1872 14.067 13.0115 13.3866 13.9607C13.1044 14.3546 12.7498 14.6912 12.3424 14.9535C11.8239 15.2872 11.2415 15.4316 10.5585 15.4998C9.88727 15.5668 9.04946 15.5656 7.99998 15.5656C6.95051 15.5656 6.1127 15.5668 5.44142 15.4998C4.75851 15.4316 4.17602 15.2872 3.65753 14.9535C3.25012 14.6912 2.89559 14.3546 2.61332 13.9607C1.93296 13.0115 1.88979 12.1872 1.78619 10.1152L1.52179 4.84067L2.89006 4.77277L3.15343 10.0463C3.26221 12.2218 3.32452 12.6015 3.72646 13.1624C3.90825 13.4161 4.13686 13.6334 4.39927 13.8023C4.66204 13.9714 5.00263 14.0792 5.57825 14.1367C6.16562 14.1953 6.92298 14.1963 7.99998 14.1963C9.07699 14.1963 9.83434 14.1953 10.4217 14.1367C10.9973 14.0792 11.3379 13.9714 11.6007 13.8023C11.8631 13.6334 12.0917 13.4161 12.2735 13.1624C12.6755 12.6015 12.7378 12.2218 12.8465 10.0463L13.1099 4.77277L14.4782 4.84067ZM5.43011 6.22849H6.7994V11.3909H5.43011V6.22849ZM9.20056 6.22849H10.5699V11.3909H9.20056V6.22849ZM8.53597 0.434431C9.17976 0.434431 9.6522 0.426926 10.0966 0.571258C10.2357 0.616451 10.3717 0.672554 10.502 0.738948C10.9182 0.951107 11.2464 1.29099 11.7015 1.74612L12.4978 2.54136H15.3742V3.91169H0.625732V2.54136H3.50218L4.29845 1.74612C4.75358 1.29099 5.08174 0.951107 5.49801 0.738948C5.62831 0.672554 5.76425 0.616451 5.90334 0.571258C6.34776 0.426926 6.82021 0.434431 7.46399 0.434431H8.53597ZM7.46399 1.80476C6.73208 1.80476 6.51641 1.81187 6.32617 1.87369C6.25545 1.89667 6.18668 1.92533 6.12041 1.95907C5.96398 2.03878 5.82348 2.16253 5.44142 2.54136H10.5585C10.1765 2.16253 10.036 2.03878 9.87955 1.95907C9.81329 1.92533 9.74452 1.89667 9.6738 1.87369C9.48356 1.81187 9.26789 1.80476 8.53597 1.80476H7.46399Z" fill="currentColor" />
-</svg>
-```
-
-### 3.5 上箭头发送图标 (QueueSendIcon)
-**文件**: `src/client/components/ScheduleDock.tsx` (行 444-449)
-**尺寸**: 14×14
-**用途**: 插话发送按钮
-
-```svg
-<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <path d="M7.24707 1.01771C7.52897 1.07653 7.77619 1.19694 8.00391 1.38001C8.19202 1.53136 8.39884 1.73784 8.61914 1.95814L12.6396 5.9806L11.6299 6.99134L7.71484 3.0763V13.0001H6.28516V3.0763L2.36914 6.99134L1.35938 5.9806L5.38086 1.95814C5.60116 1.73784 5.80798 1.53136 5.99609 1.38001C6.19476 1.22027 6.4385 1.06739 6.75195 1.01771C6.91296 0.992304 7.07471 0.997504 7.24707 1.01771Z" fill="currentColor" />
-</svg>
-```
+> 曾经抄录在本文的 `QueueClockIcon` / `QueueChevronIcon` / `QueueEditIcon` / `QueueDeleteIcon` / `QueueSendIcon` 五个内联组件已随 #19 删除，故不再保留其 path 副本。
 
 ---
 
-## 4. 设置卡片图标
+## 3. 会话状态 Badge 图标（唯一仍在组件里的内联 SVG）
 
-### ChevronDown
-**文件**: `src/client/components/SchedulerSettingsCard.tsx` (行 57-62)
-**尺寸**: 14×14
-**用途**: 设置卡片展开/收起箭头
+**文件**：`src/client/session-presence.ts`
 
-```svg
-<svg width="14" height="14" viewBox="0 0 14 14" fill="none" className={className} aria-hidden="true">
-  <path d="M3.5 5.25 7 8.75l3.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-</svg>
-```
+两个变体常量，按设置选择：`CLOCK_SVG_CLASSIC`（10×10 像素风）与 `CLOCK_SVG_MODERN`；取值来自 `getClockIconStyle?.()`，`'auto' | 'modern' | 'classic'`，仅 `classic` 走像素版，其余走 modern 版。
+
+结构（像素版）：外层 `<g class="ss-presence-ring">` 是 8 个 2×2 方点组成的环，内层 `<g class="ss-presence-hand">` 是两根指针方点；SVG 用 `shape-rendering="crispEdges"` 保持像素硬边，`aria-hidden="true"`。
+
+动画挂靠在 CSS 上（`src/client/styles.ts`）：`.ss-presence .ss-presence-ring` 默认呼吸动画；`[data-state="urgent"]` 换成更快的 pulse；`[data-state="overdue"]` 停住（`animation: none`）。modern 版对应 `.ss-clock-track` 的同名三条规则。
 
 ---
 
-## 5. 会话状态 Badge 图标
+## 4. 已移除的图标
 
-### Pixel Clock (CLOCK_SVG)
-**文件**: `src/client/session-presence.ts` (行 76-86)
-**尺寸**: 10×10 (像素风格)
-**用途**: 侧栏会话行的定时状态标识
-
-```svg
-<svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true">
-  <g class="ss-presence-ring">
-    <rect x="0" y="0" width="2" height="2"/>
-    <rect x="4" y="0" width="2" height="2"/>
-    <rect x="8" y="0" width="2" height="2"/>
-    <rect x="8" y="4" width="2" height="2"/>
-    <rect x="8" y="8" width="2" height="2"/>
-    <rect x="4" y="8" width="2" height="2"/>
-    <rect x="0" y="8" width="2" height="2"/>
-    <rect x="0" y="4" width="2" height="2"/>
-  </g>
-  <g class="ss-presence-hand">
-    <rect x="4" y="2" width="2" height="2"/>
-    <rect x="6" y="4" width="2" height="2"/>
-  </g>
-</svg>
-```
-
----
-
-## 6. Emoji 图标
-
-### ⏰ 时钟 Emoji
-**文件**: `src/client/toast.tsx` (行 62)
-**用途**: 提醒到达 toast 的图标
-
-```tsx
-<span className="ss-toast-icon" aria-hidden="true">⏰</span>
-```
+- **⏰ 到达 toast**：`src/client/toast.tsx` 已删除，到点以对话消息为准（见 CHANGELOG「移除右下角 ⏰ 到达 toast」）。现在 `⏰` 只剩 `styles.ts` 里一条分节注释，不是运行时图标。
+- 组件内所有手写 `<svg>`（§2 那张表的来源），除 `session-presence.ts` 的两个时钟变体外均已清空——`grep -rn "<svg" src/client/` 只应命中 `session-presence.ts`。
 
 ---
 
 ## 图标颜色规范
 
-| 图标 | 默认色 | 状态色 |
-|------|--------|--------|
-| 时钟按钮 | `currentColor` | - |
-| Badge (scheduled) | `#8b5cf6` (紫色) | - |
-| Badge (urgent) | `var(--dsw-alias-state-warn-secondary)` | 琥珀色 |
-| Badge (overdue) | `var(--dsw-alias-state-error-primary)` | 红色 |
-| 琥珀时钟点 | `#fbbf24` | - |
-| 气泡 | `#fff` | - |
+| 图标 | 颜色 | 出处（类名，非行号） |
+|------|------|---|
+| 输入框时钟按钮 | `var(--dsw-alias-label-secondary)`，图标继承 `currentColor` | `.ss-sched-btn` |
+| dock 动作按钮 | `var(--dsw-alias-label-tertiary)`；`:disabled` 时 `opacity: .45` | `.ss-dock-action` |
+| dock 恢复态（可恢复的暂停项） | `var(--dsw-alias-state-success-primary)` | `.ss-dock-action.ss-paused-active` |
+| dock 插话已发送 | `var(--dsw-alias-state-success-primary)` | `.ss-dock-action-steer.ss-done` |
+| Badge（scheduled，默认） | `#8b5cf6` | `.ss-presence` |
+| Badge（urgent） | `var(--dsw-alias-state-warn-secondary)` | `.ss-presence[data-state="urgent"]` |
+| Badge（overdue） | `var(--dsw-alias-state-error-primary)` | `.ss-presence[data-state="overdue"]` |
+| 悬浮卡状态点（urgent / overdue） | `#f59e0b` / `#f25a5a` | `.ss-hover-status[data-state=…]` |
+| 琥珀时钟点 `#fbbf24` | 仅出现在静态资产 `assets/icons/icon-clock.svg`、`assets/icons/icon-presence-urgent.svg`，运行时代码不使用 | — |
