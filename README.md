@@ -274,6 +274,26 @@ const live = useScheduleSummary()
   `sessions.list` 订阅、30s 状态 tick 与 60s `session.list` 读 RPC（仅页面可见时）。
 - 消费方必须容忍 `undefined`（dsh-later 未安装/未启用时静默降级）。
 
+### 折叠分组徽标：由我们自己注册 facet（issue #36）
+
+「组内有几个会话挂着定时任务」这一格，**语义与实现现在同侧**：本插件按 dsh-group-status 的
+[facet 协议 v1](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md)
+在自己 client 的 `apply` 里登记 `dsh-later.schedule`，交出 fold / merge / label / renderIcon。
+徽标数字的口径（组内**有任务的会话数**）、色档（scheduled 紫 / urgent 橙 / overdue 红）、
+脉冲（只有 overdue 与 urgent 闪）、文案（`N 定时任务` / `N Scheduled`）与图标（官方描边时钟
+14px）都由本插件判定，对方只认协议形状、不再逐家适配。
+
+- **dsh-group-status 是可选搭档**：它未安装 / 未启用时 `require('dsh-group-status/client')` 会抛，
+  本插件兜住并跳过登记。因此它**既不进** `dsh.client.external`，**也不进** client 的模块级 `inject`
+  ——顶层 `inject` 是激活门控，写成硬依赖会让本插件在对方缺席时永不激活（issue #34 那次 P0）。
+- 对端协议版本对不上时**可见地跳过**（一条 `console.warn`）：「我注册了为什么没显示」必须查得出原因。
+- 数字 / 色档 / 脉冲 / 文案 / 图标与它此前的过渡适配器逐项一致，并由
+  `tests/group-status-facet.test.mjs` 把那份适配器算法照抄成 oracle 做对拍——以后谁想改口径，
+  得先过这条基线，改动不再能静默生效。
+
+上面的摘要 API 仍然保留：侧栏行、悬浮卡片这类直接读数的消费方照旧用 `getScheduleSummaryStore()`
+与 `summarizeScheduleGroup()`，两条路读同一份 store。
+
 ## 技术文档
 
 以下内容面向开发者与维护者，已移出本 README：
