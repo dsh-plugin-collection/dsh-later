@@ -20,6 +20,19 @@
 | P6 | 折叠态归一条件 | effect：`rowCount === 0 && !collapsed` → `setCollapsed(true)` | effect：`schedules.length <= 1` → `setCollapsed(true)` | **不是冗余**：两边都有归一；插件空态整块不渲染，它的 `<= 1` 实质是「退回单条直出」。若要追平，改 `length === 0` 的同时要保住「单条恒可见」（宿主 `listVisible = rowCount === 1 \|\| expanded`） | Lead（先判语义再动代码） | ✅ bundle grep `if (rowCount === 0`；ScheduleDock.tsx grep `setCollapsed` |
 | P7 | 编辑框描边/圆角/高度 | `.editor`：`border: .5px solid var(--dsw-alias-border-l4)`、`border-radius: var(--dsw-radius-sm)`、`min-height: 28px`、`max-height: 127px`、`resize: none`、`padding: 3px 8px`、`background: --dsw-alias-bg-base` | `.ss-dock-edit-input`：固定 `height: 28px`、`border: 1px solid var(--dsw-alias-border-l2)`、`border-radius: 6px`、`padding: 0 8px` | **归 #30**，与 textarea 改造同做，别拆两处 | dock-editor | ✅ `_editor{box-sizing` 子串；styles.ts grep `ss-dock-edit-input {` |
 
+> **集成落地结果（Lead，合并 #28–#32 时统一处理）** —— 上表「插件现值」列记录的是**整改前**状态，此处登记结论，勿再按旧值走查：
+>
+> | 项 | 结果 | 落点 |
+> |---|---|---|
+> | P1 描边粗细 | ✅ 已改 `.5px` | `styles.ts` `.ss-dock-body::after` |
+> | P2 背景/描边分层 | ✅ 已拆 `::before`(背景) + `::after`(描边) | 同上 |
+> | P3 行圆角 | ✅ 已换 `var(--dsw-radius-md)`（原字面 `8px`） | `styles.ts` `.ss-dock-row` |
+> | P4 `corner-shape` | ✅ 已补（并注明 `round` 本就是初始值） | `styles.ts` `.ss-dock-action` |
+> | P5 折叠箭头 | ⚠️ **有意不追平**：保留 rotate，差异理由已就地登记 | `styles.ts` `.ss-dock-chevron.ss-open` 上方注释 |
+> | P6 折叠归一条件 | ✅ 已按语义判定移除该 effect（单条由 `expanded` 强制直出，宿主空态本组件整体不渲染），推理写在代码注释里 | `ScheduleDock.tsx` 折叠态复位口径注释 |
+> | P7 编辑框 | ✅ 已随 #30 的 textarea 改造一并对齐（`.5px`/`--dsw-radius-sm`/`min-height 28`/`max-height 127`/`resize:none`） | `styles.ts` `.ss-dock-edit-input` |
+
+
 ## §2 一致项（已对齐，集成时勿改坏）
 
 | # | 项 | 宿主值 | 插件值 | 已验证？ |
