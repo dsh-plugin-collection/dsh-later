@@ -75,14 +75,21 @@ ${body}
 mkdirSync('lib', { recursive: true });
 writeFileSync('lib/client.js', wrapped);
 
-// 4. 部署同步：各 profile 里安装的本插件与工作区是**硬链接**关系，但
-//    tsc/esbuild 重写文件时可能替换 inode（unlink+create），悄悄断链导致
-//    profile 端拿到旧代码。这里对所有含 dsh-later 的 profile 做 best-effort 强制重链
-//    （不止 web——web-test 等 profile 也要，否则跑错 profile 会像“没生效”）。
+// 4. 部署同步（**默认关闭**，issue #46）：各 profile 里安装的本插件与工作区是
+//    **硬链接**关系，tsc/esbuild 重写文件时可能替换 inode（unlink+create），悄悄
+//    断链导致 profile 端拿到旧代码——重链就是为了解决这个。但它原先是 build 的
+//    **默认副作用**，代价更大：未合并分支只要 build 一次就进到运行中的 host；
+//    多个 worktree 还会经 profile 共享 inode、彼此静默覆盖（实测发生过）。
+//    因此改为显式部署：`npm run deploy` / `--deploy` / `DSH_LATER_RELINK=1`。
+//    决策逻辑抽在 scripts/relink-policy.mjs（纯函数，可测且不碰文件系统）。
+import { shouldRelink, RELINK_SKIP_NOTICE } from './scripts/relink-policy.mjs';
 import { readdirSync, statSync, linkSync, existsSync, rmSync } from "node:fs";
 import { homedir } from 'node:os';
 import { resolve as resolvePath, dirname as parentOf } from 'node:path';
-try {
+
+if (!shouldRelink(process.argv.slice(2))) {
+  console.log(RELINK_SKIP_NOTICE);
+} else try {
   const localLib = resolvePath(process.cwd(), 'lib');
   const profilesRoot = resolvePath(homedir(), '.dsh/profiles');
   const targets = [];
@@ -92,6 +99,8 @@ try {
       if (existsSync(lib) && lib !== localLib) targets.push({ name, lib });
     }
   }
+  /** 实际被改写的 profile 名（含链接数），用于末尾的部署回报。 */
+  const deployed = [];
   for (const { name, lib: profileLib } of targets) {
     let linked = 0;
     const walk = (dir) => {
@@ -118,7 +127,14 @@ try {
       }
     };
     walk(localLib);
-    if (linked > 0) console.log(`🔗 已重链 ${linked} 个文件到 profile:${name}`);
+    if (linked > 0) {
+      deployed.push(`${name}(${linked} 文件)`);
+      console.log(`🔗 已重链 ${linked} 个文件到 profile:${name}`);
+    }
+  }
+  // 部署是显式触发的，回报也要显式：说清动了哪些 profile、代码来自哪个工作树。
+  if (deployed.length > 0) {
+    console.log(`🚀 已部署到 ${deployed.join('、')}；来源 ${localLib}`);
   }
 } catch (error) {
   console.warn(`⚠️ profile 重链跳过: ${error instanceof Error ? error.message : String(error)}`);
