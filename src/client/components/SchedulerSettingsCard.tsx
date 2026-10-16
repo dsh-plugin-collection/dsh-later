@@ -38,18 +38,33 @@ export interface SchedulerSettings {
   clockIconStyle?: 'auto' | 'modern' | 'classic';
   /** 高级语法（Beta）：多次写法开关，默认开。 */
   advancedSyntax?: boolean;
+  /** 是否解除提示字符的默认上限（1000）。**默认关**，开启后 maxPromptChars 才生效。 */
+  allowLongPrompts?: boolean;
+  /** 提示字符上限（≥1 整数）；仅在 allowLongPrompts=true 时生效。 */
+  maxPromptChars?: number;
 }
 
 /** 字段元数据（顺序固定，便于稳定渲染）。 */
 type FieldDef =
   | {
       readonly kind: 'boolean';
-      readonly key: 'showButton' | 'confirmDelivery' | 'advancedSyntax';
+      readonly key: 'showButton' | 'confirmDelivery' | 'advancedSyntax' | 'allowLongPrompts';
       readonly labelKey: string;
       readonly hintKey?: string;
       readonly defaultValue: boolean;
     }
-  | { readonly kind: 'number'; readonly key: 'maxSchedules'; readonly labelKey: string; readonly hintKey: string; readonly defaultValue: number }
+  | {
+      readonly kind: 'number';
+      readonly key: 'maxSchedules' | 'maxPromptChars';
+      readonly labelKey: string;
+      readonly hintKey: string;
+      readonly defaultValue: number;
+      /**
+       * 依赖另一个布尔开关：该开关为关时本字段**禁用并灰显**（§6.3 联动）。
+       * 仅影响渲染与禁用态，不改数值——开启开关不会自动改动本字段。
+       */
+      readonly requiresEnabled?: 'allowLongPrompts';
+    }
   | { readonly kind: 'time'; readonly key: 'workStart' | 'workEnd' | 'lunchStart' | 'lunchEnd' | 'eveningEnd'; readonly labelKey: string; readonly hintKey?: string }
   | { readonly kind: 'enum'; readonly key: 'steerDelivery' | 'onUnconfirmed' | 'clockIconStyle'; readonly labelKey: string; readonly hintKey?: string; readonly options: readonly string[]; readonly defaultValue: string };
 
@@ -86,6 +101,23 @@ const SECTIONS: readonly SectionDef[] = [
         defaultValue: 'auto',
       },
       { kind: 'number', key: 'maxSchedules', labelKey: 'maxSchedulesLabel', hintKey: 'maxSchedulesHint', defaultValue: 100 },
+      {
+        kind: 'boolean',
+        key: 'allowLongPrompts',
+        labelKey: 'allowLongPromptsLabel',
+        hintKey: 'allowLongPromptsHint',
+        // 与 host schema 的 default(false) 一致：默认**关**，上限恒为 1000。
+        defaultValue: false,
+      },
+      {
+        kind: 'number',
+        key: 'maxPromptChars',
+        labelKey: 'maxPromptCharsLabel',
+        hintKey: 'maxPromptCharsHint',
+        // 与 host schema 的 DEFAULT_MAX_PROMPT_CHARS 一致。
+        defaultValue: 1000,
+        requiresEnabled: 'allowLongPrompts',
+      },
     ],
   },
   {
@@ -245,7 +277,12 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
     }
     if (field.kind === 'boolean') {
       const v = value[field.key];
-      return v === false ? 'false' : 'true';
+      // 缺省（未设置）按**该字段声明的默认值**判定，不能写死 true：
+      // showButton/confirmDelivery/advancedSyntax 恰好都默认开，旧实现
+      // `v === false ? 'false' : 'true'` 对它们碰巧正确；而 allowLongPrompts
+      // 默认**关**，写死 true 会让开关显示「开」、宿主按「关」处理——
+      // 用户看到 maxPromptChars 已启用却仍被 1000 字符拒绝。
+      return (v ?? field.defaultValue) ? 'true' : 'false';
     }
     if (field.kind === 'enum') {
       const v = value[field.key];
@@ -263,7 +300,8 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
     }
     if (field.kind === 'boolean') {
       const v = base[field.key];
-      return v === false ? 'false' : 'true';
+      // 同 displayValue：按字段声明的默认值判定，不写死 true。
+      return (v ?? field.defaultValue) ? 'true' : 'false';
     }
     if (field.kind === 'enum') {
       const v = base[field.key];
@@ -308,6 +346,32 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
     setFailed(false);
   }, []);
 
+  /** 读某字段的生效值（pending 优先于已保存），复用字段自身的渲染口径。 */
+  const effectiveOf = (key: string): string => {
+    const field = FIELDS.find((entry) => entry.key === key);
+    return field === undefined ? '' : displayValue(field);
+  };
+
+  /**
+   * 「投递确认」当前是否开启（pending 优先于已保存）—— 决定 steer 风险文案的口径。
+   * 默认 true（与 schema 一致：未设置即为开）。
+   */
+  const confirmEnabled = effectiveOf('confirmDelivery') !== 'false';
+
+  /**
+   * 「允许长文本」是否开启（pending 优先）—— 决定 maxPromptChars 的可编辑态（§6.3）。
+   * 默认 false：与 host schema 的 default(false) 同源，关闭时上限恒为 1000。
+   *
+   * ⚠️ 声明位置有硬性要求：必须在 handleSave / invalidField 之前。`const` 处于 TDZ，
+   * 若把它们放在后面而在 `handleSave` 的依赖数组里引用，组件**渲染时**就会
+   * ReferenceError（不是调用时才炸），整张设置卡白屏。
+   */
+  const allowLongEnabled = effectiveOf('allowLongPrompts') === 'true';
+
+  /** 该字段是否因联动锁而不可编辑（§6.3）。 */
+  const isGateLocked = (field: FieldDef): boolean =>
+    'requiresEnabled' in field && field.requiresEnabled === 'allowLongPrompts' && !allowLongEnabled;
+
   const handleSave = useCallback(async () => {
     if (!dirty || saving || !writable) return;
     setSaving(true);
@@ -325,6 +389,11 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
           continue;
         }
         const field = FIELDS.find((entry) => entry.key === key);
+        // 联动锁住的字段：非法草稿**不写**。invalidField 对锁住字段返回 null
+        // （不锁死保存按钮），所以这里必须自己拦一道，否则「开长文本→填非法值→
+        // 关长文本→保存」会把脏值落进配置。合法值照写：宿主在关闭态本就不读它，
+        // 保留用户填的数也符合「切换开关不自动改数值」（§6.3）。
+        if (field !== undefined && isGateLocked(field) && validate(field, p.value) !== null) continue;
         const coerced =
           field?.kind === 'number'
             ? Number(p.value)
@@ -338,23 +407,20 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
     } finally {
       setSaving(false);
     }
-  }, [scope, pending, dirty, saving, writable]);
+  }, [scope, pending, dirty, saving, writable, allowLongEnabled]);
 
   // 校验所有 pending 字段（已弃 dirty 字段忽略）。
   const invalidField = (field: FieldDef): string | null => {
+    // 联动禁用的字段不参与校验：§6.3 要求「切换开关不自动改数值」，所以
+    // 用户可能先开了长文本、填了非法值、又关掉——此时该字段既不可编辑，
+    // 也不该把整张卡的保存按钮锁死（那会让用户以为关不掉长文本）。
+    if (isGateLocked(field)) return null;
     const p = pending[field.key];
     if (p === undefined) return null;
     return validate(field, p.value);
   };
   const anyInvalid = FIELDS.some((field) => invalidField(field) !== null);
   const saveDisabled = !dirty || saving || !writable || anyInvalid;
-
-  /**
-   * 「投递确认」当前是否开启（pending 优先于已保存）—— 决定 steer 风险文案的口径。
-   * 默认 true（与 schema 一致：未设置即为开）。
-   */
-  const confirmEnabled =
-    (pending.confirmDelivery?.value ?? (value.confirmDelivery === false ? 'false' : 'true')) !== 'false';
 
   return (
     <div className="ss-settings-form">
@@ -410,6 +476,11 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
               const userHas = isUserOverridden(field.key);
               const fieldId = `ss-${field.key}`;
               const helpHint = hintKey !== undefined && t(hintKey).length > 0;
+              /**
+               * 联动锁：字段声明了 `requiresEnabled` 且那个开关当前为关 → 本字段
+               * 禁用并灰显（§6.3）。数值**不改**——开关打开后仍是原值。
+               */
+              const gateLocked = isGateLocked(field);
               const badges = userHas ? (
                 <span className="ss-card-badges">
                   <span className="ss-card-badge">{t('overriddenLabel')}</span>
@@ -498,10 +569,17 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
                       aria-invalid={invalid !== null || undefined}
                       value={displayValue(field)}
                       placeholder={field.kind === 'number' ? String(field.defaultValue) : undefined}
-                      disabled={!writable || saving}
+                      disabled={!writable || saving || gateLocked}
+                      aria-describedby={gateLocked ? `ss-gate-${field.key}` : undefined}
                       onChange={(event) => handleFieldEdit(field, event.target.value)}
                     />
                   )}
+                  {/* §6.3 联动：依赖开关处于关闭态时，就地说明为何不可编辑。 */}
+                  {gateLocked ? (
+                    <p className="ss-card-gate" id={`ss-gate-${field.key}`} role="status">
+                      {t('maxPromptCharsLockedHint')}
+                    </p>
+                  ) : null}
                   {invalid !== null ? (
                     <p className="ss-card-invalid" role="status">{invalid}</p>
                   ) : null}
