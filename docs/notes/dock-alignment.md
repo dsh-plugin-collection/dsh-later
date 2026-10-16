@@ -104,7 +104,11 @@
 | I4 | 行内容 | 单行 preview（200 字截断 + `projectUserText`） | 两行：`时间 · 倒计时 · 正文` + 进度条 | clock-scoped 条目的核心信息 | ✅ |
 | I5 | 进度条 | 无 | `.ss-dock-bars` + 三个插件自有变量 `--ss-bar-duration` / `--ss-bar-delay` / `--ss-bar-divider` | 同上；`styles.ts` 只定义 `--ss-bar-divider`，另两个由组件内联注入 | ✅ |
 | I6 | 行文本投影 | `projectUserText(text, [])` | `item.prompt` 直出 + `title` | **待产品决策**，不算漂移 | ⚠️ |
-| I7 | 折叠／结构可访问性 | `aria-controls` + `id` + `hidden`（保留 DOM）、header `disabled: interactionActive` | 只有 `aria-expanded`，列表条件卸载，header 永不 disabled | 这是**缺陷不是有意差异**，归 #31 修（列在此处只为提醒：修它会影响 §4 的 anchor 包裹方式） | ✅ |
+| I7 | 折叠／结构可访问性 | `aria-controls` + `id` + `hidden`（保留 DOM）、header `disabled: interactionActive` | ~~只有 `aria-expanded`，列表条件卸载，header 永不 disabled~~ | **已由 #31 修掉**（现与宿主同形：`useId()` + `aria-controls` + `hidden` 常驻 + `interactionActive` 锁头）。保留此行记录原委；修它确实影响了 §4 的 anchor 包裹方式 | ✅ |
+| I8 | 附件带横向策略 | `.attachments{max-width:55%; overflow:hidden}`（静默裁切） | `.ss-dock-attachments{flex-wrap:nowrap; overflow-x:auto}`，**不设 max-width** | 宿主那个 55% 是给**单行正文**让路；本插件附件独占第三带，与正文不抢横向（dock 实测 696px，24px 缩略图一行可容 ~20 张，每任务上限 8）。照抄 55% 反而是把别人的约束当自己的 | ✅ |
+| I9 | 缩略图 effect 依赖 | `QueueThumb` 依赖 `[attachment, loadImage]`（对象） | 依赖 `[attachment_id, sessionId, loadImage]`，块内容经 `blockRef` 读取 | **隐性前提差异，最容易照抄错的一条**：宿主 dock 没有每秒 tick，对象身份稳定；本仓 `schedules` 每秒由 `.map()` 造新对象，照宿主写法等于**每秒重启一次加载**。宿主内部虽有 `attachmentId` 缓存键去重，但会变成每秒一轮 promise churn | ✅ |
+| I10 | 附件降级形态 | 加载失败与加载中都是同一个无声空占位 | 两态分开：**能力缺失**（这台宿主没有 `uiConversation` face）→ 图片位直接不渲染；**读取失败**（本该有却拿不到）→ 退化成「图片不可用 + 大小」可读 chip | 前者不是异常，满屏「不可用」是噪音；后者才值得明说。且元数据（`name`/`bytes`）随块带出，宿主没有这一层信息可用 | ✅ |
+| I11 | `loadImage` 注入形状 | `queueDockEntry` 用 `inject: (sessionId) => …` 在注入时绑死会话 | 零参 `inject` + `loadImage(sessionId, ref)`，与仓内既有 `callCommand` 同形 | 本仓 `ClientSlotDeclaration.inject` 的镜像声明是 `() => object`（不收参数），照宿主形状写直接 TS2322。**顺带一条待办**：该镜像声明与宿主契约不符——宿主 `runInject` 实际调用 `inject(binding.key, actions)`，镜像却声明成零参，后来人照镜像会误以为拿不到 sessionId（Lead 拟另开小 issue，不塞进 #38） | ✅ |
 
 ## §8 怎么复核
 
