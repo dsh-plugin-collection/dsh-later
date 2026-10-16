@@ -152,3 +152,39 @@ Gitea #32 原是一条混合 issue，按区域归属拆开执行：
 
 **护栏**：`[data-queue-dock]` 是宿主唯一稳定的选择器 hook。做任何 dock 对齐改动时，把真队列条与提醒条**同屏**截图比对（`scripts/capture/` 可复用），而不是只对着单条 dock 调 —— 上一轮「1px vs .5px 描边」这类漂移就是这么漏掉的。
 
+## 9. 分组徽标的「定时任务」：由本插件注册 facet，而不是让对方继续适配（issue #36）
+
+折叠分组的徽标由 dsh-group-status 画。此前它 `require('dsh-later/client')` 读我们的摘要 store，
+按具名字段（`scheduledSessions` / `scheduleState`）加一份色档反推把「定时任务」画进去。语义归我们，
+实现归对方：任一方改口径，另一方既不报错也不报警，只静默显示成旧读数。现在方向反过来——本插件按
+[facet 协议 v1](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md)
+登记 `dsh-later.schedule`，交出 fold / merge / label / renderIcon，对方只认协议形状。
+
+四条取舍，改这块代码前先读完：
+
+1. **同名 id 而不是新 id**。`dsh-later.schedule` 与对方过渡适配器同名，同 id 冲突**由来源决胜**
+   （provider 恒胜 legacy），与两家 apply 的先后无关。于是我们一注册，代管那份自动让位，既不重复
+   计数，也不需要协调发布顺序；换成新 id 会让徽标同时出现两份。
+2. **基线优先于「更该显示什么」**。`count` 的口径（会话数而非任务数）、色档、脉冲、文案、图标尺寸
+   逐项对齐过渡适配器：迁移的验收标准是「注册前后徽标逐字不变」，任何一处不同都算 bug（要么是这里
+   语义写错，要么是对方 bug），而不是顺手改设计。文案要不要说清「N 会话 · M 条任务」是另一个决定，
+   它得连对方的基线一起改，见 issue #36 的评论。
+3. **可选依赖绝不变成硬依赖**。dsh-group-status 缺席时 `require('dsh-group-status/client')` 抛错，
+   必须兜住；它**既不进** `dsh.client.external`，**也不进** client 的模块级 `inject`——顶层 inject 是
+   fiber 激活门控（issue #34 那次 P0 就是 host 入口列了 client 服务导致整插件 pending），写死一个可选
+   搭档等于用整个定时功能去换一只徽标。
+4. **逻辑与宿主图标集分层**。`src/schedule-facet.ts` 零 React、零 DOM，fold / merge / 文案 / 取色都在
+   这里，`node --test` 直接跑；`src/client/group-status-facet.ts` 只负责容错 require 与画图标（宿主
+   图标集的 `require` 图在本仓测试里解析不了）。分层的收益是可验证性：`tests/group-status-facet.test.mjs`
+   把过渡适配器的算法**照抄成 oracle** 与实现对拍，对方删掉 `legacy/` 之后这条回归线仍留在本仓——
+   以后想改显示口径必须先过它，改动不再能静默生效。
+
+**容错的三种形态，只有一种该出声**：未安装 / 未启用（`require` 抛）、对端旧版还没有登记面 → 静默跳过
+（旧版仍由它的适配器画徽标，行为与迁移前一致；每次启动刷一条没人能处理的警告只会淹掉真问题）；对端有
+登记面但协议版本对不上 → 一条 `console.warn`，因为「我注册了为什么没显示」必须能查出原因，这正是协议
+文档点名要避免的不可诊断失败。
+
+**顺带**：`STATE_RANK` 从 `schedule-summary.ts` 导出复用，分组聚合与 facet 跨层合并认同一套「谁更紧急」；
+两处各写一遍就是徽标与行内读数漂移的起点。取色函数对**未知 tone 回落 info**——协议允许「新增 tone 取值
+不升版本」，直接下标取值会拿到 `undefined`，于是徽标跟着主题变色且无任何报错。
+

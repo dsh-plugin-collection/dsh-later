@@ -4,6 +4,34 @@
 
 ## 未发布
 
+- **feat** 折叠分组徽标上的「定时任务」改由本插件自己注册 facet（issue #36）。
+  - 迁移前那一格由 dsh-group-status 的过渡适配器**代管**：它 `require('dsh-later/client')` 读我们的
+    摘要 store，再按具名字段与色档反推画图。语义一直归本插件，实现却写在对方仓库里——任一方改
+    口径，另一方既不报错也不报警，只静默显示成旧读数。现在按 group-status 的 facet 协议 v1 由本
+    插件登记**同名**的 `dsh-later.schedule`：同 id 冲突由来源决胜（provider 恒胜 legacy），与两家
+    apply 的先后无关，所以一注册适配器就自动让位，不需要协调发布顺序。
+  - **基线逐字不变**：`count` 仍是「组内**有任务的会话数**」（不是任务数）、色档紫 / 橙 / 红、
+    只有 urgent 与 overdue 才脉冲、文案 `N 定时任务` / `N Scheduled`、图标官方描边时钟 14px。
+    `tests/group-status-facet.test.mjs` 把那份适配器算法**照抄成 oracle** 与实现对拍（zh / en 双语、
+    跨层 merge、图标元素树比组件身份）；对方删掉 `legacy/` 之后，这份 oracle 仍留在本仓当回归线——
+    以后想改显示口径必须先过它，改动不再能静默生效。
+  - 分层：新增 `src/schedule-facet.ts`（零 React、零 DOM，fold / merge / label / 取色都在里面，
+    `node --test` 直接跑）与 `src/client/group-status-facet.ts`（只做两件事：`require` 容错、画图标）。
+    取色函数对**未知色档回落 info**——协议明文「新增 tone 取值不升版本」，直接下标取值会拿到
+    `undefined`，于是徽标跟着主题变色且不报错，正是本 issue 要消灭的那类静默漂移。
+  - 容错三态：未安装 / 未启用（`require` 抛）与「对端是旧版、还没有登记面」都**静默跳过**——这两
+    种是正常部署形态，每次启动刷一条没人能处理的警告只会淹掉真问题；对端有登记面但协议版本对不上
+    则留**一条 `console.warn`**，因为「我注册了为什么没显示」必须可诊断。三条路径都不影响本插件
+    其余功能。
+  - dsh-group-status **不进** `dsh.client.external`，也**不进** client 的模块级 `inject`：顶层 inject 是
+    fiber 激活门控（issue #34 那次 P0 就是它踩的坑），列上这个可选搭档等于把整个定时功能押出去。
+    这条不变式由单测锁住。
+  - 顺带把 `STATE_RANK` 从 `schedule-summary.ts` 导出复用：分组聚合与 facet 的跨层合并认同一套
+    「谁更紧急」，两处各写一遍就是徽标与行内读数漂移的起点。
+  - 验证：两个 tsconfig 全过；`npm test` 337 通过（本 issue 新增 28 条）。本机 DSH（装了
+    dsh-group-status 0.2.2）加载新产物后无新增 console 报错；折叠徽标本身需要「折叠分组内有会话
+    挂着提醒」这个真实条件，本次**未**在线上目视比对，显示层的一致性由上述基线对拍承担。
+
 - **fix** P0：插件 host 入口永久 pending，导致 `/later`、`/schedule`、`/user-schedule-*` 集体消失。
   - 根因：`src/index.ts` 的模块级 `inject` 里列了 `'locale'`。cordis 把顶层 `inject` 当
     **激活门控**——服务不来，整个入口就不启动，`ctx.commands.register` 一次都没执行。

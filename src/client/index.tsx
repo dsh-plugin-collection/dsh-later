@@ -28,8 +28,9 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from './runtime-augment.js';
 import { name } from '../domain.js';
-import { schedDicts } from './strings.js';
+import { dictFor, schedDicts } from './strings.js';
 import { injectStyles } from './styles.js';
+import { registerLaterScheduleFacet } from './group-status-facet.js';
 import { SchedButton } from './components/SchedButton.js';
 import { ScheduleDock } from './components/ScheduleDock.js';
 import { SchedulerSettingsCard } from './components/SchedulerSettingsCard.js';
@@ -290,6 +291,38 @@ function apply(ctx: Context): void {
       },
     }), 'dsh-later: locale');
   }
+
+  /**
+   * 向 dsh-group-status 登记本插件的「定时任务」facet（issue #36）。
+   *
+   * 为什么是「我注册」而不是让对端继续适配：徽标上那个数字的语义（什么算紧急、要不要
+   * 催用户、是几会话）一直归本插件，实现却写在对方仓库里——一方改口径，另一方不报错，
+   * 只静默显示旧口径。现在语义与实现同源。facet id 与对端的过渡适配器**同名**
+   * （`dsh-later.schedule`），同 id 由来源决胜（provider 恒胜 legacy），与两家 apply
+   * 的先后无关：我们一登记，代管那份自动让位，不需要协调发布顺序。
+   *
+   * 三条不能打乱的约定：
+   *  1. **排在 locale 注册之后**。`label` 经 `scheduledWord` 现读宿主 locale 服务；字典
+   *     还没落位时，宿主对未注册的 key 是**原样回显键名**（链尾 `?? key`），于是徽标的
+   *     `aria-label` 会念出 `facetScheduled` 这种裸键。`ctx.effect` 的 execute 同步跑
+   *     （见上面 locale 段第 2 条），所以这一段的位置本身就是时序保证。
+   *  2. **排在 summary 创建之后**。facet 直接绑这份 store——本插件的 store 与 apply 同批
+   *     创建，不存在「store 迟到」那条路径（对端代管时才需要包一层登记面订阅）。
+   *  3. **不进顶层 `inject`，也不写进 `dsh.client.external`**。dsh-group-status 是**可选**
+   *     搭档：硬依赖会让本插件在对方缺席时卡在 pending、整个插件永不激活（issue #34
+   *     那次 P0 就是顶层 inject 门控踩的坑）。对端缺席时 `registerLaterScheduleFacet`
+   *     交回一个空操作注销函数，定时功能本身照常、console 无新增报错。
+   *
+   * 卸载时注销。对端 `remove(id, facet)` 只摘「当前登记的还是它」的那一份，所以热重载里
+   * 新注册先于旧 dispose 也不会把新的摘掉。
+   */
+  ctx.effect(
+    () => registerLaterScheduleFacet({
+      store: summary,
+      scheduledWord: () => dictFor(locale?.getSnapshot().active).facetScheduled,
+    }),
+    'dsh-later: group status facet',
+  );
 
   /**
    * 执行一条 slash 命令（解析会话 face → command()）。

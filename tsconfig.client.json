@@ -20,6 +20,7 @@
     "src/presence.ts",
     "src/schedule-summary.ts",
     "src/schedule-summary-store.ts",
+    "src/schedule-facet.ts",
     "src/smart-window.ts",
     "src/time-utils.ts",
     "src/domain.ts",
