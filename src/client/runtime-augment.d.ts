@@ -16,6 +16,7 @@
  */
 import type { ComponentType, ReactNode } from 'react';
 import type { Context } from '@deepseek-ai/cordis';
+import type { SchedUIKey } from './strings.js';
 
 /** 一个 slot 声明的核心字段（足够 plugin 调用；不展开 SlotMap 全部键）。
  *
@@ -137,3 +138,80 @@ declare module '@deepseek-ai/cordis' {
     conversation?: unknown;
   }
 }
+
+/* ============================================================================
+ * locale seat 的键表（issue #28）
+ *
+ * 官方合并形状核实自宿主包：**成员值是 string 联合类型别名**，不是对象、不是字典
+ * 类型（dsh-client-locale/lib/types/client/index.d.ts:20-26 的 `common: CommonKey`
+ * 与 `'settings.locale': SettingsLocaleKey`；dsh-client-ui-conversation
+ * /lib/types/client/apply.d.ts:5-8 的 `conversation: ConversationKey`，而
+ * `ConversationKey = keyof typeof …`）。写成字典形状的话
+ * `LocaleKeysOf<N> = (LocaleNamespaceMap[N] & string) | CommonKeyOf` 会退化成
+ * `never`，`t` 虽然还在类型里却一个 key 都不吃——typecheck 只会报「参数不能赋给
+ * never」这种看不出根因的错，所以这里加正向哨兵（见文件末尾）。
+ * ========================================================================== */
+
+/** 本插件在宿主 locale 服务里的 namespace（与 index.tsx 的 `NS` 同值）。 */
+export type LaterLocaleNamespace = 'settings.plugins.later';
+
+/**
+ * 宿主 `LocaleNamespaceMap` 的键表镜像。
+ *
+ * 为什么要镜像而不是只靠下面的 `declare module`：`@deepseek-ai/dsh-client-ui-slots`
+ * 不在本仓依赖里（只有 dsh-client-ui-primitives），本文件又是带顶层 import 的模块，
+ * 那段 `declare module` 对不可解析的模块名只能算「幽灵合并」——在本仓编译单元里
+ * 拿不到那个 interface，断言就无从谈起。镜像与 `declare module` 必须保持一致，
+ * 宿主包进入编译单元后由后者接管。
+ */
+export interface LaterLocaleNamespaceMap {
+  'settings.plugins.later': SchedUIKey;
+}
+
+/** 宿主 `LocaleKeysOf` 的镜像（dsh-client-ui-slots/lib/types/index.d.ts:59）。 */
+type LaterLocaleKeysOf<N extends keyof LaterLocaleNamespaceMap & string> =
+  LaterLocaleNamespaceMap[N] & string;
+
+/** 宿主 `Translate` / `TranslateNS` 的镜像（同文件 :47-67）。 */
+type LaterTranslate<K extends string> = (key: K, params?: Record<string, unknown>) => string;
+type LaterTranslateNS<N extends keyof LaterLocaleNamespaceMap & string> = LaterTranslate<LaterLocaleKeysOf<N>>;
+
+/** 宿主 `PropsLocale` 的镜像（同文件 :78-81）：NS 不在表里时**塌成 `object`**。 */
+export type LaterPropsLocale<N> =
+  N extends keyof LaterLocaleNamespaceMap & string ? { t: LaterTranslateNS<N> } : object;
+
+/**
+ * 正向哨兵：必须是 `true`。
+ *
+ * index.tsx 里有一行 `const _dockSeatProbe: LaterDockSeatProbe = true;` 消费它——
+ * 断言体写在本文件（.d.ts，`skipLibCheck` 下不会被检查），**只有在被检查的文件里
+ * 消费才真的会失败**。合并形状写错、或宿主规则变化导致 `t` 塌陷 / 键集退化时，
+ * 这里解析成 `false`，那一行立刻编译失败。
+ */
+export type LaterDockSeatProbe =
+  ['t'] extends [keyof LaterPropsLocale<LaterLocaleNamespace>]
+    ? 'panelCount' extends Parameters<LaterPropsLocale<LaterLocaleNamespace>['t']>[0]
+      ? 'steerTask' extends Parameters<LaterPropsLocale<LaterLocaleNamespace>['t']>[0]
+        ? true
+        : false
+      : false
+    : false;
+
+/**
+ * 真正的宿主合并点：与上面 `LaterLocaleNamespaceMap` 必须同值。
+ *
+ * 说明本仓的编译现实（不要误以为它在这里生效）：
+ *  - `@deepseek-ai/dsh-client-ui-slots` 不是本仓依赖，也不在 node_modules 里，
+ *    所以在本仓编译单元内这是一段**无法解析的合并**（`skipLibCheck` 下不报错，
+ *    也不产生效果）；`LaterDockSeatProbe` 才是可验证的那一份。
+ *  - 一旦宿主把该包纳入插件可见的类型面（或本仓加了 devDependency），这段就接管，
+ *    与镜像同形 ⇒ 行为不变。
+ *  - **不为了类型去加依赖**：那会牵动 build 的 external 面与发布依赖清单。
+ */
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** Session scheduler 的全部客户端 UI 词条（strings.ts 的 schedDicts）。 */
+    'settings.plugins.later': SchedUIKey;
+  }
+}
+

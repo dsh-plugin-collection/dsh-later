@@ -9,9 +9,8 @@
  *  - 每条可单独取消；可点击编辑图标进入行内修改内容（保留原时刻）
  * @module dsh-later/client/components/ScheduleDock
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
-import { createPortal } from 'react-dom';
 import {
   IconChevronDownOutlineRegular,
   IconClockOutlineRegular,
@@ -21,11 +20,12 @@ import {
   IconPlayOutlineRegular,
   IconSendOutlineRegular,
   IconTrashOutlineRegular,
+  Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
 import { format, type SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
-import { useSchedT, type LocaleFaceLike } from '../useSchedT.js';
+import { useSchedT, type LocaleFaceLike, type SchedTranslate } from '../useSchedT.js';
 import type { CommandOutcome } from '../../command-outcome.js';
 import {
   barSegments,
@@ -95,16 +95,26 @@ function planBarAnimationFor(
 export interface ScheduleDockInjected {
   /** 向宿主执行一条 slash 命令；返回是否受理（`matched`）。 */
   callCommand: (sessionId: string, line: string) => Promise<CommandOutcome>;
-  /** 宿主 locale 服务（跟随 DSH 界面语言；缺失回退中文）。 */
-  locale?: LocaleFaceLike;
 }
 
+/**
+ * dock 的取词函数类型：`SchedStrings` 的键集卡住 key。
+ *
+ * 这是本次「属性式取词改成函数式取词」机械迁移的主要防错手段——拼错的键会在这里编译
+ * 失败，而不是把键名（`panelCount`）直接渲染到界面上。
+ */
+export type ScheduleDockTranslate = (key: keyof SchedStrings, params?: Record<string, string | number>) => string;
+
 /** 会话作用域插槽条目收到的标准 props + 注入。 */
-export interface ScheduleDockProps extends Omit<ScheduleDockInjected, 'locale'> {
-  /** 向宿主执行一条 slash 命令；返回是否受理（`matched`）。 */
-  callCommand: (sessionId: string, line: string) => Promise<CommandOutcome>;
-  /** 宿主 locale 服务（跟随 DSH 界面语言；缺失回退中文）。 */
-  locale?: LocaleFaceLike;
+export interface ScheduleDockProps extends ScheduleDockInjected {
+  /**
+   * 宿主 locale seat 给的取值函数（条目声明了 `locale: NS` 才会被挂上，见
+   * index.tsx 的 dock 注册）。形状镜像 `useSchedT.SeatTranslate`。
+   *
+   * 声明为可选：旧 renderer 不认 `locale` 声明、压根不给 seat；此时整体回落
+   * strings.ts 的本地字典（见 useSchedT.schedTranslate）。
+   */
+  t?: (key: string, params?: Record<string, unknown>) => string;
   /** 会话作用域标准 hook：读取投影。 */
   useProjection?: (key: string) => { schedules?: readonly ClientSchedule[] } | undefined;
   /** 会话 id。 */
@@ -133,9 +143,11 @@ function canPause(item: ClientSchedule, now: number): boolean {
   return Number.isFinite(epoch) && epoch > now;
 }
 
-export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: ScheduleDockProps): JSX.Element | null {
+export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
   const now = useNow(1000);
-  const { t } = useSchedT(locale);
+  // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
+  // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
+  const { tr: t } = useSchedT(undefined, seatT);
   const projection = typeof useProjection === 'function' ? useProjection('userSchedules') : undefined;
   /**
    * 删除暂停项的本地摘除集合。
@@ -204,14 +216,26 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
   );
 
   const [collapsed, setCollapsed] = useState(true);
-  const [cancelling, setCancelling] = useState<ReadonlySet<string>>(new Set());
+  /** 折叠头与列表的关联 id（`aria-controls` ↔ `id`），宿主同款做法。 */
+  const listId = useId();
+  /**
+   * 全局唯一在途标记（issue #31/#32 收敛，对齐宿主 `busy: MessageId | null`，
+   * client.js:15409 与 :15417 的 `setBusy((current) => current === itemId ? null : current)`）。
+   *
+   * 旧形态是四个按动作分开的 id 集合（`cancelling`/`steering`/`pausing`/`resuming`）。
+   * 它们只有两个用处：派生全局锁、标注「本行在途」；而后者早已没有视觉承载
+   * （#32-② 清掉的那三个空挂类名），留着只是两套规则的风险面——
+   * `cancelling` 当初正因漏被读取而变成死状态（#32-①），它的清尾又带 2.5s 延时，
+   * 并入全局锁会让一次删除把整块 dock 锁死 2.5 秒。宿主没这个负担：一条命令在途、
+   * 其余全部禁用、回执落地立即释放。这里照同一形态做。
+   */
+  const [busyId, setBusyId] = useState<string | null>(null);
   // 行内编辑状态：正在编辑的 schedule id → 当前输入
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [editErr, setEditErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // 插话发送：tracking 每个 id 的状态（idle / pending / done / failed-with-code）。
-  const [steering, setSteering] = useState<ReadonlySet<string>>(new Set());
+  // 插话发送的完成/失败态跟踪（在途态已并入上面的 `busyId`）。
   const [steerDone, setSteerDone] = useState<ReadonlySet<string>>(new Set());
   const [steerErr, setSteerErr] = useState<ReadonlyMap<string, string>>(new Map());
   /**
@@ -275,9 +299,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     return () => window.clearTimeout(timer);
   }, [steerDone, projection]);
 
-  // 暂停 / 恢复
-  const [pausing, setPausing] = useState<ReadonlySet<string>>(new Set());
-  const [resuming, setResuming] = useState<ReadonlySet<string>>(new Set());
+  // 暂停 / 恢复的失败原因（在途标记已并入 `busyId`）。
   const [pauseErr, setPauseErr] = useState<ReadonlyMap<string, string>>(new Map());
 
   // 进度条起点：首次见到任务 id 的本地时刻（仅 at 类任务需要）。
@@ -335,19 +357,78 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     if (changed) firstSeenRef.current = next;
   }, [byId]);
 
-  // 只剩一条时回到直出态。
+  /**
+   * `editingId` 的清理（issue #31）。
+   *
+   * 编辑行是条件挂载的：`editingId` 指向的行一旦被收起、从投影里消失，或随会话切换
+   * 离开，编辑器就没了，但 `editingId` 还留着旧草稿。可复现的表现是「收起再展开 →
+   * 旧输入复活」，用户以为已经丢弃的文本会在下一次保存时被写回。
+   *
+   * 四条退出路径，各自都有归宿：
+   *  - 保存成功 → `submitEdit` 末尾调 `cancelEdit()`；
+   *  - 取消（按钮或 Esc）→ `cancelEdit()`；
+   *  - 该行从投影消失 → 下面第一个 effect；
+   *  - 切换会话 → 下面第二个 effect（`sessionId` 变化）。
+   *
+   * 判据用 `schedules`（已过滤/已排序的渲染源）而不是原始投影，与宿主一致：宿主也
+   * 是拿它渲染中的那份队列判断行是否还在（client.js:15397-15401）。
+   */
   useEffect(() => {
-    if (schedules.length <= 1) setCollapsed(true);
-  }, [schedules.length]);
+    if (editingId === null) return;
+    if (schedules.some((item) => item.id === editingId)) return;
+    setEditingId(null);
+    setEditingText('');
+    setEditErr(null);
+    setSaving(false);
+  }, [editingId, schedules]);
+
+  useEffect(() => {
+    // 会话切换：投影换成了另一整套行，旧草稿不属于这个会话。
+    setEditingId(null);
+    setEditingText('');
+    setEditErr(null);
+    setSaving(false);
+  }, [sessionId]);
+
+  /**
+   * 折叠态复位口径（issue #31/#32）：与宿主对齐后**不再需要 effect**。
+   *
+   * 旧实现的条件是 `schedules.length <= 1`，但单条本来就被 `expanded` 强制直出，
+   * 复位与不复位对界面无差异；反而是「多条展开 → 删到一条 → 再加回多条」这条路会
+   * 把用户自己展开的状态被抹掉。宿主的复位条件是队列为空（client.js:15397-15401），
+   * 而本组件在 `length === 0` 时整体返回 null（卸载），复位自然由下一次挂载的初始
+   * 值 `true` 完成——与宿主同形，所以这里两条路径都不需要 effect。
+   */
 
   if (schedules.length === 0 || sessionId === undefined) return null;
 
   const next = schedules[0];
   if (next === undefined) return null;
-  const expanded = schedules.length === 1 || !collapsed;
+  /**
+   * 整块 dock 是否有命令在途——宿主的同一条判据（`disabled: busy !== null`）。
+   * `saving` 是行内编辑的「保存中」标记，属 dock-editor 的区，这里只读并入。
+   */
+  const busy = busyId !== null || saving;
+  /**
+   * 释放全局锁。**按 id 释放**：迟到的回执只能清掉自己那一次，不得顶掉期间新发起的
+   * 请求（宿主同款写法，client.js:15417）。这也是去掉删除的 2.5s 尾巴后仍然安全的
+   * 前提——`handleCancel` 的 `restore()` 回滚与 `finally` 走同一条释放路径，
+   * 不会留下永久禁用的按钮。
+   */
+  const releaseBusy = (id: string): void => {
+    setBusyId((current) => (current === id ? null : current));
+  };
+  /**
+   * 交互进行中：正在编辑，或有命令在途。宿主用的是同一条判据
+   * （client.js:15405-15407 `interactionActive`），它同时做两件事——强制展开列表，
+   * 并禁用折叠头。少了后者才会有 #31 那个缺陷：编辑中点折叠把编辑器卸载，
+   * 而 `editingId` 与草稿都还在。
+   */
+  const interactionActive = editingId !== null || busy;
+  const expanded = schedules.length === 1 || !collapsed || interactionActive;
 
   const handleCancel = (id: string, status?: 'active' | 'paused'): void => {
-    setCancelling((current) => new Set(current).add(id));
+    setBusyId(id);
     /** 撤销本地摘除（命令未被受理时回滚，避免行无谓消失）。 */
     const restore = (): void => {
       setDismissedPaused((current) => {
@@ -367,15 +448,15 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
         if (!outcome.matched) restore();
       })
       .catch(restore)
-      .finally(() => {
-        window.setTimeout(() => {
-          setCancelling((current) => {
-            const nextSet = new Set(current);
-            nextSet.delete(id);
-            return nextSet;
-          });
-        }, 2500);
-      });
+      /**
+       * 回执落地**立即**释放全局锁，不再等 2.5s。
+       *
+       * 那 2.5s 原本是留给「删除暂停项 → 本地摘除 → 投影帧收敛」的观察窗，但暂停项的
+       * 摘除已由 `dismissedPaused` 的粘性保证、未被受理时 `restore()` 又会把行放回来，
+       * 锁不需要替它代班。并入 `busy` 之后若还留这条尾巴，一次删除会把整块 dock
+       * 按住 2.5 秒——比它原本要防的问题更糟（issue #31/#32）。
+       */
+      .finally(() => releaseBusy(id));
   };
 
   /**
@@ -394,7 +475,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
   const handleSteer = (item: ClientSchedule): void => {
     const id = item.id;
     const wasPaused = item.status === 'paused';
-    setSteering((current) => new Set(current).add(id));
+    setBusyId(id);
     setSteerErr((current) => {
       const next = new Map(current);
       next.delete(id);
@@ -413,19 +494,13 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
             setDismissedPaused((current) => new Set(current).add(id));
           }
         } else {
-          setSteerErr((current) => new Map(current).set(id, t.editErrNotAccepted));
+          setSteerErr((current) => new Map(current).set(id, t('editErrNotAccepted')));
         }
       })
       .catch(() => {
-        setSteerErr((current) => new Map(current).set(id, t.editErrCommandFailed));
+        setSteerErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setSteering((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(id));
   };
 
   /**
@@ -454,7 +529,7 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
   const handlePause = (item: ClientSchedule): void => {
     const id = item.id;
     if (!canPause(item, now)) return;
-    setPausing((current) => new Set(current).add(id));
+    setBusyId(id);
     setPauseErr((current) => {
       const next = new Map(current);
       next.delete(id);
@@ -463,24 +538,18 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     void callCommand(sessionId, pauseLine(id))
       .then((outcome) => {
         if (!outcome.matched) {
-          setPauseErr((current) => new Map(current).set(id, t.editErrNotAccepted));
+          setPauseErr((current) => new Map(current).set(id, t('editErrNotAccepted')));
         }
       })
       .catch(() => {
-        setPauseErr((current) => new Map(current).set(id, t.editErrCommandFailed));
+        setPauseErr((current) => new Map(current).set(id, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setPausing((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(id));
   };
 
   const handleResume = (item: ClientSchedule): void => {
     const uid = item.id;
-    setResuming((current) => new Set(current).add(uid));
+    setBusyId(uid);
     setPauseErr((current) => {
       const next = new Map(current);
       next.delete(uid);
@@ -489,19 +558,13 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     void callCommand(sessionId, resumeLine(uid))
       .then((outcome) => {
         if (!outcome.matched) {
-          setPauseErr((current) => new Map(current).set(uid, t.editErrNotAccepted));
+          setPauseErr((current) => new Map(current).set(uid, t('editErrNotAccepted')));
         }
       })
       .catch(() => {
-        setPauseErr((current) => new Map(current).set(uid, t.editErrCommandFailed));
+        setPauseErr((current) => new Map(current).set(uid, t('editErrCommandFailed')));
       })
-      .finally(() => {
-        setResuming((current) => {
-          const next = new Set(current);
-          next.delete(uid);
-          return next;
-        });
-      });
+      .finally(() => releaseBusy(uid));
   };
 
   const startEdit = (item: ClientSchedule): void => {
@@ -516,24 +579,48 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     setSaving(false);
   };
 
-  const submitEdit = (id: string): void => {
+  /**
+   * 保存行内编辑。**入参是整条任务**而不是 id：只有暂停项才需要本地文案覆盖。
+   *
+   * 长度上限**不在这里校验**，也不该由输入框 `maxLength` 截断——1000 在仓内已是
+   * 第三处硬编码（另两处 `src/commands.ts:718/875/884`），而 host 有
+   * `allowLongPrompts` / `maxPromptChars` 设置（`src/index.ts:64-65`）。客户端静默
+   * 截断、创建路径不截，同一字段就会有两套规则。改成不设上限，交给 host 的
+   * `validatePrompt`（`src/user-tools.ts:93-110`：超限回 `invalid_prompt` + 实际
+   * 上限数字）判定。
+   */
+  const submitEdit = (item: ClientSchedule): void => {
     const trimmed = editingText.trim();
     if (trimmed.length === 0) {
-      setEditErr(t.editErrEmpty);
+      setEditErr(t('editErrEmpty'));
       return;
     }
     setSaving(true);
     setEditErr(null);
-    void callCommand(sessionId, editLine(id, trimmed)).then((outcome) => {
+    void callCommand(sessionId, editLine(item.id, trimmed)).then((outcome) => {
       if (!outcome.matched) {
-        setEditErr(format(t.editErrFailed, { message: t.editErrNotAccepted }));
+        setEditErr(t('editErrFailed', { message: t('editErrNotAccepted') }));
         return;
       }
-      // 编辑暂停项时宿主不写会话事件 → 投影仍是旧文案，本地先覆盖以立刻反映新内容。
-      setPromptOverrides((current) => new Map(current).set(id, trimmed));
+      /**
+       * 只有暂停项需要本地覆盖，未暂停的一律交给投影。
+       *
+       * 暂停项的编辑只改 sidecar、**不写会话事件** → 不会有新投影帧，行内会一直显示
+       * 旧文案，所以本地先覆盖（失效条件见上方 `promptOverrides` 的 effect：投影一旦
+       * 采纳同一文案就自动退场）。
+       *
+       * 未暂停的项相反：成功必有 `schedule/change` 帧、投影就是权威文案；被拒（例如
+       * 超长）则不会有帧。两种情况都**不能**盖本地覆盖——客户端拿不到业务结果
+       * （`RemoteResult<{matched}>`，见 `src/command-outcome.ts`），一旦被拒还把用户
+       * 刚输入的文案贴到行上，界面就在宣称「改好了」而 host 里仍是旧值。宁可显示
+       * 未变的旧文案。
+       */
+      if (item.status === 'paused') {
+        setPromptOverrides((current) => new Map(current).set(item.id, trimmed));
+      }
       cancelEdit();
     }).catch(() => {
-      setEditErr(format(t.editErrFailed, { message: t.editErrCommandFailed }));
+      setEditErr(t('editErrFailed', { message: t('editErrCommandFailed') }));
     }).finally(() => setSaving(false));
   };
 
@@ -543,29 +630,23 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
     if (editingId === item.id) {
       return (
         <li key={item.id} className="ss-dock-row ss-editing" data-ss-dock-row={item.id}>
-          <input
-            className="ss-dock-edit-input"
-            value={editingText}
-            maxLength={1000}
-            autoFocus
+          <DockEditor
+            text={editingText}
+            label={t('editTask')}
             disabled={saving}
-            onChange={(event) => setEditingText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') submitEdit(item.id);
-              else if (event.key === 'Escape') cancelEdit();
-              event.stopPropagation();
-            }}
-            aria-label={`${t.editTask}: ${item.prompt}`}
+            onChange={setEditingText}
+            onSave={() => submitEdit(item)}
+            onCancel={cancelEdit}
           />
           <button
             type="button"
             className="ss-dock-row-save"
             disabled={saving || editingText.trim().length === 0}
-            onClick={() => submitEdit(item.id)}
+            onClick={() => submitEdit(item)}
           >
-            {saving ? '…' : t.editSave}
+            {saving ? '…' : t('editSave')}
           </button>
-          <button type="button" className="ss-dock-action" onClick={cancelEdit} aria-label={t.editCancel}>
+          <button type="button" className="ss-dock-action" onClick={cancelEdit} aria-label={t('editCancel')}>
             <IconCloseOutlineRegular size={14} />
           </button>
           {editErr !== null && <span className="ss-dock-edit-err">{editErr}</span>}
@@ -577,10 +658,10 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
       ? (item.remaining_seconds ?? 0) * 1000
       : epoch - now;
     const countdownText = isPaused
-      ? t.pausedLabel
+      ? t('pausedLabel')
       : state === 'overdue'
-        ? t.dueAnyMoment
-        : `${t.countdownLeft} ${formatCountdown(Math.max(0, frozenLeft))}`;
+        ? t('dueAnyMoment')
+        : `${t('countdownLeft')} ${formatCountdown(Math.max(0, frozenLeft))}`;
     return (
       <li
         key={item.id}
@@ -605,74 +686,27 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
           */}
           {steerUnconfirmed.has(item.id) && (
             <span className="ss-dock-steer-warn" role="status">
-              <span>{t.steerUnconfirmed}</span>
+              <span>{t('steerUnconfirmed')}</span>
               <button type="button" className="ss-dock-steer-retry" onClick={() => handleSteerRetry(item)}>
-                {t.steerRetry}
+                {t('steerRetry')}
               </button>
             </span>
           )}
         </div>
         {/* 图标：编辑 → 暂停/恢复 → 删除 → 插话（暂停保留槽位宽度） */}
-        <div className="ss-dock-actions">
-          <DockTip label={t.editTask}>
-            <button
-              type="button"
-              className="ss-dock-action"
-              aria-label={t.editTask}
-              onClick={() => startEdit(item)}
-            >
-              <IconEditOutlineRegular size={14} />
-            </button>
-          </DockTip>
-          {isPaused ? (
-            <DockTip label={t.resumeTask}>
-              <button
-                type="button"
-                className={`ss-dock-action ss-paused-active${resuming.has(item.id) ? ' ss-pending' : ''}`}
-                aria-label={t.resumeTask}
-                disabled={resuming.has(item.id)}
-                onClick={() => handleResume(item)}
-              >
-                <IconPlayOutlineRegular size={16} />
-              </button>
-            </DockTip>
-          ) : (
-            <DockTip label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}>
-              <button
-                type="button"
-                className={`ss-dock-action${pausing.has(item.id) ? ' ss-pending' : ''}`}
-                aria-label={canPause(item, now) ? t.pauseTask : t.pauseUnsupportedKind}
-                disabled={!canPause(item, now) || pausing.has(item.id)}
-                onClick={() => handlePause(item)}
-              >
-                <IconPauseOutlineRegular size={16} />
-              </button>
-            </DockTip>
-          )}
-          <DockTip label={t.deleteTask}>
-            <button
-              type="button"
-              className="ss-dock-action"
-              aria-label={t.deleteTask}
-              onClick={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
-            >
-              <IconTrashOutlineRegular size={14} />
-            </button>
-          </DockTip>
-          {item.kind !== 'every' && (
-            <DockTip label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}>
-              <button
-                type="button"
-                className={`ss-dock-action ss-dock-action-steer${steering.has(item.id) ? ' ss-pending' : ''}${steerDone.has(item.id) ? ' ss-done' : ''}`}
-                aria-label={steerDone.has(item.id) ? t.steerAlreadySent : t.steerTask}
-                disabled={steering.has(item.id) || steerDone.has(item.id)}
-                onClick={() => handleSteer(item)}
-              >
-                <IconSendOutlineRegular size={16} />
-              </button>
-            </DockTip>
-          )}
-        </div>
+        <DockActions
+          item={item}
+          t={t}
+          paused={isPaused}
+          canPauseNow={canPause(item, now)}
+          busy={busy}
+          steerDone={steerDone.has(item.id)}
+          onEdit={() => startEdit(item)}
+          onPause={() => handlePause(item)}
+          onResume={() => handleResume(item)}
+          onDelete={() => handleCancel(item.id, isPaused ? 'paused' : 'active')}
+          onSteer={() => handleSteer(item)}
+        />
       </li>
     );
   };
@@ -684,19 +718,52 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, locale }: 
           <button
             type="button"
             className="ss-dock-header"
-            aria-expanded={!collapsed}
+            aria-expanded={expanded}
+            aria-controls={listId}
+            disabled={interactionActive}
             onClick={() => setCollapsed((value) => !value)}
           >
             <span className="ss-dock-lead" aria-hidden="true">
               <IconClockOutlineRegular size={16} />
             </span>
-            <span className="ss-dock-count">{format(t.panelCount, { n: schedules.length })}</span>
+            <span className="ss-dock-count">{t('panelCount', { n: schedules.length })}</span>
+            {/*
+              折叠态也要播报异常（issue #31）：收起恰恰发生在用户不想看细节的时候，
+              而「投递未确认」正是最需要被看见的状态。位置与优先级对齐宿主 header 里的
+              `queue.sending`（client.js:15455-15458）：未确认优先于在途。
+            */}
+            {!expanded && steerUnconfirmed.size > 0 && (
+              <span className="ss-dock-status" role="status">
+                {t('statusUnconfirmed', { n: steerUnconfirmed.size })}
+              </span>
+            )}
+            {!expanded && steerUnconfirmed.size === 0 && busy && (
+              <span className="ss-dock-status" role="status">{t('sending')}</span>
+            )}
             <span className={expanded ? 'ss-dock-chevron ss-open' : 'ss-dock-chevron'} aria-hidden="true">
               <IconChevronDownOutlineRegular size={14} />
             </span>
           </button>
         )}
-        {expanded && <ul className="ss-dock-list">{schedules.map(renderRow)}</ul>}
+        {/*
+          列表常驻 DOM、用 `hidden` 控可见（宿主同款：client.js:15466-15468），这样
+          `aria-controls` 永远指向一个真实存在的目标，读屏也能跳到它。
+
+          代价与对策：进度条的相位是在**挂载那一刻**冻结的（见本文件头部 #13/#16 那条结论：
+          「CSS 动画在元素被重建时会从头播放」）。列表常驻 DOM 后，收起/展开不再触发重挂载，
+          相位就停在第一次挂载时的值。`display:none` 期间动画究竟推不推进，我没有在本机验证
+          （规范页取不到：w3.org 403、drafts.csswg.org 404），因此不作断言——但两种行为下这个
+          `key` 都是对的：展开即整列重挂载、`MultiBar` 相位按当前时刻重算，与「收起即卸载」的
+          旧行为等价，同时保住 `aria-controls` 指向一个真实存在的列表。
+        */}
+        <ul
+          id={listId}
+          className="ss-dock-list"
+          key={expanded ? 'open' : 'closed'}
+          hidden={!expanded}
+        >
+          {schedules.map(renderRow)}
+        </ul>
       </div>
     </div>
   );
@@ -720,7 +787,7 @@ function MultiBar({
   item: ClientSchedule;
   now: number;
   firstSeen: ReadonlyMap<string, number>;
-  t: SchedStrings;
+  t: ScheduleDockTranslate;
   frozen?: boolean;
   frozenLeftMs?: number;
   /** 客户端已渲染过的最新时刻；冻结帧据此钳位，避免暂停瞬间条长跳增。 */
@@ -792,7 +859,7 @@ function MultiBar({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(totalRatio * 100)}
-      aria-label={t.panelTitle}
+      aria-label={t('panelTitle')}
     >
       <div className="ss-dock-bar">
         {/* 分隔线先画：跨整个 bar、画 N-1 条等比分隔；fill 之后用 z-index 盖住「已填充段」上的分隔线，只剩「轨道段」上可见刻度 */}
@@ -811,93 +878,219 @@ function MultiBar({
   );
 }
 
-/* ==================== DockTip：对齐官方 Tooltip 组件（primitives）的自定义实现 ==================== */
-/* 官方 QueueDock 用 Tooltip({ portal: true, label, side: "bottom", delayMs: 500 }) 包裹每个 action button。
- * 图标已直接 import primitives（issue #19）；Tooltip 仍为自定义实现（官方 Tooltip 的
- * 完整 API 依赖宿主 slots/portal 上下文），用 createPortal + fixed 定位实现相同视觉效果。
- *  - 500ms 延迟显示
- *  - 150ms 淡入动画
- *  - 固定定位，z-index 1100（portal 层）
- *  - 超出视口自动翻转（bottom → top）
- *  - 水平方向 clamp 到视口边缘 12px
+/* ==================== DockActions：动作按钮区（tooltip 用 primitives 的官方 Tooltip） ==================== */
+/**
+ * 宿主 QueueDock 给每个动作按钮包的是 `Tooltip({ portal: true, side: "bottom", delayMs: 500 })`，
+ * 这里换成同一个官方组件（issue #29），原先自研的 `DockTip` 已删除。
+ *
+ * 顺带纠正一处旧注释的错误说法：「官方 Tooltip 的完整 API 依赖宿主 slots/portal 上下文」
+ * **不成立**——它内部只 `useContext(TooltipSuppression)`，而该 context 默认值是 `null`，
+ * 没有 provider 时照常工作（宿主 ui-goal / ui-conversation 的 dock 都是直接这么用的）。
+ *
+ * 两个影响布局与状态的行为值得记下：
+ *  - Tooltip 用 `cloneElement` 把 ref 与 hover/focus handler 注到**子元素自身**，不额外插
+ *    包装节点。因此 `.ss-dock-actions` 的 flex 子元素仍是这四个按钮、`gap: 10px` 不变
+ *    （原先为自研气泡加的包装 span 连同其 CSS 一起删除）。
+ *  - `portal` 把气泡挂到 `document.body`，隐藏时也不会变成 dock 的 flex 子项。
+ *  - `focusDelayMs` 与 `maxWidth` 都留默认，与宿主 dock 一致（宿主两处都没传）。
  */
-function DockTip({ label, children }: { label: string; children: JSX.Element }) {
-  const anchorRef = useRef<HTMLSpanElement>(null);
-  const bubbleRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number; side: 'bottom' | 'top' } | null>(null);
-  const timerRef = useRef<number | null>(null);
+interface DockActionsProps {
+  /** 本行任务；只用 `kind` 决定插话按钮是否出现（`every` 不支持）。 */
+  item: ClientSchedule;
+  /** 文案字典。 */
+  t: SchedTranslate;
+  /** 本行是否处于暂停态（决定渲染「恢复」还是「暂停」）。 */
+  paused: boolean;
+  /** 本行此刻是否可暂停（与 host 校验一致，由调用方算好）。 */
+  canPauseNow: boolean;
+  /**
+   * 整块 dock 是否有命令在途。对齐宿主 QueueDock 的 `disabled: busy !== null`
+   * （client.js:15523/15552/15571/15592）：任一动作在途时**所有**行的动作按钮都不可点。
+   *
+   * **口径变更（issue #31/#32，勿当成误删）**：这里曾有 `pausingNow` / `resumingNow` /
+   * `steeringNow` / `cancellingNow` 四个「本行在途」标记，其中 `cancellingNow` 是
+   * **故意不并入**全局锁的——删除的清尾带着命令返回后 2.5s 的延时，并入会让一次删除
+   * 把整块 dock 锁住 2.5 秒。现在那条尾巴已去掉、在途标记收敛成单一 `busyId`
+   * （按 id 释放，见组件内 `releaseBusy`），四个标记同时失去了两个用处：禁用判据
+   * `busy` 已覆盖它们，而「本行在途」早没有视觉承载（#32-② 清掉了那几个空挂类名）。
+   * 留着只会长出第二套规则——`cancelling` 变成死状态（#32-①）就是这么来的。
+   */
+  busy: boolean;
+  /** 本行是否已插话成功（按钮转完成态并禁用）。 */
+  steerDone: boolean;
+  onEdit: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onDelete: () => void;
+  onSteer: () => void;
+}
 
-  const cancel = () => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  const show = () => {
-    const el = anchorRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setPos({ left: r.left + r.width / 2, top: r.bottom + 8, side: 'bottom' });
-  };
-
-  const enter = () => {
-    cancel();
-    timerRef.current = window.setTimeout(show, 500);
-  };
-
-  const leave = () => {
-    cancel();
-    setPos(null);
-  };
-
-  useEffect(() => cancel, []);
-
-  // 渲染后测量气泡尺寸，clamp 水平位置，必要时翻转到上方
-  useLayoutEffect(() => {
-    if (!pos || !bubbleRef.current) return;
-    const b = bubbleRef.current;
-    const w = b.offsetWidth;
-    const h = b.offsetHeight;
-    const edge = 12;
-    let left = pos.left;
-    let top = pos.top;
-    let side = pos.side;
-    // 水平 clamp
-    left = Math.max(edge + w / 2, Math.min(left, window.innerWidth - edge - w / 2));
-    // 垂直翻转：下方放不下则翻到上方
-    if (side === 'bottom' && top + h > window.innerHeight - edge) {
-      const anchorEl = anchorRef.current!;
-      const r = anchorEl.getBoundingClientRect();
-      top = r.top - 8;
-      side = 'top';
-    }
-    b.style.left = `${left}px`;
-    b.style.top = `${top}px`;
-    b.dataset.side = side;
-    b.style.visibility = 'visible';
-  }, [pos]);
-
+function DockActions({
+  item,
+  t,
+  paused,
+  canPauseNow,
+  busy,
+  steerDone,
+  onEdit,
+  onPause,
+  onResume,
+  onDelete,
+  onSteer,
+}: DockActionsProps): JSX.Element {
   return (
-    <>
-      <span
-        ref={anchorRef}
-        className="ss-dock-tip-anchor"
-        onPointerEnter={enter}
-        onPointerLeave={leave}
-        onFocus={enter}
-        onBlur={leave}
-      >
-        {children}
-      </span>
-      {pos &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div ref={bubbleRef} className="ss-dock-tip" style={{ left: pos.left, top: pos.top, visibility: 'hidden' }}>
-            {label}
-          </div>,
-          document.body
-        )}
-    </>
+    <div className="ss-dock-actions">
+      <Tooltip label={t('editTask')} side="bottom" delayMs={500} portal>
+        <button
+          type="button"
+          className="ss-dock-action"
+          aria-label={t('editTask')}
+          disabled={busy}
+          onClick={onEdit}
+        >
+          <IconEditOutlineRegular size={14} />
+        </button>
+      </Tooltip>
+      {paused ? (
+        <Tooltip label={t('resumeTask')} side="bottom" delayMs={500} portal>
+          <button
+            type="button"
+            className="ss-dock-action ss-paused-active"
+            aria-label={t('resumeTask')}
+            disabled={busy}
+            onClick={onResume}
+          >
+            <IconPlayOutlineRegular size={16} />
+          </button>
+        </Tooltip>
+      ) : (
+        /* 不可用的原因走宿主那套分工：Tooltip `disabled` 抑制气泡，原生 `title` 承载原因，
+         * `aria-label` 只留动作名——避免同一句话在气泡与读屏里各念一遍。 */
+        <Tooltip label={t('pauseTask')} side="bottom" delayMs={500} portal disabled={!canPauseNow}>
+          <button
+            type="button"
+            className="ss-dock-action"
+            aria-label={t('pauseTask')}
+            title={canPauseNow ? undefined : t('pauseUnsupportedKind')}
+            disabled={!canPauseNow || busy}
+            onClick={onPause}
+          >
+            <IconPauseOutlineRegular size={16} />
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip label={t('deleteTask')} side="bottom" delayMs={500} portal>
+        <button
+          type="button"
+          className="ss-dock-action"
+          aria-label={t('deleteTask')}
+          disabled={busy}
+          onClick={onDelete}
+        >
+          <IconTrashOutlineRegular size={14} />
+        </button>
+      </Tooltip>
+      {item.kind !== 'every' && (
+        <Tooltip label={steerDone ? t('steerAlreadySent') : t('steerTask')} side="bottom" delayMs={500} portal>
+          <button
+            type="button"
+            className={`ss-dock-action ss-dock-action-steer${steerDone ? ' ss-done' : ''}`}
+            aria-label={steerDone ? t('steerAlreadySent') : t('steerTask')}
+            disabled={busy || steerDone}
+            onClick={onSteer}
+          >
+            <IconSendOutlineRegular size={16} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
+/* ==================== DockEditor：行内编辑器（宿主 QueueDock 的 QueueEditor 同款） ==================== */
+
+/**
+ * dock 的行内编辑器。为什么单独成组件、为什么必须是 `textarea`、为什么没有
+ * `stopPropagation()`：
+ *
+ *  - **textarea 而非 input**：HTML 会从单行 `input` 的 value 里剥掉换行，于是「编辑
+ *    一条多行提醒」实际等于把它改写成一整行——正文被静默改坏。宿主 QueueEditor 的
+ *    注释写明了同一点（`@deepseek-ai/dsh-client-ui-conversation`，QueueDock.js）。
+ *
+ *  - **自适应高度用宿主算法**：先 `height='auto'`，再回填 `scrollHeight + offsetHeight
+ *    - clientHeight`（= 内容高度 + 边框/上下 padding 的差额）。上限交给 CSS
+ *    `max-height`（宿主 127px），到顶后 textarea 自己滚动，行高不再长。
+ *
+ *  - **IME 守卫**：`Enter` 保存必须先挡 `event.nativeEvent.isComposing`。中文输入法
+ *    里「按 Enter 把候选词上屏」与「按 Enter 提交」是同一个 keydown，缺这道守卫就会
+ *    在打完第一个词时把半截正文提交掉（#30 的核心缺陷）。`shiftKey` 走换行、不提交。
+ *
+ *  - **不调 `stopPropagation()`**（旧代码有、宿主没有）。逐条查过：它挡不住任何本该
+ *    挡的东西，却会挡住不该挡的东西。
+ *    1) composer 的 Enter 提交绑在草稿编辑器元素上（`ui-conversation` 里的
+ *       `keyboard.submit(…)`），而 dock 是 `.composerStack` 下 `inputBar` 的**兄弟**
+ *       子树（`renderSlot("conversation.input.dock", zone)`），事件不会经过它；
+ *    2) 全局快捷键监听在 window **捕获阶段**（`dsh-client-shortcuts`：
+ *       `addEventListener("keydown", capture, true)`），冒泡阶段的 stopPropagation
+ *       对已经执行完的捕获监听无效；且它自带 `region: "editable"` 判定
+ *       （`closest("input, textarea, select, [contenteditable…]")`），裸 Enter 也不在
+ *       允许注册的组合里；
+ *    3) 反过来，冒泡阶段的 document 监听**确实**会被掐掉——宿主 ContextMeter 的 Esc、
+ *       agent-team 的 dismiss、`ui-schedule` 的 document keydown 都在这一层。旧写法把
+ *       它放在 if/else **之外**，等于编辑框里每一个键（含普通打字与 Esc）都不再冒泡到
+ *       document。
+ *
+ *    所以只保留 `preventDefault()`（不加的话 textarea 的 Enter 默认会往正文里插一个
+ *    换行），去掉 `stopPropagation()`。
+ */
+function DockEditor({
+  text,
+  label,
+  disabled,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  /** 当前编辑中的正文。 */
+  text: string;
+  /** 无障碍标签：与宿主一致只描述动作，正文本身就在框里，不重复进标签。 */
+  label: string;
+  /** 提交在途：禁编辑，避免重复提交。 */
+  disabled: boolean;
+  /** 正文变化。 */
+  onChange: (value: string) => void;
+  /** Enter 或保存按钮。 */
+  onSave: () => void;
+  /** Esc。 */
+  onCancel: () => void;
+}): JSX.Element {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    /* v8 ignore next -- ref 在 layout effect 之前已经挂上 */
+    if (node === null) return;
+    node.style.height = 'auto';
+    node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
+  }, [text]);
+  return (
+    <textarea
+      ref={ref}
+      autoFocus
+      rows={1}
+      className="ss-dock-edit-input"
+      aria-label={label}
+      value={text}
+      disabled={disabled}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          onCancel();
+          return;
+        }
+        if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        onSave();
+      }}
+    />
   );
 }
