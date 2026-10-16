@@ -4,6 +4,24 @@
 
 ## 未发布
 
+- **fix** P0：插件 host 入口永久 pending，导致 `/later`、`/schedule`、`/user-schedule-*` 集体消失。
+  - 根因：`src/index.ts` 的模块级 `inject` 里列了 `'locale'`。cordis 把顶层 `inject` 当
+    **激活门控**——服务不来，整个入口就不启动，`ctx.commands.register` 一次都没执行。
+    而 `locale` 是 client 侧服务（`@deepseek-ai/dsh-client-locale`），host 平面上永远不
+    存在，于是这个门控永远不开。宿主日志形态：
+    `later (dsh-later): pending (waiting for service: locale)`。
+  - 引入方是 b7fc4b7（host 侧文案 i18n）。讽刺的是那三处消费点本来就写成
+    `ctx.get('locale')?.` 可选链——作者预留了「拿不到就走默认语言」的容错，但入口从没
+    运行过，容错永远执行不到。
+  - 修法：从 host 顶层 `inject` 摘掉 `locale`。拿不到语言只是走默认值，而不是整个插件
+    不加载。
+  - 新增 `tests/host-entry-activation.test.mjs` 锁三条不变式，并做过变异验证（把
+    `locale` 加回去，测试立刻变红）：host 顶层 inject 不得含 client 平面服务；locale
+    消费点必须保持可选链；client 入口**可以**列 `locale`（那里它真实存在）——两代平面
+    有意不对称，防止有人「统一两边」把它加回 host。
+  - 顺带确认该列的服务仍在（`agents`/`sessions`/`tools`/`commands`/`settings`），避免
+    「为修 bug 把依赖删光」让插件静默退化。
+
 - **fix** 设置页补上「允许长文本提醒」与「提示字符上限」两行——此前 README 的指引不可达。
   - 根因：这两个字段一直**只有 host 侧管线**（`Config` 里有、`resolvePromptLimits` 会读、
     客户端 hook 也消费），但设置卡从未渲染过对应行。于是 README「在 DSH 设置 → 插件 →
