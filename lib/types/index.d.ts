@@ -30,7 +30,19 @@ import { name } from './domain.js';
  * 保留为别名以免大范围改动调用点。
  */
 export declare const Config: z;
-/** 所需服务（延后激活，缺失时插件不加载）。 */
+/**
+ * 所需服务（延后激活，缺失时插件不加载）。
+ *
+ * ⚠️ 这里**只能列 host 平面存在的服务**。`locale` 是 client 侧服务
+ * （`@deepseek-ai/dsh-client-locale`），在 agent/host 平面上永远不出现：一旦列进
+ * 这份顶层 inject，cordis 的激活门控会让整个入口永久 `pending`，日志表现为
+ * `later (dsh-later): pending (waiting for service: locale)`，连带 `/later`、
+ * `/schedule`、`/user-schedule-*` 全部消失（b7fc4b7 就这么炸过一次）。
+ * 需要语言时走 `ctx.get('locale')?.getSnapshot().active`——那三处消费点本来就是
+ * 可选链，拿不到就走默认语言，而不是让整个插件不加载。
+ * 同一条纪律在本仓 client 入口的文件头也写着（`src/client/index.tsx`：「**不进**
+ * 顶层 `inject`，否则会永久 pending」）。
+ */
 export declare const inject: string[];
 /** 宿主持有的 settings 形状（settings getter 返回值与 register* 接受入参）。 */
 export interface SchedulerSettings {
