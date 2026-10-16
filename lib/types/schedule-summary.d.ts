@@ -81,6 +81,13 @@ export interface GroupScheduleSummary {
     readonly state?: PresenceBadgeState;
 }
 /**
+ * 状态优先级（越大越紧急）。
+ *
+ * 导出给 `schedule-facet.ts` 的跨层合并复用：分组聚合与 facet 的 `merge` 必须认同一套
+ * 「谁更紧急」，两处各写一遍就是徽标与行内读数漂移的起点（issue #36）。
+ */
+export declare const STATE_RANK: Readonly<Record<PresenceBadgeState, number>>;
+/**
  * 按**分组**聚合摘要：给定组内会话 id，折叠出可直接渲染的分组事实。
  *
  * 消费方（如 dsh-group-status 的 `GroupLiveStatus`）只需把组内会话 id 传进来，

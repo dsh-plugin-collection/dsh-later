@@ -94,6 +94,14 @@ const zh = {
   hoverScheduleStatus: '有 {n} 条定时提醒，下次 {time}',
   hoverScheduleOverdue: '有 {n} 条定时提醒已到期，等待发送',
   hoverSchedulePaused: '有 {n} 条定时提醒已暂停',
+  /**
+   * 折叠分组徽标（facet）里「定时任务」这个词（issue #36）。
+   *
+   * 措辞与 dsh-group-status 过渡基线（其 `status.scheduled`）**逐字一致**：迁移的验收
+   * 标准是注册前后徽标文案不变，这里换措辞就等于单方面改基线。
+   * 完整句子由 `laterScheduleFacetLabel` 拼：`${count} ${facetScheduled}`。
+   */
+  facetScheduled: '定时任务',
   relMinutes: '{m} 分后',
   relHours: '{h} 小时后',
   relTomorrow: '明天 {time}',
@@ -167,6 +175,8 @@ const en: { [K in keyof typeof zh]: string } = {
   hoverScheduleStatus: '{n} scheduled reminder(s), next {time}',
   hoverScheduleOverdue: '{n} scheduled reminder(s) due, waiting to send',
   hoverSchedulePaused: '{n} paused reminder(s)',
+  /** 与 zh 侧同键：措辞与 group-status 的 `status.scheduled` 逐字一致（见 zh 段注释）。 */
+  facetScheduled: 'Scheduled',
   relMinutes: 'in {m} min',
   relHours: 'in {h} h',
   relTomorrow: 'Tomorrow {time}',
