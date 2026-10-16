@@ -4,6 +4,27 @@
 
 ## 未发布
 
+- **fix** dock 行内编辑改文案静默失败（issue #44）：在待发列表里改一条提醒的文案并保存，
+  宿主返回 `schedule_not_found`，用户以为已经改好了。
+  - 根因是**一处漏改**：投影有意把 uid 当作 `id` 暴露给客户端
+    （`src/projection.ts:179` `id: uid ?? record.id`），所以 dock 传 uid 是正确的，
+    host 侧要用 `resolveActiveScheduleId()` 换算。`userScheduleDelete` 与
+    `userSchedulePause` 都调了它，**唯独 `userScheduleEditPrompt` 没有** ——
+    同一个 uid 删除能成功、改文案却失败，这个不对称本身就是最强证据。
+  - 为什么 337 个测试全绿而 bug 长存：既有编辑用例传的是 `created.id`（真 schedule
+    id）和字面量 `'schedule-past'`，**从没传过 uid**。补的正是这条从未走过的路径。
+  - 修复有个坑必须避开：`getPaused(sessionId, uid)` 这张表**以 uid 为键**，所以只有
+    「活动项查找」能用换算后的 id，暂停项查找**必须继续用原始 `id`**，否则把一个 bug
+    换成另一个（暂停项反而改不了文案）。代码里就地写了警示注释，并有专门断言钉住。
+  - 顺带改进报错：`未找到定时任务 ${scheduleId}` 改为回显**调用方传入的 id**。本次
+    问题难查正是因为报错里的 id 与用户/dock 手里那个对不上号；传真 schedule id 时
+    两者相同，无歧义。
+  - 测试：新增 5 条（`tests/edit-uid-resolution.test.mjs`）—— uid 编辑成功、真
+    schedule id 不回归、暂停项按 uid 仍可编辑、报错回显原始 id、以及一条**结构守卫**
+    （编辑必须调 resolver；paused 查找必须用原始 id；删除/暂停/编辑三个操作现在都要
+    经过 resolver，将来再漏一处会直接被拦）。**变异验证过**：把 resolver 退回原状 →
+    行为测试与结构守卫双双变红。另验证 uid 跨编辑保留（否则 dock 行认不回该任务）。
+
 - **feat** 折叠分组徽标上的「定时任务」改由本插件自己注册 facet（issue #36）。
   - 迁移前那一格由 dsh-group-status 的过渡适配器**代管**：它 `require('dsh-later/client')` 读我们的
     摘要 store，再按具名字段与色档反推画图。语义一直归本插件，实现却写在对方仓库里——任一方改
