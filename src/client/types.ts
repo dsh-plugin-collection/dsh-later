@@ -12,6 +12,9 @@
  * ⚠️ 与 host 侧 `WireAttachment`（`src/domain.ts`）是**手写镜像**，成员名必须逐字
  * 一致，由 `tests/wire-type-parity.test.mjs` 锁住。两边不共用类型，是为了不让
  * 客户端反向依赖宿主模块（本仓 host↔client 一直是这个惯例）。
+ *
+ * 消费侧注意：`name` 只有 file 块有、`media_type`/`width`/`height` 只有 image 块有，
+ * 且全部可选 —— 元数据缺失时 UI 要能退化，而不是报错（#38 的降级分支据此写）。
  */
 export interface ClientAttachment {
   readonly kind: 'image' | 'file';
@@ -48,6 +51,8 @@ export interface ClientSchedule {
   /**
    * 随提醒一起代发的附件。**无附件时整个键不出现**（不是 `[]`），渲染时可用
    * 「键在不在」直接判断。活动项与暂停项走同一映射，规则不分叉。
+   * 键缺席的语义与宿主侧 `sanitizeAttachments` 返回 `undefined` 一致，dock 据此
+   * 决定整条附件带渲不渲染（#38）。
    */
   readonly attachments?: readonly ClientAttachment[];
   /** 仅当附件被截断（>8）时出现：原始总数，用于显示「+N」。 */
