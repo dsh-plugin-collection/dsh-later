@@ -397,14 +397,16 @@ test('Config 的每个可编辑字段都在设置卡 SECTIONS 中有对应行', 
     [...card.matchAll(/key:\s*'([A-Za-z]+)'/g)].map((m) => m[1]),
   );
   /**
-   * 已知缺口（**显式豁免，不是放宽断言**）：这两个字段只有 host 侧管线，
-   * 设置卡从未渲染过对应行——README「在设置里开启长文本」因此是不可达的指引。
-   * 设计文档 docs/ui/01-component-specs.md §6.3/§6.4 与 08-microcopy 6.1/6.2
-   * 都把它们当卡片字段写，属于「spec 有、实现无」。补齐需要 §6.3 的
-   * 「关闭时禁用并灰显 maxPromptChars」联动，是独立一块工作，不在本次范围。
-   * 这里点名豁免，是为了让**新加字段**仍然会被这条测试拦住。
+   * 曾经的缺口（`allowLongPrompts` / `maxPromptChars` 只有 host 侧管线、设置卡
+   * 从未渲染，README「在设置里开启长文本」因此是不可达的指引）**已补齐**：
+   * 两行现在都在 display section，并带 §6.3 的联动禁用（关闭时禁用+灰显，
+   * 切换开关不自动改数值）。豁免名单随之清空。
+   *
+   * 下面那个循环**保留**：名单空时它恒不进入，但机制还在——日后若某个字段
+   * 需要临时豁免，加一项即可；而「Config 声明了却没渲染」始终会被 `missing`
+   * 拦住，这条才是本测试的主要价值。
    */
-  const KNOWN_UNRENDERED = ['allowLongPrompts', 'maxPromptChars'];
+  const KNOWN_UNRENDERED = [];
   const missing = configKeys.filter((key) => !renderedKeys.has(key) && !KNOWN_UNRENDERED.includes(key));
   assert.deepEqual(missing, [], `这些 Config 字段没有设置卡入口：${missing.join(', ')}`);
   for (const key of KNOWN_UNRENDERED) {

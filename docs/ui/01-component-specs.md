@@ -227,7 +227,7 @@ interface DateTimePickerProps {
 | key | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `maxSchedules` | number ≥1 | 100 | 单会话任务上限 |
-| `allowLongPrompts` | boolean | `false` | 解除默认 1000 字符下限 |
+| `allowLongPrompts` | boolean | `false` | 解除默认 1000 字符上限 |
 | `maxPromptChars` | number ≥1 | 1000 | 提示字符上限（仅 `allowLongPrompts=true` 时生效） |
 | `workStart` | HH:mm | `09:00` | 智能时段：工作开始 |
 | `workEnd` | HH:mm | `18:00` | 智能时段：工作结束 |
