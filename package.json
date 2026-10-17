@@ -1,6 +1,6 @@
 {
   "name": "dsh-later",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "给 DSH 加上定时发送：输入一句话，到点自动以你的身份送出，关掉网页也准时触发。定时发送 / 定时提醒 / 延迟发送。",
   "icon": "./icon.svg",
   "keywords": [
