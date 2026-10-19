@@ -4,6 +4,19 @@
 
 ## 未发布
 
+- **fix** 重建 `lib/client.js`，让 issue #7（继续图标配色与其它操作图标统一）**真正生效**。
+  - `7f6b5a5`（经 PR #8 并入 main）改了 `src/client/components/ScheduleDock.tsx` 与
+    `src/client/styles.ts`，但**没有重建 `lib/client.js`**。本仓库把 `lib/` 作为跟踪的
+    构建产物发布，所以 1.4.0 里跑的仍是旧 bundle：`ss-paused-active` 类与它的
+    `--dsw-alias-state-success-primary` 绿色规则各残留一处，用户看到的「继续」图标
+    依旧是绿色，而源码已要求它与其他操作图标同色。
+  - 复现方式（可长期用作守卫）：干净检出 `main` → `node build.mjs` → 与提交的
+    `lib/client.js` 比对，`ss-paused-active` 提交版 2 处 / 重建版 0 处。
+  - 本 PR 只含重建产物，diff 严格限于那两行；不改任何 `src/`。
+  - **流程教训**：改 `src/` 必须同 PR 重建 `lib/`。#47 之后 `npm run build` 不再自动
+    外溢到 profile，但「提交里带不带产物」这件事反而更需要人自觉——建议后续加一条
+    CI 守卫（干净检出后 build，`git diff --exit-code lib/` 非零即失败）。
+
 - **fix** 提醒 dock 与宿主 QueueDock 同屏时接缝双缘重影（issue #41）：队列条底边是"直角 + 开口"
   的消缝设计，提醒面板的顶圆角 + 顶描边压进它被盖住的 3px，两种收口相撞。修法（B2，宿主零改动）：
   提醒条紧邻队列条时顶边直角化、去顶描边，两段连成一根无缝管子；-9px 重叠是消缝手法、刻意保留，
