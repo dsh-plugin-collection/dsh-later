@@ -152,6 +152,14 @@ Gitea #32 原是一条混合 issue，按区域归属拆开执行：
 
 **护栏**：`[data-queue-dock]` 是宿主唯一稳定的选择器 hook。做任何 dock 对齐改动时，把真队列条与提醒条**同屏**截图比对（`scripts/capture/` 可复用），而不是只对着单条 dock 调 —— 上一轮「1px vs .5px 描边」这类漂移就是这么漏掉的。
 
+### 8.6 attach 式 dock 的垫底假设与管子接缝（issue #41）
+
+**事实链（0.2.0-rc.2 实测）**：composerStack 是 flex column、gap 6px；slot outlet 渲染为 `display: contents`，不产生盒子，所以各 dock 根是**直接 DOM 兄弟**（相邻选择器 `+` 可用）。宿主 QueueDock 根的负下边距 `calc(0px - var(--dsh-composer-stack-gap) - 3px)` = **-9px**，抵掉 6px gap 后净效果是面板底边**被下一层盖住 3px** —— 这不是 bug，是刻意的**消缝手法**：attach 壳的底边本就"直角 + 开口"（`:after` 无 bottom 边），由下一层不透明底盖掉 3px，接缝处就不会出现发丝缝。由此宿主的 dock 栈有一条**没有写在任何契约里的假设**：attach 式（顶圆角 + 底开口 + 负边距）**必须垫底、直接接 composer**。order 0/10/20 里只有 queue 是 attach 式，todo/goal 都是浮卡式（全圆角、无负边距、带 elevation 阴影），所以"垫底"从未被第二条 attach 壳考验过。
+
+**破绽与修法**：本插件逐值抄了 queue 的 attach 壳（§8.2 的既有决策），却排在 order 30 —— queue 之下。queue 不再垫底，它"底边开口 + 被盖 3px"的设计落到了提醒条的**圆角顶边 + 顶描边**上，接缝双缘重影（`dock-alignment.md` §5 G3 预言的正是这一条）。#41 选 B2「连成一根管子」：宿主零改动，插件 styles 追加两条相邻规则 —— `[data-queue-dock] + .ss-dock-root .ss-dock-body { border-radius: 0; }` 与同选择器的 `::after { border-top: none; }`，让提醒条在被队列条紧邻在上时把自己顶边管子化。**为什么保留 3px 重叠而不是拉平**：重叠是段间与段底共用的消缝手法，拉平它等于用发丝缝换掉重影（demo 初稿 B 实测可见接缝亮线，错在这两处：拉平负边距、忘去顶描边——亮线的真正来源是那条 `.5px` 顶线，不是圆角）。没有队列条时两条规则都不命中，单条 dock 观感零变化。
+
+**耦合与退出**：规则借的 `[data-queue-dock]` 是宿主私有属性（其唯一稳定 hook，§8.1 结论一），属**有记录的耦合**——宿主 rc 升级 checklist 因此追加一项：确认 queue 仍是 attach 式且该属性仍在 dock 根上。失配的后果是静默退化为修复前观感（圆角相撞），不会更糟。长期解法不是插件侧继续猜，而是宿主提供 dock 栈契约（谁是段、如何收口），见 #43。
+
 ## 9. 分组徽标的「定时任务」：由本插件注册 facet，而不是让对方继续适配（issue #36）
 
 折叠分组的徽标由 dsh-group-status 画。此前它 `require('dsh-later/client')` 读我们的摘要 store，
