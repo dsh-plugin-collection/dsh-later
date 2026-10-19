@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>两条 dock 同屏 — 方案预览</title>
+<style>
+  /*
+   * 本文件是 dsh-later 的**方案选型预览**，不参与构建、不被插件加载。
+   *
+   * 取值来源（改这里之前先回源，别凭印象调参）：
+   *  - 宿主 QueueDock 的类名与规则：安装态
+   *    @deepseek-ai/dsh-client-ui-conversation@0.2.0-rc.2 的 lib/client.js
+   *    （CSS module 构建期哈希 → 按语义后缀取，如 `_panel{`、`_dock{`）
+   *  - composerStack 容器：同包 ConversationRoot.module.css 的 `composerStack`
+   *    （`--dsh-composer-stack-gap: 6px` + column flex + gap）
+   *  - 本插件的规则：逐条抄自 src/client/styles.ts 的 `.ss-dock-*` 段
+   *
+   * 重要性：这里的几何必须与真实值一致，否则"看预览选方案"就是看假象。
+   * 实机核对记录见 docs/notes/dock-alignment.md §5 G3。
+   */
+
+  :root {
+    --dsh-composer-stack-gap: 6px;
+    --dsh-composer-side-clearance: 16px;
+    --dsh-composer-dock-inset: 8px;
+    --dsh-composer-card-max-width: 840px;
+
+    --dsw-radius-lg: 16px;
+    --dsw-radius-md: 8px;
+    --dsw-radius-sm: 6px;
+
+    --dsw-alias-border-l1: #3a3f45;
+    --dsw-alias-border-l4: #4a5058;
+    --dsw-alias-label-primary: #e6e8ea;
+    --dsw-alias-label-secondary: #b6bcc2;
+    --dsw-alias-label-tertiary: #8b9299;
+    --dsw-alias-label-primary-dimmed: #c8ccd1;
+    --dsw-alias-interactive-bg-hover: #ffffff14;
+    --dsw-alias-brand-primary: #4d6bfe;
+    --dsw-alias-line-secondary: #ffffff24;
+    --dsw-alias-border-l2: #4a5058;
+    --dsw-specific-menu: #1c1f23;
+    --dsw-menu-backdrop-filter: blur(40px);
+    --dsw-font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+    --page-bg: #0f1113;
+    --card-ring: #2a2f35;
+  }
+
+  /* 浅色主题变量（与深色一一对应；demo 只切换变量，不改任何几何） */
+  body[data-theme="light"] {
+    --dsw-alias-border-l1: #d8dce1;
+    --dsw-alias-border-l4: #c9ced4;
+    --dsw-alias-label-primary: #1b1f24;
+    --dsw-alias-label-secondary: #4a5058;
+    --dsw-alias-label-tertiary: #7b828a;
+    --dsw-alias-label-primary-dimmed: #3a4048;
+    --dsw-alias-interactive-bg-hover: #00000010;
+    --dsw-alias-brand-primary: #3b5bdb;
+    --dsw-alias-line-secondary: #00000018;
+    --dsw-alias-border-l2: #d0d5da;
+    --dsw-specific-menu: #ffffff;
+    --page-bg: #f4f5f7;
+    --card-ring: #e2e5e9;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 28px 28px 80px;
+    background: var(--page-bg);
+    color: var(--dsw-alias-label-primary);
+    font: 13px/1.5 Inter, var(--dsw-font-family);
+  }
+
+  /* ============ 页面外壳（demo 自己的，不属于任何方案） ============ */
+  .demo-head {
+    max-width: 1180px;
+    margin: 0 auto 22px;
+  }
+  .demo-head h1 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .demo-head p {
+    margin: 0;
+    color: var(--dsw-alias-label-tertiary);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .demo-head code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--dsw-alias-interactive-bg-hover);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    max-width: 1180px;
+    margin: 0 auto 24px;
+    padding: 12px 14px;
+    border: 1px solid var(--card-ring);
+    border-radius: 10px;
+  }
+  .toolbar-label {
+    color: var(--dsw-alias-label-tertiary);
+    font-size: 12px;
+    margin-right: 2px;
+  }
+  .seg {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--dsw-alias-border-l2);
+    border-radius: 8px;
+    gap: 2px;
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    background: none;
+    color: var(--dsw-alias-label-secondary);
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 11px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--dsw-alias-brand-primary);
+    color: #fff;
+  }
+  .toolbar-spacer { flex: 1; }
+
+  /* ============ 方案网格：每个 scheme 一块 ============ */
+  .schemes {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  .scheme {
+    border: 1px solid var(--card-ring);
+    border-radius: 12px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--page-bg) 60%, transparent);
+  }
+  .scheme-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--card-ring);
+  }
+  .scheme-badge {
+    flex: none;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 6px;
+    background: var(--dsw-alias-brand-primary);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .scheme-title { font-size: 14px; font-weight: 600; }
+  .scheme-verdict {
+    font-size: 12px;
+    color: var(--dsw-alias-label-tertiary);
+  }
+  .scheme-verdict b { color: var(--dsw-alias-state-ok, #3fb950); font-weight: 600; }
+  .scheme-note {
+    padding: 10px 16px 0;
+    color: var(--dsw-alias-label-secondary);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .scheme-note b { font-weight: 600; }
+  .scheme-stage {
+    padding: 20px 16px 26px;
+    /* 舞台本身不设 max-width：让 dock 自己按 --dsh-composer-card-max-width 收窄 */
+  }
+  .scheme-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    padding: 0 16px 14px;
+    color: var(--dsw-alias-label-tertiary);
+    font-size: 11.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .scheme-meta span b { color: var(--dsw-alias-label-secondary); font-weight: 600; }
+
+  /* ============ 调用栈容器（照抄宿主 .composerStack） ============ */
+  .wSkVaW_composerStack {
+    --dsh-composer-stack-gap: 6px;
+    gap: var(--dsh-composer-stack-gap);
+    flex-direction: column;
+    display: flex;
+  }
+
+  /* ============ 宿主 QueueDock（照抄安装态 client.js 的 ._7yHdaG_* 规则） ============ */
+  .host-dock {
+    box-sizing: border-box;
+    width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset));
+    max-width: calc(var(--dsh-composer-card-max-width) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset));
+    margin: 0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px);
+    padding: 0 var(--dsh-composer-dock-inset);
+    flex: none;
+  }
+  .host-panel {
+    isolation: isolate;
+    border-radius: var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0;
+    width: 100%;
+    padding: 2px 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .host-panel::before {
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--dsw-specific-menu);
+    backdrop-filter: var(--dsw-menu-backdrop-filter);
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .host-panel::after {
+    border: .5px solid var(--dsw-alias-border-l1);
+    border-bottom: none;
+    border-radius: inherit;
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+  }
+  .host-header {
+    border-radius: var(--dsw-radius-md);
+    width: 100%;
+    height: 36px;
+    color: var(--dsw-alias-label-primary);
+    text-align: left;
+    cursor: pointer;
+    background: 0 0;
+    border: none;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 12px;
+    display: flex;
+  }
+  .host-lead { color: var(--dsw-alias-label-tertiary); flex: none; place-items: center; display: grid; }
+  .host-count {
+    min-width: 0;
+    font-family: Inter, var(--dsw-font-family);
+    flex: auto;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 24px;
+  }
+  .host-chevron { width: 14px; height: 14px; color: var(--dsw-alias-label-tertiary); flex: none; display: grid; place-items: center; }
+  .host-list { max-height: 180px; margin: 0; padding: 0; list-style: none; overflow-y: auto; }
+  .host-row {
+    border-radius: var(--dsw-radius-md);
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 5px 4px 12px;
+    display: flex;
+  }
+  .host-row + .host-row { box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1); }
+  .host-row { box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1); }
+  .host-attachments { flex: none; gap: 4px; min-width: 0; max-width: 55%; display: flex; overflow: hidden; flex-shrink: 1; }
+  .host-file {
+    border: .5px solid var(--dsw-alias-border-l1);
+    border-radius: var(--dsw-radius-sm);
+    background: var(--dsw-alias-bg-base, #16191d);
+    flex: 0 180px;
+    align-items: center;
+    gap: 4px;
+    min-width: 74px;
+    height: 24px;
+    padding: 0 6px;
+    display: inline-flex;
+    overflow: hidden;
+  }
+  .host-thumb { border: .5px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); object-fit: cover; width: 24px; height: 24px; flex: none; }
+  .host-fileName { min-width: 0; color: var(--dsw-alias-label-primary-dimmed); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+  .host-preview {
+    min-width: 0;
+    flex: auto;
+    color: var(--dsw-alias-label-primary-dimmed);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .host-actions { flex: none; align-items: center; gap: 10px; display: flex; }
+  .host-action {
+    corner-shape: round;
+    width: 28px;
+    height: 28px;
+    color: var(--dsw-alias-label-tertiary);
+    cursor: pointer;
+    background: 0 0;
+    border: none;
+    border-radius: 999px;
+    flex: none;
+    place-items: center;
+    padding: 0;
+    display: grid;
+  }
+  .host-action:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+  /* ============ 插件 ScheduleDock（逐条抄 src/client/styles.ts） ============ */
+  .ss-dock-root {
+    box-sizing: border-box;
+    flex: none;
+    width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset));
+    max-width: calc(var(--dsh-composer-card-max-width) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset));
+    margin: 0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px);
+    padding: 0 var(--dsh-composer-dock-inset);
+  }
+  .ss-dock-body {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    padding: 2px 0;
+    isolation: isolate;
+    border-radius: var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0;
+  }
+  .ss-dock-body::before {
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--dsw-specific-menu);
+    backdrop-filter: var(--dsw-menu-backdrop-filter);
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .ss-dock-body::after {
+    border: .5px solid var(--dsw-alias-border-l1);
+    border-bottom: none;
+    border-radius: inherit;
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+  }
+  .ss-dock-header {
+    border-radius: var(--dsw-radius-md);
+    width: 100%;
+    height: 36px;
+    padding: 4px 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--dsw-alias-label-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ss-dock-lead { display: grid; place-items: center; color: var(--dsw-alias-label-tertiary); flex: none; }
+  .ss-dock-count { flex: auto; min-width: 0; font-family: Inter, var(--dsw-font-family); font-size: 13px; font-weight: 500; line-height: 24px; }
+  .ss-dock-chevron { display: grid; place-items: center; width: 14px; height: 14px; color: var(--dsw-alias-label-tertiary); flex: none; }
+  .ss-dock-list { margin: 0; padding: 0; list-style: none; max-height: 180px; overflow-y: auto; }
+  .ss-dock-row {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 5px 4px 12px;
+    border-radius: var(--dsw-radius-md);
+  }
+  .ss-dock-row + .ss-dock-row { box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1); }
+  .ss-dock-preview {
+    flex: auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font: var(--dsw-font-xs-13, 12px/18px);
+    font-family: Inter, var(--dsw-font-family);
+  }
+  .ss-dock-row-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .ss-dock-row-time { flex: none; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .ss-dock-row-countdown { flex: none; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .ss-dock-row-prompt {
+    flex: 1;
+    min-width: 0;
+    color: var(--dsw-alias-label-primary-dimmed);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ss-dock-bars { display: block; }
+  .ss-dock-bar {
+    position: relative;
+    height: 6px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--dsw-alias-line-secondary);
+  }
+  .ss-dock-bar-fill {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--dsw-alias-brand-primary);
+    min-width: 10px;
+  }
+  .ss-dock-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+  .ss-dock-action {
+    corner-shape: round;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    flex: none;
+    border: none;
+    border-radius: 999px;
+    background: none;
+    cursor: pointer;
+    color: var(--dsw-alias-label-tertiary);
+  }
+  .ss-dock-action:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+  /* ============ composer 卡片（照抄宿主 _root 的核心几何） ============ */
+  .host-composer {
+    box-sizing: border-box;
+    width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance));
+    max-width: var(--dsh-composer-card-max-width);
+    margin: 0 auto;
+    border-radius: var(--dsw-radius-lg);
+    background: var(--dsw-specific-menu);
+    border: .5px solid var(--dsw-alias-border-l1);
+    padding: 12px 14px;
+    color: var(--dsw-alias-label-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 52px;
+  }
+  .host-composer-send {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--dsw-alias-brand-primary);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-size: 13px;
+  }
+
+  /* ============ 方案 A：断开成两张独立卡 ============ */
+  .scheme[data-scheme="A"] .ss-dock-root {
+    /* 只改下边距：把它从"贴住 composer 卡片"改成"与上方 dock 留出栈间距" */
+    margin-bottom: 0;
+  }
+  .scheme[data-scheme="A"] .ss-dock-body {
+    border-radius: var(--dsw-radius-lg);
+  }
+  .scheme[data-scheme="A"] .ss-dock-body::after {
+    border-bottom: .5px solid var(--dsw-alias-border-l1);
+  }
+  /* 最上面那条（宿主队列条）也随之改成完整卡片：否则它的平底边仍会顶在
+     提醒条的圆角上。这模拟"每条 dock 都是完整卡片"的约定。 */
+  .scheme[data-scheme="A"] .host-dock { margin-bottom: 0; }
+  .scheme[data-scheme="A"] .host-panel { border-radius: var(--dsw-radius-lg); }
+  .scheme[data-scheme="A"] .host-panel::after { border-bottom: .5px solid var(--dsw-alias-border-l1); }
+
+  /* A2：更紧凑的成组间距（4px） */
+  .scheme[data-scheme="A2"] .wSkVaW_composerStack { --dsh-composer-stack-gap: 4px; }
+  .scheme[data-scheme="A2"] .ss-dock-root { margin-bottom: 0; }
+  .scheme[data-scheme="A2"] .ss-dock-body { border-radius: var(--dsw-radius-lg); }
+  .scheme[data-scheme="A2"] .ss-dock-body::after { border-bottom: .5px solid var(--dsw-alias-border-l1); }
+  .scheme[data-scheme="A2"] .host-dock { margin-bottom: 0; }
+  .scheme[data-scheme="A2"] .host-panel { border-radius: var(--dsw-radius-lg); }
+  .scheme[data-scheme="A2"] .host-panel::after { border-bottom: .5px solid var(--dsw-alias-border-l1); }
+
+  /* ============ 方案 B：连成一根管子，只有最下面那条接 composer ============ */
+  /* 提醒条：上无圆角、下平底开口（保持与 composer 卡片接合） */
+  .scheme[data-scheme="B"] .ss-dock-body {
+    border-radius: 0;
+  }
+  /* 队列条：保持顶圆角，但底边也要开口 —— 否则平底+描边会压在提醒条上 */
+  .scheme[data-scheme="B"] .host-panel::after { border-bottom: none; }
+  .scheme[data-scheme="B"] .host-dock,
+  .scheme[data-scheme="B"] .ss-dock-root { margin-bottom: calc(0px - var(--dsh-composer-stack-gap)); }
+
+  /* ============ 方案 B2：无缝管子（修正版，拟落地） ============ */
+  /* B 初稿有两处错误假设，这里逐条纠正：
+   *   ① 初稿把两条 dock 的下边距都改成 -6px（净空 0）。其实"重叠 3px"正是
+   *      宿主接 composer 的消缝手段（面板底边开口、被下一层盖住 3px），
+   *      管子段与段之间应当沿用同一手法，而不是拉开成 0 缝。
+   *   ② 初稿没去掉提醒条的顶描边 —— 那条 .5px 顶线横穿接缝，才是"亮线"
+   *      的真正来源。队列条的底边本来就是"直角 + 开口"（:after 无 bottom 边），
+   *      提醒条顶边只要同样"直角 + 无顶线"，两段的侧描边在同一 x 上首尾相接、
+   *      底色同为 --dsw-specific-menu，接缝处不存在任何一条线。
+   * 结论：宿主队列条零改动，插件只在自己被队列条紧邻在上时改两处。
+   * 真实实现的选择器是 `[data-queue-dock] + .ss-dock-root`：两条 dock 的根
+   * 同为 div[data-slot="conversation.input.dock"]（display:contents，已核安装态
+   * dsh-client-ui-renderer 的 ANCHOR_STYLE）的直接子元素，相邻兄弟成立。
+   * 这里用同样的相邻结构演示。 */
+  .scheme[data-scheme="B2"] [data-queue-dock] + .ss-dock-root .ss-dock-body {
+    border-radius: 0;
+  }
+  .scheme[data-scheme="B2"] [data-queue-dock] + .ss-dock-root .ss-dock-body::after {
+    border-top: none;
+  }
+  /* 注意：B2 不改任何 margin —— 队列条的 -9px 拉出 3px 重叠（段间消缝），
+     提醒条的 -9px 拉出与 composer 的 3px 重叠（底段接合），各司其职。 */
+
+  /* ============ 方案 C：保持现状，只加视觉区隔 ============ */
+  .scheme[data-scheme="C"] .ss-dock-body::after {
+    border-top-color: var(--dsw-alias-border-l2);
+  }
+
+  /* ============ 方案 D：断开 + 极小间距，成组但不相连 ============ */
+  .scheme[data-scheme="D"] .wSkVaW_composerStack { --dsh-composer-stack-gap: 3px; }
+  .scheme[data-scheme="D"] .ss-dock-root { margin-bottom: 0; }
+  .scheme[data-scheme="D"] .ss-dock-body { border-radius: var(--dsw-radius-lg); }
+  .scheme[data-scheme="D"] .ss-dock-body::after { border-bottom: .5px solid var(--dsw-alias-border-l1); }
+  .scheme[data-scheme="D"] .host-dock { margin-bottom: 0; }
+  .scheme[data-scheme="D"] .host-panel { border-radius: var(--dsw-radius-lg); }
+  .scheme[data-scheme="D"] .host-panel::after { border-bottom: .5px solid var(--dsw-alias-border-l1); }
+  /* 断开后两条卡片同宽同色，3px 太挤会像"描边粘住"，故只保留这一档用于对比 */
+
+  .overlap-readout {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .overlap-bad { background: #f25a5a22; color: #f25a5a; }
+  .overlap-ok { background: #3fb95022; color: #3fb950; }
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="demo-head">
+  <h1>两条 dock 同屏：修法预览</h1>
+  <p>
+    当前 <code>composerStack</code> 里，宿主队列条与提醒条的下边距都是
+    <code>calc(0px - var(--dsh-composer-stack-gap) - 3px)</code> = <code>-9px</code> ——
+    这个算法假设「我的下方邻居就是 composer 卡片」。两条 dock 相邻时，
+    提醒条实际<b>压进</b>队列面板底边 <b>3px</b>，于是队列面板的平底边与提醒面板的顶圆角叠在一起。
+    下面是各修法的真实观感，几何取值均照抄安装态的宿主与插件 CSS。
+  </p>
+</div>
+
+<div class="toolbar">
+  <span class="toolbar-label">主题</span>
+  <div class="seg" id="seg-theme">
+    <button data-theme="dark" aria-pressed="true">深色</button>
+    <button data-theme="light" aria-pressed="false">浅色</button>
+  </div>
+  <span class="toolbar-label" style="margin-left:12px">队列条条数</span>
+  <div class="seg" id="seg-rows">
+    <button data-rows="1" aria-pressed="true">1 条</button>
+    <button data-rows="3" aria-pressed="false">3 条（带附件）</button>
+  </div>
+  <span class="toolbar-label" style="margin-left:12px">提醒条条数</span>
+  <div class="seg" id="seg-sched">
+    <button data-sched="1" aria-pressed="true">1 条</button>
+    <button data-sched="3" aria-pressed="false">3 条（折叠头）</button>
+  </div>
+  <span class="toolbar-spacer"></span>
+  <span class="overlap-readout" id="overlap-readout"></span>
+</div>
+
+<div class="schemes" id="schemes">
+
+  <!-- ============ 0：现状 ============ -->
+  <section class="scheme" data-scheme="0">
+    <div class="scheme-head">
+      <span class="scheme-badge">0</span>
+      <span class="scheme-title">现状（两条都抄了同一个负边距）</span>
+      <span class="scheme-verdict">问题：面板重叠，圆角与平底相撞</span>
+    </div>
+    <div class="scheme-note">
+      队列面板底边是<b>平的</b>（只留底边开口），提醒面板顶边是<b>圆角</b>。
+      两者叠了 3px，观感是「一张卡片插进了另一张的边缘」。
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+          <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+          <ul class="host-list" data-host-list></ul>
+        </div></div>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+  <!-- ============ A：断开成两张独立卡（6px） ============ -->
+  <section class="scheme" data-scheme="A">
+    <div class="scheme-head">
+      <span class="scheme-badge">A</span>
+      <span class="scheme-title">断开成两张独立卡 · 间距 6px（栈默认）</span>
+      <span class="scheme-verdict"><b>推荐</b></span>
+    </div>
+    <div class="scheme-note">
+      两条 dock 各自是完整卡片（四角圆角 + 完整描边），中间留 <code>stack-gap</code> 的 6px。
+      与页面其它「卡片间距」一致，读起来是<b>两张相邻的卡</b>而不是一条管子。
+      判据可用宿主唯一稳定 hook <code>[data-queue-dock]</code> 做兄弟选择器，<b>没有队列条时行为完全不变</b>。
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+          <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+          <ul class="host-list" data-host-list></ul>
+        </div></div>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+  <!-- ============ A2：断开 + 4px ============ -->
+  <section class="scheme" data-scheme="A2">
+    <div class="scheme-head">
+      <span class="scheme-badge">A2</span>
+      <span class="scheme-title">断开成两张独立卡 · 间距收紧到 4px</span>
+    </div>
+    <div class="scheme-note">
+      同上，但把两条 dock 之间的间距压到 4px，让它们更明显地<b>成组</b>，
+      同时仍各自完整。代价：与 composer 卡片之间也会变成 4px，整体栈变紧。
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+          <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+          <ul class="host-list" data-host-list></ul>
+        </div></div>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+  <!-- ============ B：连成一根管子（初稿，留作对比） ============ -->
+  <section class="scheme" data-scheme="B">
+    <div class="scheme-head">
+      <span class="scheme-badge">B</span>
+      <span class="scheme-title">连成一根管子 · 初稿</span>
+      <span class="scheme-verdict">接缝有亮线（见 B2 修正）</span>
+    </div>
+    <div class="scheme-note">
+      初稿有两处错误假设：把两条 dock 的负边距拉平成 0 缝（其实 3px 重叠才是宿主消缝手法），
+      又没去掉提醒条的顶描边（那条 .5px 顶线横穿接缝，就是亮线的来源）。保留此档供对比。
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+          <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+          <ul class="host-list" data-host-list></ul>
+        </div></div>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+  <!-- ============ B2：无缝管子（修正版，拟落地） ============ -->
+  <section class="scheme" data-scheme="B2">
+    <div class="scheme-head">
+      <span class="scheme-badge">B2</span>
+      <span class="scheme-title">无缝管子 · 修正版</span>
+      <span class="scheme-verdict"><b>拟落地</b> · 宿主零改动</span>
+    </div>
+    <div class="scheme-note">
+      修正 B 的两处假设：<b>保留 -9px 重叠</b>（段间与段底同一消缝手法），提醒条顶边
+      <b>直角 + 去顶描边</b>。队列条的底边本来就是直角开口，两段的侧描边首尾相接、底色相同，
+      接缝处没有任何线 —— 整根管子连成一块面板，只有最顶一个圆角。
+      实现只需两条 CSS（<code>[data-queue-dock] + .ss-dock-root</code> 相邻兄弟选择器），
+      <b>没有队列条时（对照组）行为零变化</b>。
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+          <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+          <ul class="host-list" data-host-list></ul>
+        </div></div>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+  <!-- ============ C：只做视觉区隔 ============ -->
+  <section class="scheme" data-scheme="C">
+    <div class="scheme-head">
+      <span class="scheme-badge">C</span>
+      <span class="scheme-title">保留重叠，只加深区隔线</span>
+      <span class="scheme-verdict">治标不治本</span>
+    </div>
+    <div class="scheme-note">
+      不改几何，只把提醒条顶边描边调亮。3px 重叠还在，圆角处仍然能看出两条面板相压。
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+          <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+          <ul class="host-list" data-host-list></ul>
+        </div></div>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+  <!-- ============ 对照：只有一条 dock（退化情形） ============ -->
+  <section class="scheme" data-scheme="solo">
+    <div class="scheme-head">
+      <span class="scheme-badge">↺</span>
+      <span class="scheme-title">对照组：只有提醒条（无队列条）</span>
+      <span class="scheme-verdict">任何方案都不应改变这个观感</span>
+    </div>
+    <div class="scheme-note">
+      提醒条单独存在时，它接的就是 composer 卡片 —— 负边距、顶圆角、底边开口都是对的。
+      <b>所有方案都必须保证这一档零变化。</b>
+    </div>
+    <div class="scheme-stage">
+      <div class="wSkVaW_composerStack" data-stack>
+        <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+          <ul class="ss-dock-list" data-ss-list></ul>
+        </div></div>
+        <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+      </div>
+    </div>
+    <div class="scheme-meta" data-meta></div>
+  </section>
+
+</div>
+
+<script>
+/*
+ * demo 脚本：只负责「按当前档位铺行数据」+「实时量出重叠像素」+「切主题」。
+ * 不含任何方案逻辑 —— 方案全部是上面 CSS 里的 [data-scheme] 规则，
+ * 这样预览与将来落进 styles.ts 的写法是同一套。
+ */
+
+const QUEUE_ROWS = {
+  1: [
+    { text: '怎么样了', files: [] },
+  ],
+  3: [
+    { text: '怎么样了', files: [] },
+    { text: '把 src/client/styles.ts 的 dock 段导出成一张对照表，标注每一项的宿主来源', files: [{ name: 'styles.ts', size: '42K' }] },
+    { text: '跑一遍全部测试并把失败项整理出来', files: [{ name: 'test-report.html', size: '8K' }, { name: 'shot.png', size: '124K' }] },
+  ],
+};
+
+const SCHED_ROWS = {
+  1: [
+    { time: '16:57', left: '剩 02:06', prompt: '怎么样了', ratio: 0.38 },
+  ],
+  3: [
+    { time: '16:57', left: '剩 02:06', prompt: '怎么样了', ratio: 0.38 },
+    { time: '17:30', left: '剩 35:00', prompt: '提醒我 review 一下 PR', ratio: 0.12 },
+    { time: '18:00', left: '剩 1:05:12', prompt: '把今天的改动同步进 CHANGELOG', ratio: 0.05 },
+  ],
+};
+
+const svg = {
+  lead: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  chevron: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 5.25 7 8.75l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  clock: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.75V8l2.25 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  edit: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.4 1.9a1.2 1.2 0 0 1 1.7 1.7L4.6 10.1l-2.2.5.5-2.2 6.5-6.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  pause: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3.5v9M10 3.5v9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  trash: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 3.5h9M5.5 3.5V2h3v1.5M4 3.5l.6 8h4.8l.6-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  send: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8 14 2.5 8 14l-1.6-4.4L2 8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  file: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 1.5h4l2 2v7H3v-9Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>',
+};
+
+function hostRow(r) {
+  const files = r.files.length
+    ? `<div class="host-attachments">${r.files.map(f =>
+        `<span class="host-file">${svg.file}<span class="host-fileName">${f.name}</span></span>`).join('')}</div>`
+    : '';
+  return `<li class="host-row">
+    ${files}
+    <div class="host-preview" title="${r.text.replace(/"/g, '&quot;')}">${r.text}</div>
+    <div class="host-actions">
+      <span class="host-action" title="编辑">${svg.edit}</span>
+      <span class="host-action" title="暂停">${svg.pause}</span>
+      <span class="host-action" title="删除">${svg.trash}</span>
+      <span class="host-action" title="插话">${svg.send}</span>
+    </div>
+  </li>`;
+}
+
+function schedRow(s) {
+  return `<li class="ss-dock-row">
+    <div class="ss-dock-preview">
+      <div class="ss-dock-row-line">
+        <span class="ss-dock-row-time">${s.time}</span>
+        <span class="ss-dock-row-countdown">${s.left}</span>
+        <span class="ss-dock-row-prompt" title="${s.prompt.replace(/"/g, '&quot;')}">${s.prompt}</span>
+      </div>
+      <div class="ss-dock-bars"><div class="ss-dock-bar"><div class="ss-dock-bar-fill" style="width:${s.ratio * 100}%"></div></div></div>
+    </div>
+    <div class="ss-dock-actions">
+      <span class="ss-dock-action" title="编辑">${svg.edit}</span>
+      <span class="ss-dock-action" title="暂停">${svg.pause}</span>
+      <span class="ss-dock-action" title="删除">${svg.trash}</span>
+      <span class="ss-dock-action" title="插话">${svg.send}</span>
+    </div>
+  </li>`;
+}
+
+function schedHeader(n) {
+  return `<button type="button" class="ss-dock-header">
+    <span class="ss-dock-lead">${svg.clock}</span>
+    <span class="ss-dock-count">${n} 条定时提醒</span>
+    <span class="ss-dock-chevron">${svg.chevron}</span>
+  </button>`;
+}
+
+const state = { rows: 1, sched: 1 };
+
+function render() {
+  const qRows = QUEUE_ROWS[state.rows];
+  const sRows = SCHED_ROWS[state.sched];
+
+  document.querySelectorAll('.scheme').forEach((scheme) => {
+    const solo = scheme.dataset.scheme === 'solo';
+    const hostList = scheme.querySelector('[data-host-list]');
+    const hostCount = scheme.querySelector('[data-host-count]');
+    if (hostList) hostList.innerHTML = qRows.map(hostRow).join('');
+    if (hostCount) hostCount.textContent = `${qRows.length} 条排队消息`;
+
+    const ssList = scheme.querySelector('[data-ss-list]');
+    const body = scheme.querySelector('[data-ss-body]');
+    const root = scheme.querySelector('[data-ss-dock]');
+    if (!ssList) return;
+
+    // 多条时渲染折叠头（与真实 ScheduleDock 一致：>1 条才有 header）
+    let html = '';
+    if (sRows.length > 1 && body) {
+      if (!body.querySelector('.ss-dock-header')) {
+        body.insertAdjacentHTML('afterbegin', schedHeader(sRows.length));
+      } else {
+        body.querySelector('.ss-dock-count').textContent = `${sRows.length} 条定时提醒`;
+      }
+      body.dataset.multi = '1';
+    } else if (body) {
+      const h = body.querySelector('.ss-dock-header');
+      if (h) h.remove();
+      delete body.dataset.multi;
+    }
+    ssList.innerHTML = sRows.map(schedRow).join('');
+
+    if (solo && root) root.style.display = '';
+  });
+
+  measure();
+}
+
+/* 实时量出「队列面板底边 → 提醒面板顶边」的重叠像素。
+ * 这是判断方案好坏的硬指标：>0 就是两条面板互相压着。 */
+function measure() {
+  document.querySelectorAll('.scheme').forEach((scheme) => {
+    const meta = scheme.querySelector('[data-meta]');
+    const hostPanel = scheme.querySelector('[data-host-panel]');
+    const ssBody = scheme.querySelector('[data-ss-body]');
+    const stack = scheme.querySelector('[data-stack]');
+    const composer = scheme.querySelector('.host-composer');
+    if (!meta || !ssBody || !stack) return;
+
+    const gap = getComputedStyle(stack).gap;
+    const ssTop = ssBody.getBoundingClientRect().top;
+    const parts = [`<span>stack-gap <b>${gap}</b></span>`];
+
+    if (hostPanel) {
+      const overlap = +(hostPanel.getBoundingClientRect().bottom - ssTop).toFixed(1);
+      /* B2 的 3px 重叠是**段间消缝手法**（宿主接 composer 同款），不是缺陷；
+         0/C 档的重叠才是圆角相撞。判据：面板顶边是否已放弃圆角+顶描边。 */
+      const tube = scheme.dataset.scheme === 'B2';
+      const cls = overlap > 0 ? (tube ? 'overlap-ok' : 'overlap-bad') : 'overlap-ok';
+      const label = overlap > 0
+        ? (tube ? `重叠 ${overlap}px（消缝，有意）` : `重叠 ${overlap}px`)
+        : `无重叠（净空 ${Math.abs(overlap)}px）`;
+      parts.push(`<span class="overlap-readout ${cls}">${label}</span>`);
+      const hp = getComputedStyle(hostPanel);
+      parts.push(`<span>队列面板圆角 <b>${hp.borderRadius}</b></span>`);
+    } else {
+      parts.push(`<span class="overlap-readout overlap-ok">仅一条 dock（对照）</span>`);
+    }
+    const sb = getComputedStyle(ssBody);
+    parts.push(`<span>提醒面板圆角 <b>${sb.borderRadius}</b></span>`);
+    const ssRoot = scheme.querySelector('[data-ss-dock]');
+    if (ssRoot) parts.push(`<span>提醒条 margin-bottom <b>${getComputedStyle(ssRoot).marginBottom}</b></span>`);
+    if (composer) {
+      const cs = composer.getBoundingClientRect();
+      const sb2 = ssBody.getBoundingClientRect();
+      const seam = +(cs.top - sb2.bottom).toFixed(1);
+      parts.push(`<span>与 composer 的缝 <b>${seam}px</b></span>`);
+    }
+
+    meta.innerHTML = parts.join('');
+  });
+
+  // 顶部汇总：突出"现状"这一档
+  const zero = document.querySelector('.scheme[data-scheme="0"] [data-meta] .overlap-readout');
+  const out = document.getElementById('overlap-readout');
+  if (zero && out) {
+    out.className = 'overlap-readout ' + (zero.classList.contains('overlap-bad') ? 'overlap-bad' : 'overlap-ok');
+    out.textContent = '现状：' + zero.textContent;
+  }
+}
+
+function bindSeg(id, key, cast) {
+  const el = document.getElementById(id);
+  el.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    el.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    state[key] = cast(btn.dataset[key]);
+    render();
+  });
+}
+
+bindSeg('seg-rows', 'rows', Number);
+bindSeg('seg-sched', 'sched', Number);
+
+document.getElementById('seg-theme').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  document.getElementById('seg-theme').querySelectorAll('button')
+    .forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  document.body.dataset.theme = btn.dataset.theme;
+});
+
+render();
+window.addEventListener('resize', measure);
+</script>
+</body>
+</html>
