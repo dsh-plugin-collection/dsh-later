@@ -4,6 +4,11 @@
 
 ## 未发布
 
+- **fix** 提醒 dock 与宿主 QueueDock 同屏时接缝双缘重影（issue #41）：队列条底边是"直角 + 开口"
+  的消缝设计，提醒面板的顶圆角 + 顶描边压进它被盖住的 3px，两种收口相撞。修法（B2，宿主零改动）：
+  提醒条紧邻队列条时顶边直角化、去顶描边，两段连成一根无缝管子；-9px 重叠是消缝手法、刻意保留，
+  没有队列条时规则不命中、单条 dock 观感零变化。详见 design-decisions §8.6。
+
 - **fix** `npm run build` 不再静默部署到 `~/.dsh/profiles`（issue #46）。构建与部署拆开：
   `npm run build` 只写本地 `lib/`，要同步给运行中的 DSH 需显式 `npm run deploy`
   （或 `node build.mjs --deploy` / `DSH_LATER_RELINK=1`）。

@@ -46,6 +46,7 @@
 | S7 | 动作按钮交互态 | `.action`：28×28、`radius 999px`、`--dsw-alias-label-tertiary`、`:hover` → `--dsw-alias-interactive-bg-hover`、`:focus-visible` focus ring、`:disabled{cursor:default;opacity:.45}` | `.ss-dock-action` 全套同值（含 `.45`） | ✅ |
 | S8 | 空态 | 条目为 0 不渲染 | 同 | ✅ |
 | S9 | 单条直出 | `listVisible = rowCount === 1 \|\| expanded` | `expanded = schedules.length === 1 \|\| !collapsed` | ✅ 语义等价 |
+| S10 | 管子接缝 | attach 壳隐含"自己是最后一条 dock"（宿主 todo/goal 浮卡式、queue attach 式垫底） | 插件 order 30 排在 queue 之下 → 借 `[data-queue-dock]` 相邻检测把自身顶边管子化 | ✅ #41 |
 
 ## §3 #32 ①② 的死状态与空类名（含归属变更说明）
 
@@ -78,7 +79,7 @@
 |---|---|---|---|---|
 | G1 | tooltip **遮挡表现** | 值层面已核对（§4：portal 档 1100），但 fixed 元素是否真压在 composer 卡片／面板浮层之上取决于运行时 stacking context（dock 侧 `isolation: isolate`、面板 `z-index: 1099/1100`）；窄视口下翻转与不裁切 | Lead（真机 + `scripts/capture/`） | ❌ 表现层验证不了；✅ 数值可从 `Tooltip.module.css` 读到 |
 | G2 | 按钮列宽与行宽预算 | 去掉 `.ss-dock-tip-anchor` 后，图标列在 pending／done／禁用态之间不抖动；三个 28px 按钮下正文仍不被挤成纯省略号（#3） | Lead | ❌ |
-| G3 | 两条 dock 同屏 | 真队列条与提醒条同时出现时，两块面板负 margin 叠加、两个顶圆角相接处无重影／双描边；`.5px` 描边在 DPR=1 与暗色主题下肉眼可见（P1） | Lead | ❌ |
+| G3 | 两条 dock 同屏 | 真队列条与提醒条同时出现时，两块面板负 margin 叠加、两个顶圆角相接处无重影／双描边；`.5px` 描边在 DPR=1 与暗色主题下肉眼可见（P1） | Lead | ✅ 已解决：#41 B2 管子接缝，styles.ts 两条 `[data-queue-dock]` 相邻规则；demo 实测重叠 3px 为有意消缝、接缝无水平线 |
 | G4 | textarea 自适应高度 | 编辑多行提醒随行高增长、超上限内部滚动，收起后不留残余；dock `max-height: 180px` 滚动不跳 | dock-editor 作者，Lead 复验 | ⚠️ 宿主算法可读（`scrollHeight + offsetHeight - clientHeight`） |
 | G5 | Enter／IME 与 composer 抢键 | dock 内聚焦时 Enter 只保存，不触发宿主提交；`busyEnter=queue` 与 `=steer` 两档一致；输入法组合态 Enter 不提交 | dock-editor | ⚠️ 现有 `event.stopPropagation()` 是宿主没有的一行，动机未证（见 C3） |
 | G6 | 进度条动画相位 | 切走会话再切回、折叠→展开重挂载后条长不归零、无每秒跳变；`prefers-reduced-motion` 下走静态宽度不塌缩 | dock-i18n／Lead | ⚠️ 逻辑可读，观感需实测 |
