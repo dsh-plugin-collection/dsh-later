@@ -59,7 +59,6 @@
 |------|------|---|
 | 输入框时钟按钮 | `var(--dsw-alias-label-secondary)`，图标继承 `currentColor` | `.ss-sched-btn` |
 | dock 动作按钮 | `var(--dsw-alias-label-tertiary)`；`:disabled` 时 `opacity: .45` | `.ss-dock-action` |
-| dock 恢复态（可恢复的暂停项） | `var(--dsw-alias-state-success-primary)` | `.ss-dock-action.ss-paused-active` |
 | dock 插话已发送 | `var(--dsw-alias-state-success-primary)` | `.ss-dock-action-steer.ss-done` |
 | Badge（scheduled，默认） | `#8b5cf6` | `.ss-presence` |
 | Badge（urgent） | `var(--dsw-alias-state-warn-secondary)` | `.ss-presence[data-state="urgent"]` |

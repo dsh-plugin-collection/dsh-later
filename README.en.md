@@ -188,6 +188,15 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 ```
 
 > Dev tip: `npm run watch` rebuilds on `src/` changes and runs shape regression tests.
+>
+> It no longer patches the copy the GUI is running (issue #46: the old behaviour
+> silently deployed unmerged code into every profile, and concurrent worktrees
+> overwrote each other through shared inodes). To see a change in the UI, either:
+>
+> ```sh
+> npm run deploy                     # sync once, explicitly
+> DSH_LATER_RELINK=1 npm run watch   # restore the old deploy-on-every-change
+> ```
 
 ### Your first reminder
 

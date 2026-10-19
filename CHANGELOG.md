@@ -4,6 +4,57 @@
 
 ## 未发布
 
+- **fix** 提醒 dock 与宿主 QueueDock 同屏时接缝双缘重影（issue #41）：队列条底边是"直角 + 开口"
+  的消缝设计，提醒面板的顶圆角 + 顶描边压进它被盖住的 3px，两种收口相撞。修法（B2，宿主零改动）：
+  提醒条紧邻队列条时顶边直角化、去顶描边，两段连成一根无缝管子；-9px 重叠是消缝手法、刻意保留，
+  没有队列条时规则不命中、单条 dock 观感零变化。详见 design-decisions §8.6。
+
+- **fix** `npm run build` 不再静默部署到 `~/.dsh/profiles`（issue #46）。构建与部署拆开：
+  `npm run build` 只写本地 `lib/`，要同步给运行中的 DSH 需显式 `npm run deploy`
+  （或 `node build.mjs --deploy` / `DSH_LATER_RELINK=1`）。
+  - 原先重链是 build 的**默认副作用**，两层代价：① 未合并、未评审的分支只要 build
+    一次就进到运行中的 host；② 多个 worktree 经 profile **共享 inode**，彼此静默覆盖。
+    后者已实际发生过：主 worktree 的一次 build 把未合并的修复写进了另一个会话的工作树
+    （`wt-issue-36/lib/user-tools.js` 与主树同 inode、内容含 4 处 resolver 而它自己
+    HEAD 只有 3 处，而那个会话自身一行未改）。
+  - **`npm run watch` 是最严重的形态**：它每次文件变动都 `execSync('npm run build')`
+    （`watch.mjs:45`），等于**持续自动部署**。现在 watch 复用同一策略，默认不再外溢；
+    要保留旧行为用 `DSH_LATER_RELINK=1 npm run watch`（子进程继承环境变量）。
+  - 跳过部署时**必须打印提示**并给出三条显式路径 —— 否则「build 完 GUI 没变化」会被
+    当成构建失效去排查，而 #11 当初引入重链正是为了治这个。行为变了，噪音也得跟着变。
+  - 决策抽成纯函数 `scripts/relink-policy.mjs`：`build.mjs` 是带副作用的顶层脚本
+    （tsc/esbuild/linkSync），测试导入它会**真的改写 profiles**，所以「要不要重链」
+    必须能在不执行构建的前提下被钉死。优先级 `--no-deploy` > `--deploy` > 环境变量 >
+    **默认关**。
+  - 测试：新增 9 条（`tests/build-no-silent-deploy.test.mjs`）—— 策略穷举（默认关、
+    显式开、`--no-deploy` 最高优先、跳过提示含三条路径）、接线守卫（build 必经策略、
+    watch 不得自建重链、package.json 有 deploy）、以及一条**端到端**：造假 `HOME`
+    放哨兵产物，默认构建后哨兵必须原样在、`--deploy` 后才被替换。
+    端到端做过**变异验证**：把把关改成恒不成立 → 结构守卫与端到端双双变红。
+    （第一次变异写错了 —— `if (!gate) {提示} else if (true) {重链}` 里 else 根本不会
+    执行，测试全绿是假阴性；这也说明「测试通过」本身不构成证据。）
+
+- **fix** dock 行内编辑改文案静默失败（issue #44）：在待发列表里改一条提醒的文案并保存，
+  宿主返回 `schedule_not_found`，用户以为已经改好了。
+  - 根因是**一处漏改**：投影有意把 uid 当作 `id` 暴露给客户端
+    （`src/projection.ts:179` `id: uid ?? record.id`），所以 dock 传 uid 是正确的，
+    host 侧要用 `resolveActiveScheduleId()` 换算。`userScheduleDelete` 与
+    `userSchedulePause` 都调了它，**唯独 `userScheduleEditPrompt` 没有** ——
+    同一个 uid 删除能成功、改文案却失败，这个不对称本身就是最强证据。
+  - 为什么 337 个测试全绿而 bug 长存：既有编辑用例传的是 `created.id`（真 schedule
+    id）和字面量 `'schedule-past'`，**从没传过 uid**。补的正是这条从未走过的路径。
+  - 修复有个坑必须避开：`getPaused(sessionId, uid)` 这张表**以 uid 为键**，所以只有
+    「活动项查找」能用换算后的 id，暂停项查找**必须继续用原始 `id`**，否则把一个 bug
+    换成另一个（暂停项反而改不了文案）。代码里就地写了警示注释，并有专门断言钉住。
+  - 顺带改进报错：`未找到定时任务 ${scheduleId}` 改为回显**调用方传入的 id**。本次
+    问题难查正是因为报错里的 id 与用户/dock 手里那个对不上号；传真 schedule id 时
+    两者相同，无歧义。
+  - 测试：新增 5 条（`tests/edit-uid-resolution.test.mjs`）—— uid 编辑成功、真
+    schedule id 不回归、暂停项按 uid 仍可编辑、报错回显原始 id、以及一条**结构守卫**
+    （编辑必须调 resolver；paused 查找必须用原始 id；删除/暂停/编辑三个操作现在都要
+    经过 resolver，将来再漏一处会直接被拦）。**变异验证过**：把 resolver 退回原状 →
+    行为测试与结构守卫双双变红。另验证 uid 跨编辑保留（否则 dock 行认不回该任务）。
+
 - **feat** 折叠分组徽标上的「定时任务」改由本插件自己注册 facet（issue #36）。
   - 迁移前那一格由 dsh-group-status 的过渡适配器**代管**：它 `require('dsh-later/client')` 读我们的
     摘要 store，再按具名字段与色档反推画图。语义一直归本插件，实现却写在对方仓库里——任一方改
