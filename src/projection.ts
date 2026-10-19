@@ -30,12 +30,80 @@ import {
   getOwnership,
   hasOwnership,
 } from './ownership-store.js';
-import type { PausedEntry } from './ownership-store.js';
+import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
 import type {
   UserScheduleOwnedChange,
   UserScheduleProjectionValue,
   UserScheduleWireItem,
+  WireAttachment,
 } from './domain.js';
+
+/**
+ * wire 里单条附件引用的 schema。
+ *
+ * `.strict()`：sidecar 是本地文件、可能被外部改写，多余键一律拒读，避免把非预期
+ * 字段透给客户端（附件块最终参与「以用户身份代发」，读路径按不可信输入处理）。
+ */
+const wireAttachmentSchema = z
+  .object({
+    kind: z.union([z.literal('image'), z.literal('file')]),
+    attachment_id: z.string(),
+    name: z.string().optional(),
+    bytes: z.number().optional(),
+    media_type: z.string().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+  })
+  .strict();
+
+/**
+ * 单条任务最多带出多少个附件块（issue #37）。
+ *
+ * 投影帧按「任务数 × 附件数」膨胀，而宿主 composer 的 `dropLimits.count` 远小于
+ * 此值，所以 8 是防御性上限而非产品限制；被截断时以 `attachments_total` 报原始
+ * 总数，客户端据此显示「+N」。
+ */
+const MAX_WIRE_ATTACHMENTS = 8;
+
+/**
+ * 把 sidecar 的附件块映射成 wire 引用（只出不透明 id + 展示元数据）。
+ *
+ * 两个 builder 共用同一份映射，保证活动项与暂停项规则一致——两面分叉的历史根因
+ * 就是规则各写各的。`undefined`/空数组都返回 `{}`，即**整个键不出现**，与
+ * `sanitizeAttachments()` 的语义对齐，客户端因此不必区分两种空态。
+ */
+function attachmentWireOf(
+  list: readonly ScheduledAttachment[] | undefined,
+): Pick<UserScheduleWireItem, 'attachments' | 'attachments_total'> {
+  if (list === undefined || list.length === 0) return {};
+  // `attachment` 必须在判别式分支**内部**取：提前解构会让 TS 无法从
+  // `block.type` 收窄到 ImageBlock/FileBlock 的具体 ref 类型。
+  const mapped = list.map((block): WireAttachment => {
+    if (block.type === 'image') {
+      const ref = block.attachment;
+      return {
+        kind: 'image',
+        attachment_id: ref.attachmentId,
+        ...(typeof ref.mediaType === 'string' ? { media_type: ref.mediaType } : {}),
+        ...(typeof ref.bytes === 'number' ? { bytes: ref.bytes } : {}),
+        ...(typeof ref.width === 'number' ? { width: ref.width } : {}),
+        ...(typeof ref.height === 'number' ? { height: ref.height } : {}),
+      };
+    }
+    const ref = block.attachment;
+    return {
+      kind: 'file',
+      attachment_id: ref.attachmentId,
+      ...(typeof ref.name === 'string' ? { name: ref.name } : {}),
+      ...(typeof ref.bytes === 'number' ? { bytes: ref.bytes } : {}),
+    };
+  });
+  const shown = mapped.slice(0, MAX_WIRE_ATTACHMENTS);
+  return {
+    attachments: shown,
+    ...(mapped.length > shown.length ? { attachments_total: mapped.length } : {}),
+  };
+}
 
 /** 单条 wire 项 schema。 */
 const wireItemSchema = z
@@ -53,6 +121,9 @@ const wireItemSchema = z
     paused_at: z.string().optional(),
     schedule_id: z.string().optional(),
     window_seconds: z.number().optional(),
+    // 无附件时整个键不出现（不是 []），理由见 domain.ts 的字段注释
+    attachments: z.array(wireAttachmentSchema).optional(),
+    attachments_total: z.number().optional(),
   })
   .strict();
 
@@ -189,6 +260,8 @@ function wireItemOf(record: StoredScheduleRecord, sessionId: string): UserSchedu
     delivery_mode: 'session-local',
     status: 'active',
     schedule_id: record.id,
+    // 附件：ownership 已在上面取到，不新增任何 sidecar 读取
+    ...attachmentWireOf(ownership?.attachments),
   };
 }
 
@@ -207,6 +280,9 @@ function pausedWireItemOf(entry: PausedEntry): UserScheduleWireItem {
     remaining_seconds: entry.remainingSeconds,
     paused_at: new Date(entry.pausedAt).toISOString(),
     schedule_id: entry.lastScheduleId,
+    // 暂停项的附件随留档冻结（pause 会删日志记录，留档是唯一素材来源），
+    // 与活动项走同一个映射，规则不分叉。
+    ...attachmentWireOf(entry.attachments),
   };
 }
 

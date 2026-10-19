@@ -59,6 +59,36 @@ export interface UserScheduleOwnedChange {
 export type UserScheduleDelivery = 'context' | 'user';
 
 /**
+ * wire 里的一条附件引用（issue #37）。
+ *
+ * 只携带**不透明引用 + 展示元数据**：不带字节、不带路径。sidecar 存的就是这个
+ * 形状（`ownership-store.ts` 的 `ScheduledAttachment`），理由相同——附件块最终
+ * 会拼进「以用户身份代发」的消息，读路径必须视为不可信输入并逐块过滤。
+ *
+ * 客户端要显示图片时自行解析 URL（宿主 `uiConversation.imageUrl(sessionId, …)`），
+ * 所以这里不需要、也不应该给任何可寻址路径。
+ *
+ * ⚠️ 与客户端的 `ClientAttachment`（`src/client/types.ts`）是**手写镜像**：
+ * 成员名必须逐字一致，由 `tests/wire-type-parity.test.mjs` 锁住。本仓 host↔client
+ * 一直是这个惯例（见 `ClientSchedule` 自述），刻意不合并成一个共享类型，以免
+ * 客户端反向依赖宿主模块。
+ */
+export interface WireAttachment {
+  readonly kind: 'image' | 'file';
+  /** 宿主耐久化的不透明引用；非路径、非字节。 */
+  readonly attachment_id: string;
+  /** 仅 file：已消毒的文件名。 */
+  readonly name?: string;
+  /** 字节数：image/file 都有。 */
+  readonly bytes?: number;
+  /** 仅 image。 */
+  readonly media_type?: string;
+  /** 仅 image：intrinsic 尺寸，客户端算缩略图裁切比用。 */
+  readonly width?: number;
+  readonly height?: number;
+}
+
+/**
  * 投影输出的一条用户任务骨架（不含随墙钟变化的状态字段；
  * `scheduled`/`overdue` 由客户端用 `scheduledAt` 实时推导）。
  * 字段用 snake_case，与 `user_schedule_list` 工具响应保持一致。
@@ -87,6 +117,18 @@ export interface UserScheduleWireItem {
    * 此字段保留原 after 间隔，使进度条从冻结处继续而不是从 0 重跑。
    */
   readonly window_seconds?: number;
+  /**
+   * 随提醒一起代发的附件引用（issue #37）。
+   *
+   * **无附件时整个键不出现**，而不是 `[]`——与 `sanitizeAttachments()` 返回
+   * `undefined` 的语义一致，也让客户端能用「键在不在」直接判断，不必区分两种空态。
+   */
+  readonly attachments?: readonly WireAttachment[];
+  /**
+   * 仅当附件被截断时出现：sidecar 里的**原始总数**（> 已列出条数）。
+   * 未截断时不出现该键，客户端据此决定要不要显示「+N」。
+   */
+  readonly attachments_total?: number;
 }
 
 /** 投影输出值。 */

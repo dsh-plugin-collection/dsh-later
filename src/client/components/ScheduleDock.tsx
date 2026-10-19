@@ -12,6 +12,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
 import {
+  FileTypeIcon,
   IconChevronDownOutlineRegular,
   IconClockOutlineRegular,
   IconCloseOutlineRegular,
@@ -20,6 +21,7 @@ import {
   IconPlayOutlineRegular,
   IconSendOutlineRegular,
   IconTrashOutlineRegular,
+  fileSizeText,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
@@ -34,7 +36,7 @@ import {
   planBarAnimation,
   type BarAnimationPlan,
 } from '../../bar-geometry.js';
-import type { ClientSchedule } from '../types.js';
+import type { ClientAttachment, ClientSchedule } from '../types.js';
 
 /** 精确剩余时长：超过 1 小时 `H:MM:SS`，否则 `MM:SS`（负值截为 00:00）。 */
 function formatCountdown(ms: number): string {
@@ -95,6 +97,22 @@ function planBarAnimationFor(
 export interface ScheduleDockInjected {
   /** 向宿主执行一条 slash 命令；返回是否受理（`matched`）。 */
   callCommand: (sessionId: string, line: string) => Promise<CommandOutcome>;
+  /**
+   * 把一条附件引用解析成浏览器可显示的 URL（#38）。
+   *
+   * 背后是宿主的 `uiConversation.imageUrl(sessionId, ref)`。声明为**可选**是有意的：
+   * 该服务只能按会话绑定，且旧宿主组合可能压根没有它——拿不到时 dock 必须**照常
+   * 渲染文字与文件 chip**，只是没有缩略图，绝不能整块不渲染。
+   *
+   * ⚠️ 提供它的地方（index.tsx）**不许**把 `uiConversation` 写进模块级 `inject`：
+   * 顶层 inject 是激活门控，服务缺失会让整个插件永久 pending（issue #34 的事故）。
+   *
+   * 首参是 `sessionId`：本仓 dock 的注入面已经是「首参传 sessionId、inject 零参」
+   * 的形状（`callCommand` 同理），且 `ClientSlotDeclaration.inject` 的镜像声明不收
+   * 参数。宿主 `queueDockEntry` 用的是 `inject: (sessionId) => …`，那条路要先改宽
+   * 镜像声明，属另一处修正。
+   */
+  loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
 }
 
 /**
@@ -143,7 +161,7 @@ function canPause(item: ClientSchedule, now: number): boolean {
   return Number.isFinite(epoch) && epoch > now;
 }
 
-export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
+export function ScheduleDock({ callCommand, loadImage, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
   const now = useNow(1000);
   // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
   // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
@@ -676,6 +694,13 @@ export function ScheduleDock({ callCommand, sessionId, useProjection, t: seatT }
             </span>
             <span className="ss-dock-row-prompt" title={item.prompt}>{item.prompt}</span>
           </div>
+          {/*
+            附件带（#38）：与 `.ss-dock-row-line` 是**兄弟**而非嵌套——行的三带结构是
+            正文 / 附件 / 进度条，附件不与正文抢横向（宿主 `.attachments` 的
+            max-width:55% 折中我们不需要）。放在进度条**之前**，保证条仍贴底、
+            不被附件挤出可视区（#16 的条长一致性回归不受影响）。
+          */}
+          <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} />
           <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
             <span className="ss-dock-steer-err">{steerErr.get(item.id) ?? pauseErr.get(item.id)}</span>
@@ -1092,5 +1117,156 @@ function DockEditor({
         onSave();
       }}
     />
+  );
+}
+
+/* ==================== DockAttachments：行内附件带（issue #38） ==================== */
+/**
+ * 一行提醒的附件带：图片缩略图与文件 chip **横向铺开**。
+ *
+ * 为什么是「铺开」而不是「收成一个回形针入口」：本插件的行本来就是两带
+ * （正文 / 进度条），再加一带不与正文竞争横向——dock 实测宽 696px，24px 缩略图
+ * 一行可容约 20 张，而每任务上限是 8。宿主 `.attachments` 的 `max-width:55%`
+ * 折中是给它单行正文让路的，我们没有那个约束。（初稿判断相反，已在 #38 撤回。）
+ *
+ * 约束方向因此是**纵向**：附件带必须排在进度条**之前**，让进度条保持贴底，
+ * 不被附件挤出 `max-height:180px` 的可视区。
+ */
+function DockAttachments({
+  item,
+  t,
+  sessionId,
+  loadImage,
+}: {
+  item: ClientSchedule;
+  t: ScheduleDockTranslate;
+  sessionId?: string;
+  loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
+}): JSX.Element | null {
+  const blocks = item.attachments;
+  // 无附件时该键根本不出现（#37 契约）；元数据缺失也走这条，行回到两带，不占位不报错。
+  if (blocks === undefined || blocks.length === 0) return null;
+  /*
+   * 拿不到解析能力时（旧宿主无 uiConversation face / 无会话上下文）图片位没有意义，
+   * 只留文件 chip——文字与文件照常可读，**不得**因为没服务就整块不渲染（#38 硬约束）。
+   * 若这一行了只剩图片，整带不渲染，避免留下一个空的 flex 容器。
+   */
+  const canResolve = loadImage !== undefined && sessionId !== undefined;
+  const shown = canResolve ? blocks : blocks.filter((block) => block.kind === 'file');
+  if (shown.length === 0) return null;
+  const total = item.attachments_total ?? blocks.length;
+  const extra = total - blocks.length;
+  return (
+    <div className="ss-dock-attachments" data-ss-dock-attachments={item.id}>
+      {shown.map((block, index) => (
+        // 同一附件可能被多次写法逐条复用，key 用「引用 + 序号」保证同带内唯一。
+        // ⚠️ 这里不能用 `ref` 当 prop 名——React 会把它当 callback ref 吃掉。
+        block.kind === 'image'
+          ? <DockThumb key={`${block.attachment_id}:${index}`} block={block} t={t} sessionId={sessionId} loadImage={loadImage} />
+          : <DockFileChip key={`${block.attachment_id}:${index}`} block={block} t={t} />
+      ))}
+      {extra > 0 && (
+        <span className="ss-dock-more" data-ss-attach="more" aria-label={t('attachmentMore', { n: extra })}>
+          {`+${extra}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 一张图片缩略图。每块**独立**异步加载：单块失败只让它自己退化成占位，
+ * 不牵连同带其它附件（宿主 `QueueThumb` 就是这个形状）。
+ */
+function DockThumb({
+  block,
+  t,
+  sessionId,
+  loadImage,
+}: {
+  block: ClientAttachment;
+  t: ScheduleDockTranslate;
+  sessionId?: string;
+  loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
+}): JSX.Element | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  /**
+   * 依赖里放 `attachment_id` 而**不是 block 对象**：dock 每秒 tick 重渲染，
+   * 而 `schedules` 每帧都由 `.map()` 造出新的块对象——按对象依赖等于每秒重启一次
+   * 加载（宿主 dock 没有 tick，所以它可以直接依赖对象）。
+   */
+  const blockRef = useRef(block);
+  blockRef.current = block;
+  const attachmentId = block.attachment_id;
+  useEffect(() => {
+    // 服务缺失（旧宿主组合）或没有会话上下文：不发请求，直接走可读降级。
+    if (loadImage === undefined || sessionId === undefined) return undefined;
+    let alive = true;
+    loadImage(sessionId, blockRef.current).then(
+      (resolved) => {
+        if (alive) setUrl(resolved);
+      },
+      () => {
+        if (alive) setFailed(true);
+      },
+    );
+    // 卸载后不得 setState（宿主 QueueThumb 同款 alive 标志）。
+    return () => {
+      alive = false;
+    };
+  }, [attachmentId, sessionId, loadImage]);
+
+  /*
+   * 能力缺失（这台宿主没有 uiConversation face，或拿不到会话上下文）→ 图片位**直接不渲染**。
+   * 与下面的 `failed` 区分开：那不是异常，是这个部署本来没这能力，满屏「图片不可用」
+   * 反而是噪音；而 failed 是「本该有却读不到」，才值得明说。
+   */
+  if (loadImage === undefined || sessionId === undefined) return null;
+
+  if (url !== null) {
+    return <img className="ss-dock-thumb" data-ss-attach="image" src={url} alt={t('attachmentImage')} />;
+  }
+  if (failed) {
+    /*
+     * 字节不可用，但元数据是随块带出来的 → 退化成「图片不可用 + 大小」的可读 chip，
+     * 而不是像宿主那样无声消失。这一层是宿主没有的。
+     */
+    return (
+      <span
+        className="ss-dock-file ss-dock-thumb-fallback"
+        data-ss-attach="image-unavailable"
+        aria-label={t('attachmentUnavailable')}
+      >
+        <span className="ss-dock-file-name">{t('attachmentUnavailable')}</span>
+        {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeText(block.bytes)}</span>}
+      </span>
+    );
+  }
+  // 加载中：等尺寸空占位，避免 URL 到位时行高跳动。
+  return <span className="ss-dock-thumb" data-ss-attach="pending" aria-hidden="true" />;
+}
+
+/** 一个文件 chip：图标 + 名 + 大小。取值照抄宿主 `.file`（`flex: 0 180px` 等）。 */
+function DockFileChip({
+  block,
+  t,
+}: {
+  block: ClientAttachment;
+  t: ScheduleDockTranslate;
+}): JSX.Element {
+  const name = block.name ?? '';
+  // 名字缺失时不硬造：留空让 chip 只表达「有个文件 + 多大」，比显示附件 id 诚实。
+  const label = name.length > 0 ? t('attachmentFile', { name }) : t('attachmentFile', { name: '' }).trim();
+  return (
+    <span className="ss-dock-file" data-ss-attach="file" aria-label={label} title={name.length > 0 ? name : undefined}>
+      {name.length > 0 && (
+        <span className="ss-dock-file-icon" aria-hidden="true">
+          <FileTypeIcon path={name} size={16} />
+        </span>
+      )}
+      <span className="ss-dock-file-name">{name}</span>
+      {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeText(block.bytes)}</span>}
+    </span>
   );
 }

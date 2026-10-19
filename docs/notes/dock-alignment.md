@@ -105,7 +105,11 @@
 | I4 | 行内容 | 单行 preview（200 字截断 + `projectUserText`） | 两行：`时间 · 倒计时 · 正文` + 进度条 | clock-scoped 条目的核心信息 | ✅ |
 | I5 | 进度条 | 无 | `.ss-dock-bars` + 三个插件自有变量 `--ss-bar-duration` / `--ss-bar-delay` / `--ss-bar-divider` | 同上；`styles.ts` 只定义 `--ss-bar-divider`，另两个由组件内联注入 | ✅ |
 | I6 | 行文本投影 | `projectUserText(text, [])` | `item.prompt` 直出 + `title` | **待产品决策**，不算漂移 | ⚠️ |
-| I7 | 折叠／结构可访问性 | `aria-controls` + `id` + `hidden`（保留 DOM）、header `disabled: interactionActive` | 只有 `aria-expanded`，列表条件卸载，header 永不 disabled | 这是**缺陷不是有意差异**，归 #31 修（列在此处只为提醒：修它会影响 §4 的 anchor 包裹方式） | ✅ |
+| I7 | 折叠／结构可访问性 | `aria-controls` + `id` + `hidden`（保留 DOM）、header `disabled: interactionActive` | ~~只有 `aria-expanded`，列表条件卸载，header 永不 disabled~~ | **已由 #31 修掉**（现与宿主同形：`useId()` + `aria-controls` + `hidden` 常驻 + `interactionActive` 锁头）。保留此行记录原委；修它确实影响了 §4 的 anchor 包裹方式 | ✅ |
+| I8 | 附件带横向策略 | `.attachments{max-width:55%; overflow:hidden}`（静默裁切） | `.ss-dock-attachments{flex-wrap:nowrap; overflow-x:auto}`，**不设 max-width** | 宿主那个 55% 是给**单行正文**让路；本插件附件独占第三带，与正文不抢横向（dock 实测 696px，24px 缩略图一行可容 ~20 张，每任务上限 8）。照抄 55% 反而是把别人的约束当自己的 | ✅ |
+| I9 | 缩略图 effect 依赖 | `QueueThumb` 依赖 `[attachment, loadImage]`（对象） | 依赖 `[attachment_id, sessionId, loadImage]`，块内容经 `blockRef` 读取 | **隐性前提差异，最容易照抄错的一条**：宿主 dock 没有每秒 tick，对象身份稳定；本仓 `schedules` 每秒由 `.map()` 造新对象，照宿主写法等于**每秒重启一次加载**。宿主内部虽有 `attachmentId` 缓存键去重，但会变成每秒一轮 promise churn | ✅ |
+| I10 | 附件降级形态 | 加载失败与加载中都是同一个无声空占位 | 两态分开：**能力缺失**（这台宿主没有 `uiConversation` face）→ 图片位直接不渲染；**读取失败**（本该有却拿不到）→ 退化成「图片不可用 + 大小」可读 chip | 前者不是异常，满屏「不可用」是噪音；后者才值得明说。且元数据（`name`/`bytes`）随块带出，宿主没有这一层信息可用 | ✅ |
+| I11 | `loadImage` 注入形状 | `queueDockEntry` 用 `inject: (sessionId) => …` 在注入时绑死会话 | 零参 `inject` + `loadImage(sessionId, ref)`，与仓内既有 `callCommand` 同形 | 本仓 `ClientSlotDeclaration.inject` 的镜像声明是 `() => object`（不收参数），照宿主形状写直接 TS2322。**顺带一条待办**：该镜像声明与宿主契约不符——宿主 `runInject` 实际调用 `inject(binding.key, actions)`，镜像却声明成零参，后来人照镜像会误以为拿不到 sessionId（Lead 拟另开小 issue，不塞进 #38） | ✅ |
 
 ## §8 怎么复核
 
@@ -114,3 +118,7 @@
 3. 插件值：`grep -n 'ss-dock' src/client/styles.ts`；组件侧 grep className 拼接。
 4. 死类名自查：JSX 出现的每个 `ss-*` 都要能在 `styles.ts` 找到规则（D2 即此法发现）。
 5. 顶替宿主条目这件事**不要尝试**：`list` 槽同 `id` 只在同 `priority` 冲突，priority 不同两条都渲染（§8.1 结论二）。
+6. **源码级正则断言：匹配前先剥注释。** 本仓大量断言是对源文件文本跑正则，而注释里的三行 `//` 说明会**切断跨行匹配**——实测踩过：`#39` 的字段漂移锁因为 serializer 里一段注释被打断，把**已经输出**的 `delivery_mode` 误报成漂移，看起来像实现有 bug，其实是断言写错。新写这类断言时先剥 `//` 与 `/* */`，并在注释里说明为什么剥。
+7. **变异验证必须双向断言。** 只断言"变异后变红"不成立——变异脚本自身有 bug（例如 `before`/`after` 用了同一组下标，等于没变异）时，那一排 ✅ 全是绿的，看起来像做过完整验证，实际一次有效变异都没发生。正确形态是同时要求**变异前该绿的绿**（`holdsBefore === true`）与**变异后该红的红**，任一不满足即判该次验证无效。这条比任何单条锁都贵，因为它决定"绿"这个数字能不能信。
+8. **`data-*` 探针分两类，只有第二类必须锁。** 样式钩子（`.ss-*` 类名）改名后果是视觉变化、肉眼可查，不强制断言；**验证接口**（被测试或真机定位使用的 `data-ss-dock`、`data-ss-dock-row`、`data-ss-dock-attachments`、`data-ss-attach` 取值集合）视同公共接口，改名必须与断言同一次提交变更——它的失败形态是"查不到元素"，极易被误判成"dock 没渲染 / 这条没附件"，而不是"探针没了"。现状核实（`216f93d`）：4 个探针中 3 个曾无锁，已由 #39 第 11 项补齐。
+9. **`every` 跨轮是否丢附件：已查证，不需要行为级测试。** `advanceEvery`（`src/projection.ts`）返回 `{ ...record, scheduledAt: 新时刻 }`——**只换 `scheduledAt`，`record.id` 跨轮保持不变**；而投递侧 `attachmentsOf(record.id)` 按 id 取，故每轮取到同一批附件。结论：`#39` 第 5 项的源码级锁已经足够，补 FakeAgent/FakeSession 那套重假件只是在锁一个不会变的东西。**若将来出现"换轮换新 id"的路径，这条结论作废**，届时第 5 项必须升级为行为级。

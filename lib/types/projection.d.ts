@@ -34,6 +34,16 @@ export declare const userSchedulesSchema: z.ZodObject<{
         paused_at: z.ZodOptional<z.ZodString>;
         schedule_id: z.ZodOptional<z.ZodString>;
         window_seconds: z.ZodOptional<z.ZodNumber>;
+        attachments: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            kind: z.ZodUnion<readonly [z.ZodLiteral<"image">, z.ZodLiteral<"file">]>;
+            attachment_id: z.ZodString;
+            name: z.ZodOptional<z.ZodString>;
+            bytes: z.ZodOptional<z.ZodNumber>;
+            media_type: z.ZodOptional<z.ZodString>;
+            width: z.ZodOptional<z.ZodNumber>;
+            height: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>>>;
+        attachments_total: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const userSchedulesStateSchema: z.ZodObject<{
@@ -169,6 +179,16 @@ export declare const userSchedulesProjectionUnit: {
                 paused_at: z.ZodOptional<z.ZodString>;
                 schedule_id: z.ZodOptional<z.ZodString>;
                 window_seconds: z.ZodOptional<z.ZodNumber>;
+                attachments: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                    kind: z.ZodUnion<readonly [z.ZodLiteral<"image">, z.ZodLiteral<"file">]>;
+                    attachment_id: z.ZodString;
+                    name: z.ZodOptional<z.ZodString>;
+                    bytes: z.ZodOptional<z.ZodNumber>;
+                    media_type: z.ZodOptional<z.ZodString>;
+                    width: z.ZodOptional<z.ZodNumber>;
+                    height: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strict>>>;
+                attachments_total: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strict>>;
         }, z.core.$strict>;
         readonly view: typeof viewUserScheduleProjection;
