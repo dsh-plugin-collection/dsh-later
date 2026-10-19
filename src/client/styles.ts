@@ -172,7 +172,7 @@ const COMPONENTS = [
 '.ss-dock-row.ss-paused .ss-dock-row-countdown { color: var(--dsw-alias-label-tertiary); }',
 '.ss-dock-row.ss-paused .ss-dock-row-time,',
 '.ss-dock-row.ss-paused .ss-dock-row-prompt { color: var(--dsw-alias-label-secondary); }',
-'.ss-dock-action.ss-paused-active { color: var(--dsw-alias-state-success-primary); }',
+
 '/* 分隔线：absolute 跨整个 bar 画 N-1 条等比竖线，渲染在 fill 之前（fill 用 z-index:1 盖住「已填充段」上的刻度）。 */',
 '.ss-dock-bar-divider {',
 '  position: absolute; inset: 0; pointer-events: none;',
