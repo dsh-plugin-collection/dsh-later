@@ -955,7 +955,7 @@ function DockActions({
         <Tooltip label={t('resumeTask')} side="bottom" delayMs={500} portal>
           <button
             type="button"
-            className="ss-dock-action ss-paused-active"
+            className="ss-dock-action"
             aria-label={t('resumeTask')}
             disabled={busy}
             onClick={onResume}
