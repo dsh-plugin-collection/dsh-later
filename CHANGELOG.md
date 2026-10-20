@@ -4,6 +4,16 @@
 
 ## 未发布
 
+- **chore** 补上宿主版本约束 `engines.dsh`：`>=0.1.1-rc.2 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`。
+  此前插件包没有这个字段，宿主只能退到 8 条 `@deepseek-ai/dsh-*` peerDependencies 上逐条比对；
+  而宿主源码里 `engines.dsh` 一旦存在就**独占**判定权（`unmetRequirements`：own `engines.dsh`
+  决定，peer 全部忽略）。所以这是把 8 条**收敛成 1 条**，不是加严门槛 —— peer 的并集展开正好
+  是这两段（`0.2.0-rc.0`/`rc.1` 两边都拒），144 个版本抽样比对零分歧。
+  - 判据落在宿主侧而非文档侧：不满足时 `dsh plugin add` **直接拒装**（exit 1，回滚 profile
+    manifest 与 lockfile），放行必须用 `dsh plugin allow-version` 给出**精确版本**豁免；插件市场
+    读同一个函数，会把不兼容与 requirements 显示出来。写进包元数据，用户遇到的是"为什么装不上"，
+    而不是莫名其妙装不上。
+  - 区间与 `dsh-suggest-ghost`、`dsh-wakatime-plugin` 一致，避免同一套插件对宿主版本各说各话。
 - **test** 把 #42 的管子接缝判据从**散文变成可执行**（issue #42 §2/§3/§4）。此前它的交付是
   4 张一次性 PNG —— 只能回答"10 月 19 号人眼看着没问题"，回答不了"下次宿主升级后接缝还在不在"。
   - 新增 `scripts/seam-check/png.mjs`：极简 8-bit 非隔行 PNG 解码（zlib 内置 + unfilter 40 行）。

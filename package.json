@@ -42,7 +42,8 @@
     "CHANGELOG.md"
   ],
   "engines": {
-    "node": "^22.19 || >=24"
+    "node": "^22.19 || >=24",
+    "dsh": ">=0.1.1-rc.2 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0"
   },
   "scripts": {
     "build": "node build.mjs",
