@@ -511,10 +511,71 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
   // 每个 root agent 一个「用户提醒调度器」：负责确保命令/工具创建的提醒会武装 timer 并触发。
   const runtimes = new Map<Agent, UserScheduleRuntime>();
 
+  /** 当前活着的 root agent 列表（服务未就绪时返回空，不抛）。 */
+  const safeRoots = (): readonly Agent[] => {
+    try {
+      return ctx.agents.roots();
+    } catch {
+      return [];
+    }
+  };
+
+  /**
+   * 为 root agent 挂载用户调度器（幂等）。**挂载逻辑只此一份**。
+   *
+   * 只在 `agent/created` 上挂载是不够的：cordis 重载/热更新会 teardown 再 apply，
+   * 而**既有会话不会重发 created**；同理，宿主在 apply 之后才恢复的会话若错过事件，
+   * 也永远等不到挂载。这些会话的后果是「提醒能创建、dock 能显示，但到点不触发，
+   * 点『Send now』报 `no_runtime`」——因为创建路径的可选链把缺失吞掉了。
+   * 故除 created 事件外，见 apply 末尾的既有 roots 水合，以及 notifyUser* 的按需挂载。
+   */
+  const mountRuntime = (agent: Agent): UserScheduleRuntime | undefined => {
+    if (stopping) return undefined;
+    const existing = runtimes.get(agent);
+    if (existing !== undefined) return existing;
+    if (!safeRoots().includes(agent)) return undefined;
+    const runtime = new UserScheduleRuntime(ctx, agent, getSettings);
+    try {
+      // effect 的 disposer 由 agent.ctx 生命周期托管，这里不需要自己持有。
+      agent.ctx.effect(() => {
+        const getLocale = () => ctx.get('locale')?.getSnapshot().active;
+        const disposeTools = registerUserScheduleTools(ctx, agent.ctx, agent, getSettings, getLocale, notifyUserChange);
+        const stopStatus = agent.ctx.on('agent/status', ({ status }: { status: string }) => {
+          // 自愈：agent 转 idle 时重算（与 dsh-schedule 同构），覆盖被遗漏的重驱。
+          if (status === 'idle') runtime.requestDrive();
+        });
+        runtime.requestDrive();
+        return async () => {
+          stopStatus();
+          disposeTools();
+          try {
+            await runtime.dispose();
+          } finally {
+            if (runtimes.get(agent) === runtime) runtimes.delete(agent);
+          }
+        };
+      }, 'later.userTools()');
+      runtimes.set(agent, runtime);
+      return runtime;
+    } catch (error) {
+      ctx.logger.warn(
+        `later: agent "${agent.id}" 用户工具/调度器挂载失败: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    }
+  };
+
+  /** 取该 agent 的调度器；缺失就按需挂载（自愈，覆盖错过 created 事件的会话）。 */
+  const ensureRuntime = (agent: Agent): UserScheduleRuntime | undefined =>
+    runtimes.get(agent) ?? mountRuntime(agent);
+
   /** 用户创建/删除成功 → 重驱该 agent 的用户调度器（也让 dsh-schedule 感知后续 idle）。 */
   const notifyUserChange = (agent: Agent): void => {
     try {
-      runtimes.get(agent)?.requestDrive();
+      // 自愈：错过 created 事件的会话在这里补挂，否则提醒只会"显示不触发"。
+      ensureRuntime(agent)?.requestDrive();
     } catch {
       /* 调度失败不影响工具/命令的结果 */
     }
@@ -528,7 +589,7 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     | { readonly ok: true; readonly id: string; readonly steered: true }
     | { readonly ok: false; readonly code: string; readonly message: string }
   > => {
-    const runtime = runtimes.get(agent);
+    const runtime = ensureRuntime(agent);
     if (runtime === undefined) {
       return { ok: false, code: 'no_runtime', message: '该会话尚未挂载用户调度器。' };
     }
@@ -550,36 +611,8 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     // 模型请求会等待初始化完成。0.1.5/0.1.2 的同步回调签名在 0.1.7 下会因
     // 返回 void 而不匹配，故显式 async。
     const stopCreated = ctx.on('agent/created', async ({ agent }: { agent: Agent }) => {
-      if (stopping || runtimes.has(agent) || !ctx.agents.roots().includes(agent)) return;
-      const runtime = new UserScheduleRuntime(ctx, agent, getSettings);
-      try {
-        // effect 的 disposer 由 agent.ctx 生命周期托管，这里不需要自己持有。
-        agent.ctx.effect(() => {
-          const getLocale = () => ctx.get('locale')?.getSnapshot().active;
-          const disposeTools = registerUserScheduleTools(ctx, agent.ctx, agent, getSettings, getLocale, notifyUserChange);
-          const stopStatus = agent.ctx.on('agent/status', ({ status }: { status: string }) => {
-            // 自愈：agent 转 idle 时重算（与 dsh-schedule 同构），覆盖被遗漏的重驱。
-            if (status === 'idle') runtime.requestDrive();
-          });
-          runtime.requestDrive();
-          return async () => {
-            stopStatus();
-            disposeTools();
-            try {
-              await runtime.dispose();
-            } finally {
-              if (runtimes.get(agent) === runtime) runtimes.delete(agent);
-            }
-          };
-        }, 'later.userTools()');
-        runtimes.set(agent, runtime);
-      } catch (error) {
-        ctx.logger.warn(
-          `later: agent "${agent.id}" 用户工具/调度器挂载失败: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
+      // 0.1.7 起该事件异步串行，签名须返回 Promise；挂载本身是同步的。
+      mountRuntime(agent);
     });
     return async () => {
       stopping = true;
@@ -589,6 +622,10 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
       await Promise.allSettled(runtimesToDispose.map((runtime) => runtime.dispose()));
     };
   }, 'later.userToolsLifecycle()');
+
+  // 既有会话水合：插件重载/热更新会 teardown 再 apply，而既有会话不会重发
+  // `agent/created`。不补这一次，那些会话的提醒永远不触发、Send now 报 no_runtime。
+  for (const agent of safeRoots()) mountRuntime(agent);
 }
 
 export { name };
