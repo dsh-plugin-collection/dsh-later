@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { build } from 'esbuild';
 
-const entries = ['src/index.ts', 'src/domain.ts', 'src/owned-event-registration.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/smart-window.ts', 'src/time-utils.ts'];
+const entries = ['src/index.ts', 'src/domain.ts', 'src/owned-event-registration.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/smart-window.ts', 'src/time-utils.ts', 'src/kernel-identity.ts'];
 for (const entry of entries) {
   const name = entry.replace('src/', '').replace('.ts', '.js');
   const result = await build({
