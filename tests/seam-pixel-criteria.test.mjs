@@ -21,10 +21,13 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { decodePngRgb } from '../scripts/seam-check/png.mjs';
 import {
-  detectSeamLine,
+  assertPixelIdentical,
   detectRoundedTopCorners,
+  detectSeamLine,
+  detectSideStrokeContinuity,
   maxDeviationSpan,
 } from '../scripts/seam-check/criteria.mjs';
 
@@ -171,3 +174,125 @@ test('PNG 解码器与参照值逐字节一致（判据不建立在错像素上�
 function rowOf(img, y) {
   return img.data.subarray(y * img.width * 3, (y + 1) * img.width * 3);
 }
+
+/* ---------------- 6. 实采矩阵（docs/media/seam-matrix） ---------------- */
+
+/**
+ * 这一节喂的是 `scripts/seam-check/capture-demo.mjs` 从
+ * `docs/dock-stacking-demo.html` 实采的 8 帧矩阵（浏览器真实渲染）。
+ *
+ * 它的价值在于让判据 2/4 第一次**跑过真实输入** —— 在此之前这两个函数
+ * 「实现写着、测试引用 0 次」，而判据 2 的第一版就是这么活下来的：它拿整行
+ * 平均亮度当基准，对**每一帧**都判 false（包括已知良好的 B2），写成什么样都没人发现。
+ */
+const MATRIX_MANIFEST = new URL('../docs/media/seam-matrix/manifest.json', import.meta.url).pathname;
+const matrix = JSON.parse(readFileSync(MATRIX_MANIFEST, 'utf8'));
+const mframe = (rel) => decodePngRgb(new URL(`../${rel}`, import.meta.url).pathname);
+
+test('矩阵齐备：8 帧，含 B2/scheme0 对照与 solo 基线', () => {
+  assert.equal(matrix.length, 8);
+  const tags = matrix.map((e) => e.tag).sort();
+  assert.ok(tags.some((t) => t.startsWith('B2-')));
+  assert.ok(tags.some((t) => t.startsWith('0-')));
+  assert.ok(tags.some((t) => t.startsWith('solo-')));
+  // 深浅主题都要有，否则"方向无关"这条没被真实数据覆盖
+  assert.ok(tags.some((t) => t.endsWith('dark')));
+  assert.ok(tags.some((t) => t.endsWith('light')));
+});
+
+test('判据 1 在真实矩阵上：B2 全 PASS、scheme0 全 FAIL（深浅主题都是）', () => {
+  let checked = 0;
+  for (const e of matrix) {
+    if (!e.crop || !e.seamsInCrop) continue;
+    const r = detectSeamLine(mframe(e.crop), { seams: e.seamsInCrop });
+    const expected = e.scheme === 'B2';
+    assert.equal(r.pass, expected,
+      `${e.tag}: 期望 ${expected ? 'PASS' : 'FAIL'}，实得 span=${(r.worst.spanRatio * 100).toFixed(1)}%`);
+    checked += 1;
+  }
+  assert.equal(checked, 6, '应有 6 帧带接缝裁图（B2×4 + scheme0×2）');
+});
+
+test('判据 1 的双锚点不可省：按 #42 原文的单锚点会漏判 scheme0', () => {
+  const e = matrix.find((x) => x.tag === '0-r1-s1-dark');
+  const img = mframe(e.crop);
+  const [a, b] = e.seamsInCrop; // [hostPanel.bottom, ssBody.top]，相差 3px（消缝重叠）
+  assert.notEqual(a, b, 'B2 的消缝重叠让两个锚点不相等，这正是本用例的前提');
+  const dual = detectSeamLine(img, { seams: e.seamsInCrop });
+  assert.equal(dual.pass, false, '双锚点应判出缝线');
+
+  /**
+   * 断言的是**实质区别**，不是"两个数不相等"。
+   * 第一版写成 `assert.notEqual(single.worst.spanRatio, dual.worst.spanRatio)` —— 太弱：
+   * 把 `seams` 参数整个忽略掉（退回单锚点）时它照样通过，是变异测试抓出来的。
+   *
+   * 真实情况：缝线在 ssBody.top(21)，而按 #42 原文取 hostPanel.bottom(24)±2 的带
+   * 是 [22,26]，**恰好把线让过去** —— 一个已知有缺陷的帧会被判成 PASS。
+   */
+  const singleAtBottom = detectSeamLine(img, { seamY: a });
+  assert.equal(singleAtBottom.pass, true, '按 #42 原文的单锚点确实会漏判（已知局限，见函数注释）');
+  assert.ok(dual.worst.spanRatio > 0.9, `双锚点跨度应接近满宽，实得 ${(dual.worst.spanRatio * 100).toFixed(1)}%`);
+  assert.ok(singleAtBottom.worst.spanRatio < 0.1, `单锚点跨度应接近零（漏判形态），实得 ${(singleAtBottom.worst.spanRatio * 100).toFixed(1)}%`);
+  // 采样带必须真的不同，否则说明 seams 没被用上
+  assert.notDeepEqual(dual.band, singleAtBottom.band, 'seams 未生效：采样带与单锚点相同');
+});
+
+test('判据 2 在真实矩阵上：B2 侧线连续、scheme0 断裂', () => {
+  for (const e of matrix) {
+    if (!e.tube) continue;
+    const img = mframe(e.tube);
+    // 上下各留 20px 避开圆角区：圆角段侧线本就内收，不属于"应当连续"的范围
+    const r = detectSideStrokeContinuity(img, { x0: 2, x1: img.width - 3, yTop: 20, yBottom: img.height - 21 });
+    if (e.scheme === 'B2') {
+      assert.equal(r.pass, true, `${e.tag}: B2 侧线应连续，found=${r.left.found}/${r.total} breaks=${r.left.breaks}`);
+      assert.equal(r.left.maxDrift, 0, `${e.tag}: B2 侧线不应有 x 漂移`);
+    } else if (e.scheme === '0') {
+      assert.equal(r.pass, false, `${e.tag}: scheme0 圆角相撞应导致侧线断裂`);
+    }
+  }
+});
+
+test('判据 3 在真实矩阵上与几何真值一致（阈值按真值定标）', () => {
+  for (const e of matrix) {
+    if (!e.tube) continue;
+    const img = mframe(e.tube);
+    const topInCrop = 2 + Math.round(e.geo.ssBodyRect.top - (e.geo.hostPanelRect ? e.geo.hostPanelRect.top : e.geo.ssBodyRect.top));
+    const r = detectRoundedTopCorners(img, { topY: topInCrop });
+    const radius = Number.parseFloat(e.geo.ssPanelRadius) || 0;
+    assert.equal(r.rounded, radius > 0,
+      `${e.tag}: 几何 radius=${radius}px，像素判定 rounded=${r.rounded}（缺口 L=${r.leftOffsetColumns} R=${r.rightOffsetColumns}）`);
+  }
+});
+
+test('判据 3 阈值定标：直角组与圆角组的缺口列数必须可分', () => {
+  const gaps = { square: [], round: [] };
+  for (const e of matrix) {
+    if (!e.tube) continue;
+    const img = mframe(e.tube);
+    const topInCrop = 2 + Math.round(e.geo.ssBodyRect.top - (e.geo.hostPanelRect ? e.geo.hostPanelRect.top : e.geo.ssBodyRect.top));
+    const r = detectRoundedTopCorners(img, { topY: topInCrop });
+    const g = Math.max(r.leftOffsetColumns, r.rightOffsetColumns);
+    const radius = Number.parseFloat(e.geo.ssPanelRadius) || 0;
+    (radius > 0 ? gaps.round : gaps.square).push(g);
+  }
+  assert.ok(gaps.square.length > 0 && gaps.round.length > 0);
+  const maxSquare = Math.max(...gaps.square);
+  const minRound = Math.min(...gaps.round);
+  assert.ok(maxSquare < minRound,
+    `直角组最大缺口(${maxSquare}) 必须小于圆角组最小缺口(${minRound})，否则阈值 ${6} 没有分离依据`);
+  assert.ok(6 > maxSquare && 6 <= minRound, `默认阈值 6 应落在分离区间 (${maxSquare}, ${minRound}]`);
+});
+
+test('判据 4：solo 基线自比零差异、跨主题判不同', () => {
+  const dark = matrix.find((e) => e.scheme === 'solo' && e.theme === 'dark');
+  const light = matrix.find((e) => e.scheme === 'solo' && e.theme === 'light');
+  const A = mframe(dark.tube);
+  const self = assertPixelIdentical(A, A);
+  assert.equal(self.pass, true);
+  assert.equal(self.diffPixels, 0);
+  const cross = assertPixelIdentical(A, mframe(light.tube));
+  assert.equal(cross.pass, false);
+  // 修正过的口径：diffPixels 是像素数，不可能超过总像素
+  assert.ok(cross.diffPixels <= cross.totalPixels,
+    `diffPixels(${cross.diffPixels}) 不该超过 totalPixels(${cross.totalPixels}) —— 超过说明数的还是通道`);
+});

@@ -1,0 +1,430 @@
+[
+  {
+    "scheme": "B2",
+    "rows": 1,
+    "sched": 1,
+    "theme": "dark",
+    "tag": "B2-r1-s1-dark",
+    "seamsInCrop": [
+      24,
+      21
+    ],
+    "crop": "docs/media/seam-matrix/B2-r1-s1-dark-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r1-s1-dark-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": 940.640625,
+        "bottom": 1285.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 344.53125
+      },
+      "ssBodyRect": {
+        "top": 1132.421875,
+        "bottom": 1173.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 1059.421875,
+        "bottom": 1135.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 1170.921875,
+        "bottom": 1224.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 3,
+    "sched": 3,
+    "theme": "dark",
+    "tag": "B2-r3-s3-dark",
+    "seamsInCrop": [
+      24,
+      21
+    ],
+    "crop": "docs/media/seam-matrix/B2-r3-s3-dark-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r3-s3-dark-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": 463.640625,
+        "bottom": 991.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 527.53125
+      },
+      "ssBodyRect": {
+        "top": 727.421875,
+        "bottom": 879.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 152.5
+      },
+      "hostPanelRect": {
+        "top": 582.421875,
+        "bottom": 730.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 148
+      },
+      "composerRect": {
+        "top": 876.921875,
+        "bottom": 930.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 1,
+    "sched": 1,
+    "theme": "light",
+    "tag": "B2-r1-s1-light",
+    "seamsInCrop": [
+      24,
+      21
+    ],
+    "crop": "docs/media/seam-matrix/B2-r1-s1-light-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r1-s1-light-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": 940.640625,
+        "bottom": 1285.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 344.53125
+      },
+      "ssBodyRect": {
+        "top": 1132.421875,
+        "bottom": 1173.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 1059.421875,
+        "bottom": 1135.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 1170.921875,
+        "bottom": 1224.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 3,
+    "sched": 3,
+    "theme": "light",
+    "tag": "B2-r3-s3-light",
+    "seamsInCrop": [
+      24,
+      21
+    ],
+    "crop": "docs/media/seam-matrix/B2-r3-s3-light-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r3-s3-light-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": 463.640625,
+        "bottom": 991.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 527.53125
+      },
+      "ssBodyRect": {
+        "top": 727.421875,
+        "bottom": 879.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 152.5
+      },
+      "hostPanelRect": {
+        "top": 582.421875,
+        "bottom": 730.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 148
+      },
+      "composerRect": {
+        "top": 876.921875,
+        "bottom": 930.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "0",
+    "rows": 1,
+    "sched": 1,
+    "theme": "dark",
+    "tag": "0-r1-s1-dark",
+    "seamsInCrop": [
+      24,
+      21
+    ],
+    "crop": "docs/media/seam-matrix/0-r1-s1-dark-seam.png",
+    "tube": "docs/media/seam-matrix/0-r1-s1-dark-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": -0.3125,
+        "bottom": 323.828125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 324.140625
+      },
+      "ssBodyRect": {
+        "top": 171.078125,
+        "bottom": 212.578125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 98.078125,
+        "bottom": 174.078125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 209.578125,
+        "bottom": 263.578125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "0",
+    "rows": 1,
+    "sched": 1,
+    "theme": "light",
+    "tag": "0-r1-s1-light",
+    "seamsInCrop": [
+      24,
+      21
+    ],
+    "crop": "docs/media/seam-matrix/0-r1-s1-light-seam.png",
+    "tube": "docs/media/seam-matrix/0-r1-s1-light-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": -0.3125,
+        "bottom": 323.828125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 324.140625
+      },
+      "ssBodyRect": {
+        "top": 171.078125,
+        "bottom": 212.578125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 98.078125,
+        "bottom": 174.078125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 209.578125,
+        "bottom": 263.578125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "solo",
+    "rows": 0,
+    "sched": 1,
+    "theme": "dark",
+    "tag": "solo-r0-s1-dark",
+    "seamsInCrop": null,
+    "crop": null,
+    "tube": "docs/media/seam-matrix/solo-r0-s1-dark-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": 1669.3125,
+        "bottom": 1920.453125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 251.140625
+      },
+      "ssBodyRect": {
+        "top": 1767.703125,
+        "bottom": 1809.203125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": null,
+      "composerRect": {
+        "top": 1806.203125,
+        "bottom": 1860.203125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": null,
+      "seamToComposer": -3,
+      "queuePanelRadius": null,
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "solo",
+    "rows": 0,
+    "sched": 1,
+    "theme": "light",
+    "tag": "solo-r0-s1-light",
+    "seamsInCrop": null,
+    "crop": null,
+    "tube": "docs/media/seam-matrix/solo-r0-s1-light-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 1,
+      "schemeRect": {
+        "top": 1669.3125,
+        "bottom": 1920.453125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 251.140625
+      },
+      "ssBodyRect": {
+        "top": 1767.703125,
+        "bottom": 1809.203125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": null,
+      "composerRect": {
+        "top": 1806.203125,
+        "bottom": 1860.203125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": null,
+      "seamToComposer": -3,
+      "queuePanelRadius": null,
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  }
+]
