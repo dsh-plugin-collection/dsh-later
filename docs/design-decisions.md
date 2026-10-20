@@ -8,11 +8,28 @@ PRD 想在 `schedule/change` 荷载里加 `source: 'user-tool'` 区分创建来�
 
 **本插件解法**：`schedule/change` 荷载**保持原样**（完全兼容），另写一条本插件自有的伴生事件 `session-scheduler/user-schedule`（`{version:1, operation:'add'|'remove', id}`）记录用户来源。dsh-schedule 的 fold 会跳过非 `schedule/change` 事件，天然互不干扰；GUI 与 `user_schedule_list` 以「schedule/change 活动记录 ∩ 伴生所有权」为据展示用户任务。
 
-## 1b. 自有事件类型的加载兼容：激活时注册（owned-event-registration.ts）
+## 1b. 自有事件类型的加载兼容：~~激活时注册~~ → **已移除**（2026-10-20，#58）
 
-dsh-session 的持久化读路径在加载历史时逐条校验事件类型：不在核心白名单 `KNOWN_SESSION_EVENT_TYPES` 里且未标 envelope `ignorable:true` 的事件，会让**整份日志被拒读**（`SessionFormatUnsupportedError`，GUI 表现为「历史加载失败」）——而伴生事件（见 §1）恰好是插件自有词汇。当前构建的 `Session.append(type, data)` 不暴露 `ignorable` 字段、核心文档明示插件注册面暂缓提供，因此本插件在 `apply()` 最先调用 `registerOwnedSessionEventType()` 把自有类型登记进宿主集合（进程级、幂等；该模块仅限 host 端引用，client bundle 不得引入）。
+**历史背景**：dsh-session 的持久化读路径在加载历史时逐条校验事件类型 —— 不在核心白名单
+`KNOWN_SESSION_EVENT_TYPES` 里、且未标 envelope `ignorable:true` 的事件，会让**整份日志被拒读**
+（`SessionFormatUnsupportedError`，GUI 表现为「历史加载失败」）。伴生事件（§1）恰好是插件自有词汇，
+于是早期实现在 `apply()` 最先调用 `registerOwnedSessionEventType()`，把自有类型 `add()` 进宿主的集合。
 
-> TODO(上游)：待 dsh-session 暴露 append 侧 `ignorable` 标记后，可在**确有需要**时恢复伴生事件方案并改为写入时标记。
+**为什么废掉**：
+
+1. 上游**明确否决了这条路**（`known-event-types.d.ts` 的注释）：事件名注册「does not classify
+   omission safety and would make reads composition-dependent」；官方认可的兼容机制是 envelope 上的
+   `ignorable: true`。我们用 `Set.add()` 只因为运行时那个集合恰好没冻结。
+2. 它**只在插件与宿主解析到同一份 `dsh-session` 实例**时有效 —— `link:` 开发态实测失效
+   （插件侧 0.2.0 / 宿主 0.2.1，注册写进了孤岛 Set，见 #57）。
+3. **没有需要救的数据**：该事件自 2026-09-10（§1c 的 sidecar 化）起不再写入，而最早 release
+   `v1.0.0` 是 2026-09-12 —— 没有任何已发布版本写过它；全库按 JSON `type` 精确匹配扫 1666 份日志，
+   0 份命中。
+
+**现状**：注册模块与调用已删除。旧日志如确需读取，用 `scripts/migrate-owned-events.mjs`
+（默认 dry-run；`--apply` 先备份）给这些记录补 `ignorable: true` —— 不动 `seq`、不动 `type`，
+因为读路径要求 seq 连续，删行会造出缺口反而更不可读。详见 CHANGELOG「未发布」与
+`docs/verification.md` 的「会话日志兼容」一节。
 
 ## 1c. 所有权彻底移出会话日志：sidecar 文件（2026-09 缺口事故的根治）
 

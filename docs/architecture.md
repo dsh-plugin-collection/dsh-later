@@ -60,7 +60,6 @@ dsh-later/
 │   ├── commands.ts           # 客户端↔宿主变更通道（slash command：create/list/delete/edit/schedule/later）
 │   ├── smart-window.ts       # 智能时段计算（纯函数，host/client 共享）
 │   ├── time-utils.ts         # 时间格式化（纯函数，host/client 共享；相对/绝对时间支持 zh/en）
-│   ├── owned-event-registration.ts  # 自有事件类型登记（避免历史日志拒读）
 │   └── client/
 │       ├── index.tsx         # 浏览器入口：input.right / input.dock 两个插槽注册 + 命令通道
 │       ├── styles.ts         # ss- 命名空间组件样式（走宿主 --dsw-* / --dsh-composer-* 变量）+ dock 编辑样式
