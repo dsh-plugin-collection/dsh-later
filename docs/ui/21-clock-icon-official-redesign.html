@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 点阵时钟 → 官方风格重设计（语义还原）</title>
+<style>
+  :root {
+    color-scheme: dark light;
+    --page-bg: #17181b;
+    --page-fg: #e8e9ec;
+    --page-dim: #9aa0a8;
+    --page-line: #2c2f35;
+    --page-soft: #1f2126;
+    --page-accent: #3b82f6;
+    --sched: #8b5cf6;
+    --card-bg: #2c2c2e;
+    --sidebar-bg: #0f1012;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --page-bg: #ffffff; --page-fg: #1b1d21; --page-dim: #6b7280;
+      --page-line: #e5e7eb; --page-soft: #f6f7f9;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: var(--page-bg); color: var(--page-fg);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .lede { color: var(--page-dim); margin: 0 0 8px; font-size: 13px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--page-dim); margin: 40px 0 16px; font-weight: 600;
+  }
+  h3 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+
+  .panel {
+    background: var(--page-soft); border: 1px solid var(--page-line);
+    border-radius: 10px; padding: 20px; margin-bottom: 24px;
+  }
+  .panel-title {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--page-dim); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title::before {
+    content: ""; display: block; width: 8px; height: 8px; border-radius: 50%;
+  }
+  .panel.old .panel-title::before { background: #f59e0b; }
+  .panel.new .panel-title::before { background: #22c55e; }
+
+  /* ===== 宿主侧栏会话行（实测背景） ===== */
+  .sidebar {
+    background: var(--sidebar-bg);
+    border-radius: 8px; padding: 8px;
+  }
+  .session-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; line-height: 20px; color: var(--page-fg);
+  }
+  .session-row:hover { background: rgba(255,255,255,0.04); }
+  .slot { display: inline-flex; flex: none; align-items: center; justify-content: center; }
+  .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .time { color: var(--page-dim); font-size: 12px; flex: none; }
+
+  /* ===== 宿主 spinner（逐字段复刻官方 CSS） ===== */
+  .h-spinner { flex: none; width: 14px; height: 14px; color: var(--page-dim); }
+  .h-spinner .motion { transform-origin: center; animation: dsh-spin 1.5s linear infinite; }
+  .h-spinner .track { fill: none; stroke: currentColor; opacity: .25; stroke-width: 2; }
+  .h-spinner .arc {
+    fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+    stroke-dasharray: 18 150; animation: dsh-dash 1.5s ease-in-out infinite;
+  }
+  @keyframes dsh-spin { to { transform: rotate(360deg); } }
+  @keyframes dsh-dash {
+    0% { stroke-dasharray: 2 150; stroke-dashoffset: 0; }
+    50% { stroke-dasharray: 100 150; stroke-dashoffset: -24; }
+    100% { stroke-dasharray: 2 150; stroke-dashoffset: -124; }
+  }
+
+  /* ===== 旧版点阵时钟（原样保留） ===== */
+  .clk-legacy { display: inline-flex; flex: none; color: var(--sched); }
+  .clk-legacy rect { fill: currentColor; }
+  .clk-legacy .ring { animation: breathe 2.4s ease-in-out infinite; }
+  .clk-legacy .hand { opacity: 1; }
+  @keyframes breathe { 0%,100% { opacity: .65; } 50% { opacity: 1; } }
+
+  /* ===== 新版：官方语言的点阵时钟 =====
+     语义映射：
+       旧版 8 点外圈  → 官方 track 式描边圆环（fill:none, stroke, 圆头）
+       旧版 2 点指针  → 官方 arc 式圆头线段（stroke-linecap: round）
+       旧版呼吸动画   → 保留在表盘环上（同旧版 keyframes）
+       旧版紫色       → 保留 --sched（定时专属语义色） */
+  .clk-modern { display: inline-flex; flex: none; color: var(--sched); }
+  .clk-modern .face {
+    fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  .clk-modern .hand { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .clk-modern .hand-h { }
+  .clk-modern .hand-m { opacity: .85; }
+
+  /* 放大镜容器 */
+  .zoom-row {
+    display: flex; align-items: flex-end; gap: 40px;
+    padding: 24px 20px 8px; justify-content: center;
+  }
+  .zoom-item { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .zoom-label { font-size: 11px; color: var(--page-dim); }
+  .zoom-item .z { transform: scale(4); transform-origin: bottom center; margin-bottom: 24px; }
+
+  .note {
+    font-size: 12px; color: var(--page-dim); margin-top: 12px;
+    padding: 10px 12px; background: var(--page-soft);
+    border-left: 3px solid var(--page-accent); border-radius: 4px;
+  }
+  .panel .note { background: var(--page-bg); }
+  .note code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+  @media (prefers-color-scheme: light) {
+    .note code { background: rgba(0,0,0,0.06); }
+  }
+
+  /* 映射表 */
+  table.map { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.map th, table.map td {
+    text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--page-line);
+    vertical-align: top;
+  }
+  table.map th { color: var(--page-dim); font-weight: 600; font-size: 12px; }
+  table.map code {
+    background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; font-size: 12px;
+  }
+  @media (prefers-color-scheme: light) {
+    table.map code { background: rgba(0,0,0,0.06); }
+  }
+  .arrow { color: var(--page-accent); font-weight: 600; }
+
+  .tag {
+    display: inline-block; font-size: 11px; padding: 2px 6px;
+    border-radius: 4px; color: #fff; font-weight: 500; margin-left: 6px;
+  }
+  .tag.old { background: #f59e0b; }
+  .tag.new { background: #22c55e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>点阵时钟 → 官方风格重设计</h1>
+  <p class="lede">
+    原则：<strong>表现层</strong>（尺寸体系、描边、圆头线帽）采用 DSH 0.2.0 官方语言；
+    <strong>语义层</strong>（表盘 / 指针 / 呼吸 / 定时紫）逐一还原旧版点阵时钟。
+  </p>
+
+  <!-- ============ 1. 官方设计语言拆解 ============ -->
+  <h2>1. 官方设计语言（实测源码）</h2>
+  <div class="panel">
+    <div class="panel-title">DSH 0.2.0 spinner — 新图标必须遵循的词汇表</div>
+    <table class="map">
+      <tr><th>维度</th><th>官方取值</th><th>出处</th></tr>
+      <tr>
+        <td>viewBox</td>
+        <td><code>0 0 24 24</code>，渲染尺寸由容器传入（侧栏 slot 为 14px）</td>
+        <td>JSX: <code>viewBox:"0 0 24 24", width:a, height:a</code></td>
+      </tr>
+      <tr>
+        <td>几何</td>
+        <td><code>&lt;circle cx=12 cy=12 r=9.5&gt;</code>（24 体系下半径 9.5）</td>
+        <td>JSX: spinnerTrack / spinnerArc</td>
+      </tr>
+      <tr>
+        <td>描边</td>
+        <td><code>fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round</code></td>
+        <td><code>._spinnerArc_1i3xo_48</code></td>
+      </tr>
+      <tr>
+        <td>轨道</td>
+        <td>track 与 arc 同几何，track 为弱化透明度</td>
+        <td><code>._spinner_1i3xo_37</code> color: <code>--dsw-alias-label-tertiary</code></td>
+      </tr>
+      <tr>
+        <td>动画挂载</td>
+        <td>动画类挂在 <code>&lt;g&gt;</code> 上（motion），不在 circle 上</td>
+        <td>JSX: <code>&lt;g class="spinnerMotion"&gt;</code></td>
+      </tr>
+    </table>
+    <div class="note">
+      结论：新时钟不能再用 <code>10×10 + fill 方块 + crispEdges</code>（旧官方词汇），
+      必须换用 <code>24×24 + stroke 圆头线帽</code>（现官方词汇）。
+    </div>
+  </div>
+
+  <!-- ============ 2. 语义映射表 ============ -->
+  <h2>2. 旧 → 新语义映射（一一对应）</h2>
+  <div class="panel">
+    <table class="map">
+      <tr>
+        <th>旧版元素（点阵时钟）</th>
+        <th></th>
+        <th>新版元素（官方风格）</th>
+        <th>共同语义</th>
+      </tr>
+      <tr>
+        <td>8 × 2px 方块组成外圈<br><code>&lt;rect&gt; × 8</code></td>
+        <td class="arrow">→</td>
+        <td>描边圆环<br><code>&lt;circle r=9.5 stroke-width=2&gt;</code></td>
+        <td><strong>表盘</strong> — 离散点环 → 连续环（官方 track 同款几何）</td>
+      </tr>
+      <tr>
+        <td>2 × 2px 方块组成指针<br><code>&lt;rect&gt; × 2</code>（12 点方向 + 3 点方向）</td>
+        <td class="arrow">→</td>
+        <td>两根圆头线段<br><code>&lt;line stroke-linecap=round&gt;</code></td>
+        <td><strong>时针 + 分针</strong> — 同样指向 12 点与 3 点（= 3:00，定时→"到点"）</td>
+      </tr>
+      <tr>
+        <td>呼吸动画挂外圈<br><code>opacity .65 ↔ 1, 2.4s</code></td>
+        <td class="arrow">→</td>
+        <td>呼吸动画挂表盘环<br>同 keyframes，同周期</td>
+        <td><strong>"活着的定时"</strong> — 会话里有等待中的提醒</td>
+      </tr>
+      <tr>
+        <td>指针不透明度 1（静止）</td>
+        <td class="arrow">→</td>
+        <td>分针 opacity .85、时针 1（轻微主次）</td>
+        <td><strong>指针静止</strong> — 提醒未触发；不旋转，与宿主 spinner（转）区分</td>
+      </tr>
+      <tr>
+        <td>颜色 <code>#8b5cf6</code>（定时紫）</td>
+        <td class="arrow">→</td>
+        <td>颜色 <code>#8b5cf6</code> 不变</td>
+        <td><strong>定时专属色</strong> — 与宿主状态色板（灰/白/琥珀/红）区分</td>
+      </tr>
+      <tr>
+        <td><code>crispEdges</code> 锐利像素边</td>
+        <td class="arrow">→</td>
+        <td><code>stroke-linecap: round</code> 圆头</td>
+        <td>表现词汇切换：像素时代 → 描边时代（官方既定方向）</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ============ 3. 侧栏实景对比 ============ -->
+  <h2>3. 侧栏实景对比</h2>
+  <div class="compare" style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+    <div class="panel old" style="margin-bottom:0;">
+      <div class="panel-title">旧版 · 点阵时钟 <span class="tag old">legacy</span></div>
+      <div class="sidebar">
+        <div class="session-row">
+          <span class="slot">
+            <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+              <g class="motion">
+                <circle class="track" cx="12" cy="12" r="9.5"/>
+                <circle class="arc" cx="12" cy="12" r="9.5"/>
+              </g>
+            </svg>
+          </span>
+          <span class="clk-legacy">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges">
+              <g class="ring">
+                <rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/>
+                <rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/>
+                <rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/>
+                <rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/>
+              </g>
+              <g class="hand">
+                <rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/>
+              </g>
+            </svg>
+          </span>
+          <span class="title">定时提醒会话（进行中）</span>
+          <span class="time">刚刚</span>
+        </div>
+        <div class="session-row">
+          <span class="slot">
+            <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+              <g class="motion">
+                <circle class="track" cx="12" cy="12" r="9.5"/>
+                <circle class="arc" cx="12" cy="12" r="9.5"/>
+              </g>
+            </svg>
+          </span>
+          <span class="clk-legacy">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges">
+              <g class="ring">
+                <rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/>
+                <rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/>
+                <rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/>
+                <rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/>
+              </g>
+              <g class="hand">
+                <rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/>
+              </g>
+            </svg>
+          </span>
+          <span class="title">定时提醒会话（空闲）</span>
+          <span class="time">2 分钟前</span>
+        </div>
+      </div>
+      <div class="note">
+        旧 badge 是 10×10 <code>fill 方块</code>体系，与官方新 spinner 的
+        <code>stroke 圆环</code>体系并存时明显两代感：一方锐利像素、一方平滑圆头。
+      </div>
+    </div>
+
+    <div class="panel new" style="margin-bottom:0;">
+      <div class="panel-title">新版 · 官方风格时钟 <span class="tag new">modern</span></div>
+      <div class="sidebar">
+        <div class="session-row">
+          <span class="slot">
+            <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+              <g class="motion">
+                <circle class="track" cx="12" cy="12" r="9.5"/>
+                <circle class="arc" cx="12" cy="12" r="9.5"/>
+              </g>
+            </svg>
+          </span>
+          <span class="clk-modern">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="face" cx="12" cy="12" r="9.5"/>
+              <g class="hand">
+                <line class="hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+          <span class="title">定时提醒会话（进行中）</span>
+          <span class="time">刚刚</span>
+        </div>
+        <div class="session-row">
+          <span class="slot">
+            <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+              <g class="motion">
+                <circle class="track" cx="12" cy="12" r="9.5"/>
+                <circle class="arc" cx="12" cy="12" r="9.5"/>
+              </g>
+            </svg>
+          </span>
+          <span class="clk-modern">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="face" cx="12" cy="12" r="9.5"/>
+              <g class="hand">
+                <line class="hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+          <span class="title">定时提醒会话（空闲）</span>
+          <span class="time">2 分钟前</span>
+        </div>
+      </div>
+      <div class="note">
+        新 badge 与宿主 spinner <strong>同一几何基因</strong>：
+        同 <code>viewBox 24</code>、同 <code>r=9.5</code>、同 <code>stroke-width 2</code>、
+        同 <code>round 线帽</code>。区别仅在：spinner 的 arc 在转（进行中），
+        时钟的指针静止 + 表盘呼吸（定时等待中）。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4. 放大逐笔对比 ============ -->
+  <h2>4. 放大 4× · 逐笔对应</h2>
+  <div class="panel">
+    <div class="zoom-row">
+      <div class="zoom-item">
+        <svg class="z" width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" style="color:#8b5cf6">
+          <g style="animation: breathe 2.4s ease-in-out infinite;">
+            <rect x="0" y="0" width="2" height="2" fill="currentColor"/><rect x="4" y="0" width="2" height="2" fill="currentColor"/>
+            <rect x="8" y="0" width="2" height="2" fill="currentColor"/><rect x="8" y="4" width="2" height="2" fill="currentColor"/>
+            <rect x="8" y="8" width="2" height="2" fill="currentColor"/><rect x="4" y="8" width="2" height="2" fill="currentColor"/>
+            <rect x="0" y="8" width="2" height="2" fill="currentColor"/><rect x="0" y="4" width="2" height="2" fill="currentColor"/>
+          </g>
+          <rect x="4" y="2" width="2" height="2" fill="currentColor"/>
+          <rect x="6" y="4" width="2" height="2" fill="currentColor"/>
+        </svg>
+        <span class="zoom-label">旧 · 8 点外圈 + 2 点指针</span>
+      </div>
+      <div class="zoom-item">
+        <svg class="z" width="14" height="14" viewBox="0 0 24 24" style="color:#8b5cf6">
+          <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round"
+                  style="animation: breathe 2.4s ease-in-out infinite;"/>
+          <line x1="12" y1="12" x2="12" y2="6.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="12" y1="12" x2="17" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <span class="zoom-label">新 · 描边表盘 + 圆头指针</span>
+      </div>
+      <div class="zoom-item">
+        <svg class="z" width="14" height="14" viewBox="0 0 24 24" style="color:var(--page-dim)">
+          <g style="transform-origin:center; animation: dsh-spin 1.5s linear infinite;">
+            <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" opacity=".25" stroke-width="2"/>
+            <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-dasharray="18 150"
+                    style="animation: dsh-dash 1.5s ease-in-out infinite;"/>
+          </g>
+        </svg>
+        <span class="zoom-label">参照 · 宿主 spinner（同一几何）</span>
+      </div>
+    </div>
+    <div class="note" style="margin-top: 28px;">
+      <strong>为什么指针取 12 点 + 3 点：</strong>旧版点阵的两个方块就在 12 点方向
+      （<code>rect x=4,y=2</code>）和 3 点方向（<code>rect x=6,y=4</code>），
+      即"3:00"——到点的时刻。新版线段端点严格换算：
+      12 点方向 <code>(12,6.5)</code>（r=5.5 长时针）、3 点方向 <code>(17,12)</code>（短分针），
+      与旧版语义完全一致。
+    </div>
+  </div>
+
+  <!-- ============ 5. 新版 SVG 交付源码 ============ -->
+  <h2>5. 新版交付源码（可直接进 session-presence.ts）</h2>
+  <div class="panel new">
+    <div class="panel-title">CLOCK_SVG（modern）</div>
+    <pre style="background: var(--page-bg); padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 12px; line-height: 1.55; color: var(--page-fg);"><code>/**
+ * 侧栏定时徽标 —— DSH 0.2.0 官方描边语言版点阵时钟。
+ *
+ * 语义还原（旧点阵 → 新描边）：
+ *   8 点外圈  → circle r=9.5 stroke-width=2（= 官方 spinnerTrack 几何）
+ *   2 点指针  → line ×2, stroke-linecap:round（= 官方 spinnerArc 线帽）
+ *                12 点 (12,6.5) 时针 / 3 点 (17,12) 分针 —— 即旧版"3:00"
+ *   呼吸动画  → 保留 .ring 呼吸 keyframes（挂表盘环）
+ *   定时紫    → currentColor 由 .ss-presence 提供 #8b5cf6
+ *
+ * 表现还原（官方词汇）：
+ *   viewBox 0 0 24 24 / 渲染 14px（= 宿主 spinner slot 尺寸）
+ *   fill:none + stroke / stroke-linecap:round —— 摒弃 crispEdges
+ */
+export const CLOCK_SVG = `
+&lt;svg viewBox="0 0 24 24" width="14" height="14"
+     fill="none" stroke="currentColor"
+     stroke-width="2" stroke-linecap="round" aria-hidden="true"&gt;
+  &lt;circle class="ss-clock-face" cx="12" cy="12" r="9.5"/&gt;
+  &lt;g class="ss-clock-hands"&gt;
+    &lt;line x1="12" y1="12" x2="12" y2="6.5"/&gt;
+    &lt;line x1="12" y1="12" x2="17" y2="12" opacity="0.85"/&gt;
+  &lt;/g&gt;
+&lt;/svg&gt;`;
+
+/* styles.ts 配套 */
+.ss-clock-face {
+  animation: ss-clock-breathe 2.4s ease-in-out infinite;
+}
+@keyframes ss-clock-breathe {
+  0%, 100% { opacity: .65; }
+  50%      { opacity: 1;   }
+}
+.ss-clock-hands { opacity: 1; } /* 指针静止：提醒未触发，与宿主旋转 spinner 区分 */</code></pre>
+    <div class="note">
+      <strong>与旧版共存：</strong><code>KERNEL_GENERATIONS</code> 已有版本判定，
+      0.1.x 代次继续注入旧点阵 SVG，0.2.0+ 注入本 SVG ——
+      两套常量并排放置，检测逻辑复用既有的代次选择器，不新增探测机制。
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

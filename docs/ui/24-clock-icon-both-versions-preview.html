@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>时钟图标双版本预览</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    padding: 40px;
+    min-height: 100vh;
+  }
+  h1 {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+  .subtitle {
+    color: #888;
+    font-size: 14px;
+    margin-bottom: 40px;
+  }
+  .section {
+    margin-bottom: 48px;
+  }
+  .section-title {
+    font-size: 18px;
+    margin-bottom: 20px;
+    color: #ccc;
+    border-bottom: 1px solid #333;
+    padding-bottom: 8px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .card {
+    background: #252540;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+  }
+  .card-title {
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 16px;
+  }
+  .icon-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 60px;
+  }
+  .state-label {
+    margin-top: 12px;
+    font-size: 12px;
+    color: #666;
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    margin-top: 20px;
+  }
+  .comparison-item {
+    background: #252540;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .comparison-title {
+    font-size: 16px;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+  .comparison-icons {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+  }
+
+  /* 侧栏模拟样式 */
+  .ss-presence { display: inline-flex; flex: none; color: #8b5cf6; }
+  .ss-presence-beside { margin-left: 4px; }
+
+  /* 旧版点阵时钟 */
+  .ss-presence rect { fill: currentColor; }
+  .ss-presence .ss-presence-ring { opacity: 0.8; animation: ss-presence-breathe 2.4s ease-in-out infinite; }
+  .ss-presence .ss-presence-hand { opacity: 1; }
+  .ss-presence[data-state="urgent"] { color: rgb(247, 173, 49); }
+  .ss-presence[data-state="urgent"] .ss-presence-ring { animation-name: ss-presence-pulse; animation-duration: 0.9s; }
+  .ss-presence[data-state="overdue"] { color: rgb(236, 19, 19); }
+  .ss-presence[data-state="overdue"] .ss-presence-ring { animation: none; }
+
+  /* 新版描边时钟 */
+  .ss-presence .ss-clock-face {
+    fill: none; stroke: currentColor; stroke-width: 1; stroke-linecap: round;
+    opacity: 0.8; animation: ss-clock-breathe 2.4s ease-in-out infinite;
+  }
+  .ss-presence .ss-clock-hand { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .ss-presence .ss-clock-hand-h { opacity: 1; }
+  .ss-presence .ss-clock-hand-m { opacity: 0.85; }
+  .ss-presence[data-state="urgent"] .ss-clock-face { animation-name: ss-clock-pulse; animation-duration: 0.9s; }
+  .ss-presence[data-state="overdue"] .ss-clock-face { animation: none; opacity: 1; }
+
+  @keyframes ss-presence-breathe { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }
+  @keyframes ss-presence-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+  @keyframes ss-clock-breathe { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }
+  @keyframes ss-clock-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+  /* 侧栏行模拟 */
+  .sidebar-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    background: #1e1e35;
+    border-radius: 8px;
+    margin-bottom: 8px;
+  }
+  .sidebar-row-icon {
+    width: 20px;
+    height: 20px;
+    background: #3a3a5c;
+    border-radius: 4px;
+    margin-right: 12px;
+  }
+  .sidebar-row-name {
+    flex: 1;
+    font-size: 14px;
+  }
+  .sidebar-row-badge {
+    display: flex;
+    align-items: center;
+  }
+
+  .note {
+    background: #1e3a5f;
+    border-left: 3px solid #4a9eff;
+    padding: 12px 16px;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #aaa;
+    border-radius: 0 8px 8px 0;
+  }
+  .note strong { color: #4a9eff; }
+</style>
+</head>
+<body>
+
+<h1>时钟图标双版本预览</h1>
+<p class="subtitle">旧版点阵风格 vs 新版描边风格（stroke-width: 1，符合 DSH 0.2.0 官方规范）</p>
+
+<!-- 侧栏模拟 -->
+<div class="section">
+  <div class="section-title">📋 侧栏会话行效果模拟</div>
+
+  <div class="comparison">
+    <div class="comparison-item">
+      <div class="comparison-title">旧版点阵（Classic）</div>
+      <div class="sidebar-row">
+        <div class="sidebar-row-icon"></div>
+        <div class="sidebar-row-name">定时任务会话</div>
+        <div class="sidebar-row-badge">
+          <span class="ss-presence ss-presence-beside" data-state="scheduled">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g class="ss-presence-ring"><rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/><rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/><rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/></g><g class="ss-presence-hand"><rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/></g></svg>
+          </span>
+        </div>
+      </div>
+      <div class="state-label">scheduled · 紫色呼吸动画</div>
+
+      <div class="sidebar-row" style="margin-top: 16px;">
+        <div class="sidebar-row-icon"></div>
+        <div class="sidebar-row-name">紧急提醒</div>
+        <div class="sidebar-row-badge">
+          <span class="ss-presence ss-presence-beside" data-state="urgent">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g class="ss-presence-ring"><rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/><rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/><rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/></g><g class="ss-presence-hand"><rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/></g></svg>
+          </span>
+        </div>
+      </div>
+      <div class="state-label">urgent · 琥珀色脉冲动画</div>
+
+      <div class="sidebar-row" style="margin-top: 16px;">
+        <div class="sidebar-row-icon"></div>
+        <div class="sidebar-row-name">已过期任务</div>
+        <div class="sidebar-row-badge">
+          <span class="ss-presence ss-presence-beside" data-state="overdue">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g class="ss-presence-ring"><rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/><rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/><rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/></g><g class="ss-presence-hand"><rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/></g></svg>
+          </span>
+        </div>
+      </div>
+      <div class="state-label">overdue · 红色静态</div>
+    </div>
+
+    <div class="comparison-item">
+      <div class="comparison-title">新版描边（Modern）</div>
+      <div class="sidebar-row">
+        <div class="sidebar-row-icon"></div>
+        <div class="sidebar-row-name">定时任务会话</div>
+        <div class="sidebar-row-badge">
+          <span class="ss-presence ss-presence-beside" data-state="scheduled">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>
+              <g class="ss-clock-hand">
+                <line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="state-label">scheduled · 紫色呼吸动画</div>
+
+      <div class="sidebar-row" style="margin-top: 16px;">
+        <div class="sidebar-row-icon"></div>
+        <div class="sidebar-row-name">紧急提醒</div>
+        <div class="sidebar-row-badge">
+          <span class="ss-presence ss-presence-beside" data-state="urgent">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>
+              <g class="ss-clock-hand">
+                <line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="state-label">urgent · 琥珀色脉冲动画</div>
+
+      <div class="sidebar-row" style="margin-top: 16px;">
+        <div class="sidebar-row-icon"></div>
+        <div class="sidebar-row-name">已过期任务</div>
+        <div class="sidebar-row-badge">
+          <span class="ss-presence ss-presence-beside" data-state="overdue">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>
+              <g class="ss-clock-hand">
+                <line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="state-label">overdue · 红色静态</div>
+    </div>
+  </div>
+</div>
+
+<!-- 放大对比 -->
+<div class="section">
+  <div class="section-title">🔍 放大对比（4x）</div>
+  <div class="comparison">
+    <div class="comparison-item">
+      <div class="comparison-title">旧版点阵（Classic）</div>
+      <div class="comparison-icons">
+        <div style="text-align: center;">
+          <span class="ss-presence" data-state="scheduled" style="transform: scale(4); transform-origin: center; display: inline-block; margin: 20px;">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g class="ss-presence-ring"><rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/><rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/><rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/></g><g class="ss-presence-hand"><rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/></g></svg>
+          </span>
+          <div class="state-label">scheduled</div>
+        </div>
+        <div style="text-align: center;">
+          <span class="ss-presence" data-state="urgent" style="transform: scale(4); transform-origin: center; display: inline-block; margin: 20px;">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g class="ss-presence-ring"><rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/><rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/><rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/></g><g class="ss-presence-hand"><rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/></g></svg>
+          </span>
+          <div class="state-label">urgent</div>
+        </div>
+        <div style="text-align: center;">
+          <span class="ss-presence" data-state="overdue" style="transform: scale(4); transform-origin: center; display: inline-block; margin: 20px;">
+            <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g class="ss-presence-ring"><rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/><rect x="8" y="0" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="4" y="8" width="2" height="2"/><rect x="0" y="8" width="2" height="2"/><rect x="0" y="4" width="2" height="2"/></g><g class="ss-presence-hand"><rect x="4" y="2" width="2" height="2"/><rect x="6" y="4" width="2" height="2"/></g></svg>
+          </span>
+          <div class="state-label">overdue</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comparison-item">
+      <div class="comparison-title">新版描边（Modern）</div>
+      <div class="comparison-icons">
+        <div style="text-align: center;">
+          <span class="ss-presence" data-state="scheduled" style="transform: scale(4); transform-origin: center; display: inline-block; margin: 20px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>
+              <g class="ss-clock-hand">
+                <line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+          <div class="state-label">scheduled</div>
+        </div>
+        <div style="text-align: center;">
+          <span class="ss-presence" data-state="urgent" style="transform: scale(4); transform-origin: center; display: inline-block; margin: 20px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>
+              <g class="ss-clock-hand">
+                <line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+          <div class="state-label">urgent</div>
+        </div>
+        <div style="text-align: center;">
+          <span class="ss-presence" data-state="overdue" style="transform: scale(4); transform-origin: center; display: inline-block; margin: 20px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="ss-clock-face" cx="12" cy="12" r="9.5"/>
+              <g class="ss-clock-hand">
+                <line class="ss-clock-hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+                <line class="ss-clock-hand-m" x1="12" y1="12" x2="17" y2="12"/>
+              </g>
+            </svg>
+          </span>
+          <div class="state-label">overdue</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <strong>设置选项：</strong> 自动（根据 DSH 版本选择）| 新版描边风格 | 旧版点阵风格<br>
+  <strong>默认行为：</strong> DSH 0.2.0+ → 新版描边 | DSH 0.1.x → 旧版点阵
+</div>
+
+</body>
+</html>
