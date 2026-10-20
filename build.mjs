@@ -9,12 +9,32 @@
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { build } from 'esbuild';
+import {
+  shouldAllowFallback,
+  FALLBACK_REFUSED_NOTICE,
+  FALLBACK_ALLOWED_NOTICE,
+} from './scripts/build-fallback-policy.mjs';
 
-// 1. host 端：tsc（容忍依赖版本差异导致的 TS 错误）
+// 1. host 端：tsc（**默认失败即中止**，issue #56）
+//    `--noEmitOnError` 是关键：tsc 默认即使有类型错误也会照常 emit，那样「非零
+//    退出」的同时 lib/ 已经被悄悄改写了一半。加上它，失败时 lib/ 保持原样。
+//
+//    降级 esbuild 只在显式开闸时发生。优先级与既有重链策略
+//    （`--no-deploy` > `--deploy` > `DSH_LATER_RELINK`）**同构**：
+//      `--no-fallback` > `--allow-fallback` > `DSH_LATER_BUILD_FALLBACK` > 默认关。
+//    决策逻辑在 scripts/build-fallback-policy.mjs（纯函数，可测）。
+let hostFallbackUsed = false;
 try {
-  execSync('npx tsc -p tsconfig.json', { stdio: 'inherit' });
+  execSync('npx tsc -p tsconfig.json --noEmitOnError', { stdio: 'inherit' });
 } catch (error) {
-  console.warn('⚠️ host tsc 遇到依赖类型差异，尝试 esbuild 降级构建…');
+  const argv = process.argv.slice(2);
+  if (!shouldAllowFallback(argv)) {
+    // 默认路径：不兜底、不改写 lib/、非零退出（掩埋真信号才是本 issue 的病灶）。
+    console.error(FALLBACK_REFUSED_NOTICE);
+    process.exit(1);
+  }
+  console.warn(FALLBACK_ALLOWED_NOTICE);
+  hostFallbackUsed = true;
   const entries = ['src/index.ts', 'src/domain.ts', 'src/owned-event-registration.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/presence.ts', 'src/schedule-summary.ts', 'src/schedule-summary-store.ts', 'src/smart-window.ts', 'src/time-utils.ts', 'src/upstream-compat.ts'];
   for (const entry of entries) {
     const name = entry.replace('src/', '').replace('.ts', '.js');
@@ -33,6 +53,8 @@ try {
 }
 
 // 1b. client 端类型检查（noEmit；避免类型错误溜进浏览器产物）
+//     这里**不套**兜底闸门：client 产物无论类型检查通过与否都是同一个 esbuild
+//     bundle，不存在 #56 那种「逐文件 tsc → 单文件 bundle」的形态漂移。
 try {
   execSync('npx tsc -p tsconfig.client.json --noEmit', { stdio: 'inherit' });
 } catch (error) {
@@ -140,4 +162,11 @@ if (!shouldRelink(process.argv.slice(2))) {
   console.warn(`⚠️ profile 重链跳过: ${error instanceof Error ? error.message : String(error)}`);
 }
 
-console.log('✅ lib/index.js (host, tsc) + lib/client.js (browser, esbuild) 构建完成');
+// 收尾回报要如实反映 host 产物形态（issue #56）：走了兜底就不能再打绿勾，
+// 否则读者会以为拿到的是逐文件 tsc 产物、拿它去跑回归。
+if (hostFallbackUsed) {
+  console.log('🟥 lib/index.js (host, esbuild 兜底) + lib/client.js (browser, esbuild) 构建完成');
+  console.log('   ⚠️ 产物形态与逐文件 tsc 不同，测试结果不可用于判定回归。');
+} else {
+  console.log('✅ lib/index.js (host, tsc) + lib/client.js (browser, esbuild) 构建完成');
+}
