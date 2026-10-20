@@ -38,6 +38,7 @@ declare const zh: {
     readonly errTimeOutOfRange: "时间超出允许范围。";
     readonly errFrequencyTooHigh: "频率过高。";
     readonly errInvalidRule: "规则无效。";
+    readonly errSubagentSession: "该会话属于子 agent 委派，永远不会收到提醒投递。";
     readonly errScheduleNotFound: "提醒不存在。";
     readonly errAlreadyOverdue: "提醒已到期。";
     readonly errQuotaExceeded: "已达任务上限（{max} 条）。";
