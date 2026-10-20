@@ -4,6 +4,38 @@
 
 ## 未发布
 
+- **fix** 新增**内核模块同源护栏**（#57）：启动时比较插件侧与宿主侧解析到的 `@deepseek-ai/dsh-*`
+  是否同一份真实模块，给出 `same` / `different` / `unknown` 三态。
+  - 起因是 `link:` 开发态下进程内有两份内核实例（插件侧 0.2.0、宿主 npx 那份 0.2.1），读兼容用的
+    `KNOWN_SESSION_EVENT_TYPES.add()` 加进了插件自己那份 Set，宿主读路径毫无变化 —— **静默失效**。
+  - `different` 时每进程告警一次（cordis 重载不刷屏），列出两侧文件与版本；`unknown` 默认静默。
+    `DSH_LATER_KERNEL_GUARD=off` 关闭、`=verbose` 打印 `same`/`unknown` 结论，
+    `DSH_LATER_HOST_ENTRY` 可指认宿主入口。
+  - **探测失败一律报 `unknown`，不伪装成同源** —— 这条 issue 的病根就是"看起来生效了"。
+  - 只做观测：双实例下读兼容注册到底是放弃 / 保留+迁移 / 折中仍待 #58 拍板，选放弃或折中时仍需删注册。
+- **fix** `npm run build` 不再**静默降级** esbuild（#56）。host tsc 失败现在默认非零退出、`lib/` 原样保留。
+  - 旧行为：只打一句"依赖类型差异"告警，然后照常兜底并打 ✅。代价是产物形态从逐文件 tsc 产物
+    （`lib/index.js` ≈24.6KB）变成单文件 bundle（≈128KB，兄弟模块被内联、状态单例被复制），
+    一次带出 **34 条假测试失败**，把真正的类型错误埋掉。
+  - 确需兜底请显式开闸：`node build.mjs --allow-fallback` 或 `DSH_LATER_BUILD_FALLBACK=1 npm run build`；
+    优先级 `--no-fallback` > `--allow-fallback` > 环境变量 > 默认关（与重链策略同构）。
+  - 开闸时打醒目横幅并明确"产物形态与逐文件 tsc 不同，测试结果不可用于判定回归"，收尾不再冒充 tsc 产物；
+    新增判据（体积 / 保留相对导入 / 无内联分节注释）让兜底产物直接判红。
+  - client 侧 tsc 仍是 warn & continue：client 产物恒为 esbuild bundle，没有这种形态漂移。
+- **fix** 错误码跟上内核 `0.2.1`：`ScheduleInputError` 新增的 `subagent_session` 现在会**原样透出**，
+  不再被折叠成"内部错误"（#54）。
+  - 该码来自上游对"委派深度 > 0 的子 agent 会话"的拒绝。本插件**不在工具层重复这条守卫**：用户工具只在
+    `ctx.agents.roots()` 命中时注册，子 agent 必带 `parentAgent` 且会话头 stamp `origin:'subagent'`，
+    官方路径构造不出这种 agent（等价性写进了代码注释）。
+  - 新增**超集护栏**测试：从实际安装的 `dsh-schedule` 类型声明里解析上游 code 联合，断言本插件类型是超集
+    —— 上游下次再加码即红，不手抄码表。
+- **feat** 支持内核 `0.2.1-rc.2`：插件在该内核上不再因代次未枚举被判不兼容/跳过（#55）。
+  - `KERNEL_GENERATIONS` 追加 `0.2.1-rc.2` → `node scripts/sync-peer-matrix.mjs` 重生成 peer 枚举 →
+    9 个内核 devDependency 钉到 `0.2.1-rc.2`，`pnpm-lock.yaml` 同步（CI 是 `pnpm install --frozen-lockfile`）。
+  - 核对结论：相对 `0.2.0-rc.2`，Session 形状未变、`schedule-compat` 的 `isV17` 探测仍命中，
+    **唯一差异是上面那个错误码**，业务路径没有新增版本分支。
+  - 已支持代次：`0.1.1-rc.2` / `0.1.2-rc.1` / `0.1.5-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.2`，旧内核行为不变。
+  - 未覆盖：没有在真实宿主里加载 0.2.1（只做了依赖面、类型面与全量单测），已记在 `docs/verification.md`。
 - **chore** 补上宿主版本约束 `engines.dsh`：`>=0.1.1-rc.2 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`。
   此前插件包没有这个字段，宿主只能退到 8 条 `@deepseek-ai/dsh-*` peerDependencies 上逐条比对；
   而宿主源码里 `engines.dsh` 一旦存在就**独占**判定权（`unmetRequirements`：own `engines.dsh`
