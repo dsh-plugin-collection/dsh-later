@@ -53,7 +53,18 @@ export declare function validatePrompt(raw: unknown, limits: PromptLimits): {
     value: string;
 } | UserScheduleError;
 /** 用户工具稳定的闭包错误集合（在 dsh-schedule 闭包之上追加本插件专用码）。 */
-export type UserScheduleErrorCode = 'invalid_prompt' | 'invalid_selector' | 'invalid_time_zone' | 'not_future' | 'time_out_of_range' | 'frequency_too_high' | 'invalid_rule' | 'schedule_not_found' | 'already_overdue' | 'quota_exceeded' | 'persistence_uncertain' | 'unsupported_kind' | 'not_paused' | 'internal_error';
+export type UserScheduleErrorCode = 'invalid_prompt' | 'invalid_selector' | 'invalid_time_zone' | 'not_future' | 'time_out_of_range' | 'frequency_too_high' | 'invalid_rule' | 'schedule_not_found' | 'already_overdue' | 'quota_exceeded' | 'persistence_uncertain' | 'unsupported_kind' | 'not_paused'
+/**
+ * `dsh-schedule@0.2.1-rc.2` 新增的上游闭包码：目标 Session 属于委派子代理
+ * （delegation depth > 0），投递永远到不了，故上游 `create` 拒绝、
+ * `update` 返回非变更结果。
+ *
+ * 本插件的写路径**不经过** `ScheduleService`（自己 append `schedule/change`
+ * 再 fold），故自身不会产生此码；列入本联合仅因为 `toInputError` 是上游闭包
+ * 的直通翻译器 —— 不列入就会让「上游多一个码」变成编译错误（升级到 0.2.1
+ * 时 tsc 已如实报出）。
+ */
+ | 'subagent_session' | 'internal_error';
 /** 封闭错误值。 */
 export interface UserScheduleError {
     readonly ok: false;

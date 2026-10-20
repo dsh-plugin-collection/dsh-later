@@ -241,6 +241,44 @@
 > framing 根本不会执行，故修完 peer 缺口后测试才暴露出来。这正是 devDependencies
 > 固定到运行时真实代次的价值：把「本地测试环境落后于运行时」造成的盲区消除。
 
+- **`0.2.1` 兼容核对（2026-10-20 实测通过）**
+
+  - **结论**：`0.2.1-rc.2` 相对 `0.2.0-rc.2` 对本插件只多出**一处类型面差异**，
+    业务路径无需新增版本分支；登记代次后 host / client 两条 `tsc --noEmit`
+    零错误，`npm test` **407 通过 / 0 失败**。
+  - **Session 形状未变**：`@deepseek-ai/dsh-session@0.2.1-rc.2` 的类型声明里
+    `ownEvents(): readonly SessionEvent[]` 与 `inheritedEventCount: SessionLogOffset`
+    仍在（`node_modules/@deepseek-ai/dsh-session/lib/types/index.d.ts` 第 231、152
+    行），故 `readOwnEvents` /
+    `readInheritedEventCount` 原样可用，`sessionApi` 仍为 `'own-events'`。
+  - **`dsh-schedule` 的探测照旧命中**：`renderRecurringReminderBatchFraming` 仍在
+    导出，`scheduleMessageSource()` 的 `isV17` 存在性探测继续返回 `kind:'schedule'`；
+    `createAfterScheduleRecord` 的 arity 仍为 5（`title` 照旧由 `deriveScheduleTitle`
+    提供）；`foldScheduleEvents` / `renderReminderFraming` / `resolveEveryOccurrence` /
+    `decodeScheduleChange` / `scheduleView` / `ScheduleId` 逐个 `import()` 实测均在。
+  - **唯一的真实差异：`ScheduleInputError` 多一个码**。0.2.1 给输入错误闭包加了
+    `subagent_session`（目标 Session 属于委派子代理，投递永远到不了，故其 `create`
+    拒绝、`update` 返回非变更结果）。本插件的写路径**不经过** `ScheduleService`
+    （自己 append `schedule/change` 再 fold），因此不会真收到该码；但
+    `toInputError` 是上游闭包的直通翻译器，本地联合不补就编译不过（升级依赖时
+    `tsc` 已如实报出 `TS2322`）。处置：`UserScheduleErrorCode` 补入该码并注明来源，
+    另加一条运行期护栏，构造 `ScheduleInputError('subagent_session', …)` 经翻译后
+    **码原样透出**，不降级成 `internal_error`。
+  - **落地**：`KERNEL_GENERATIONS` 追加 `0.2.1-rc.2`（`peerRange: '^0.2.1-rc.2'`，
+    `sessionApi: 'own-events'`）→ `node scripts/sync-peer-matrix.mjs` 重写 8 个 peer
+    范围 → devDependencies 里 9 个 `@deepseek-ai/*` 精确版本推进到 `0.2.1-rc.2`
+    （含只出现在 dev 的 `dsh-client-ui-primitives`；`cordis` / `schemastery` 不动）
+    → `pnpm-lock.yaml` 同步刷新。
+  - **证据**：`tsc -p tsconfig.json --noEmit` 0 错误；`tsc -p tsconfig.client.json
+    --noEmit` 0 错误；`npm test` 407 通过 / 0 失败（基线 406，新增 1 条错误码护栏）。
+  - **变异验证**：从 `KERNEL_GENERATIONS` 删掉 `0.2.1-rc.2` 并重建 `lib/` 后，
+    `peerDependencies 与 KERNEL_GENERATIONS 完整范围一致` 与
+    `devDependencies 固定到某个已验证代次（不与 peer 范围混同）` 双双变红
+    （407 → 405 通过 / 2 失败）；还原后回到 407 全绿。护栏确实绑在代次表上，
+    不是被 package.json 里的常量蒙混过关。
+  - **未覆盖**：本次没有在真实宿主里加载 0.2.1 内核（只做依赖面、类型面与单测冒烟）；
+    `engines.dsh` 的既有区间已覆盖 0.2.1（`>=0.2.0-rc.2 <0.3.0-0`），未改动。
+
 ## 验收对照（v1.0.0）
 
 | 编号 | 场景 | 落地 |
