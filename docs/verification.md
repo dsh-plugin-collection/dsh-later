@@ -210,6 +210,8 @@
     ② `tsc -p tsconfig.client.json --noEmit`（client）**0 错误**；
     ③ `npm run build` 走 **tsc 原生路径成功**（无 esbuild 降级告警 —— 即
     typecheck 干净，构建产物形态未被破坏）；④ 183 项测试全绿。
+    （注：#56 起判定的**形式**变了 —— tsc 报错会直接非零退出、不再有"降级告警"这条路，
+    所以「没看到告警」不再是"typecheck 干净"的证据，改为「构建成功且产物判据判逐文件」。）
   - **落地**：`KERNEL_GENERATIONS` 追加 `0.2.0-rc.2` 一代 → `node scripts/sync-peer-matrix.mjs`
     重写 8 个 peer 范围 → dev 固定推进到 `0.2.0-rc.2`（并同步护栏中的代次断言）。
     核对后以宿主的校验逻辑复算：`0.2.0-rc.2` 上 **0 个不兼容 peer**（放行）；
@@ -278,6 +280,13 @@
     不是被 package.json 里的常量蒙混过关。
   - **未覆盖**：本次没有在真实宿主里加载 0.2.1 内核（只做依赖面、类型面与单测冒烟）；
     `engines.dsh` 的既有区间已覆盖 0.2.1（`>=0.2.0-rc.2 <0.3.0-0`），未改动。
+  - **合并后复核（2026-10-20，main 合入 #63–#66 之后）**：在 0.2.1-rc.2 的**真实** devDependency 下
+    重跑 —— `pnpm install --frozen-lockfile` 通过且**不改写** `pnpm-lock.yaml`；
+    host / client 两条 `tsc --noEmit` 零错误；`npm test` **443 通过 / 0 失败**
+    （基线 406 + #55 的 1 + #54 的 2 + #56 的 18 + #57 的 16）；`npm run build` 后 `lib/` 与源码
+    同步（`git status` 零脏改），产物仍是逐文件 tsc 形态。
+    这也补上了 #54 交接里"0.2.1 内核下的最终 typecheck 未验"那一项 —— 该错误码是在真实 0.2.1
+    类型面下编译通过的，不是在 0.2.0 上"看起来没问题"。
 
 ## 验收对照（v1.0.0）
 
