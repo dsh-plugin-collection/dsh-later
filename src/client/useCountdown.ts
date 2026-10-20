@@ -2,7 +2,7 @@
  * 倒计时工厂 hook：以给定间隔重渲染，供倒计时文本与紧急度判断使用。
  * @module dsh-later/client/useCountdown
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 /** 每秒 tick。 */
 export function useNow(intervalMs = 1000): number {

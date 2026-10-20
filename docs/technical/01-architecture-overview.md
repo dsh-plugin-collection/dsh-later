@@ -101,7 +101,7 @@ dsh-later/
 ├── lib/                          # 构建产物（tsc + esbuild），不要手改、也不是源码目录
 ├── tests/                        # node:test，*.test.mjs 平铺 + tests/helpers
 ├── docs/                         # 本文档树
-├── build.mjs / build-client.mjs / build-host.mjs / watch.mjs
+├── build.mjs / watch.mjs      # 构建与监听（分端构建脚本不存在；host 兜底策略在 scripts/build-fallback-policy.mjs）
 ├── cordis.patch.yml              # Cordis bundle patch
 └── package.json
 ```

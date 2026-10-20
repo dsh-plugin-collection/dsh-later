@@ -25,9 +25,9 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
-import { format, type SchedStrings } from '../strings.js';
+import type { SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
-import { useSchedT, type LocaleFaceLike, type SchedTranslate } from '../useSchedT.js';
+import { useSchedT, type SchedTranslate } from '../useSchedT.js';
 import type { CommandOutcome } from '../../command-outcome.js';
 import {
   barSegments,

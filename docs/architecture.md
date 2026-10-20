@@ -68,8 +68,8 @@ dsh-later/
 │       ├── session-presence.ts # 侧栏会话行状态点（消费 schedule-summary-store；源头是 userSchedules 投影）
 │       └── components/       # SchedButton / SchedPanel / ScheduleDock（含行内编辑）/ TaskList / SchedulerSettingsCard
 ├── tests/                    # 单元 + 集成测试（node:test，含 runtime 决策、投影形状回归、delivery 分流）
-├── build.mjs                 # tsc(host) + 客户端类型检查 + esbuild(client)
-├── build-client.mjs/.build-host.mjs  # 分端构建（watch 复用）
+├── build.mjs                 # tsc(host) + 客户端类型检查 + esbuild(client)；部署策略见 build-fallback/relink 两个策略文件
+├── watch.mjs                 # 监听 src/ 重建（复用 build.mjs 的策略）
 ├── watch.mjs                 # 监听 src/ 自动重建 + 跑形状回归测试
 ├── cordis.patch.yml          # bundle patch
 └── package.json

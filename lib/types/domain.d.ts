@@ -1,19 +1,3 @@
-/**
- * dsh-later 领域类型与事件荷载。
- *
- * 兼容性说明（关键设计决策）：
- * dsh-schedule 对 `schedule/change` 荷载采用严格解码（`hasExactKeys` 拒绝任何
- * 多余字段）。因此本插件**不会**在 `schedule/change` 里追加 `source` 字段——
- * 那会让 dsh-schedule 自身 fold 抛 `corrupt_schedule_log`，破坏 AC-20 互不干扰。
- * 用户来源**不再**用伴生会话事件记录（2026-09 根治）：曾用自有事件
- * `session-scheduler/user-schedule` 写进会话日志，但该类型不在宿主词汇表内，
- * 持久化层在特定时序下会静默丢行、留下永久 seq 缺口，导致整份历史被拒读。
- * 现改为 sidecar 文件（见 ownership-store.ts）；该事件类型仅作**读兼容**
- * 保留（旧日志可能仍含此事件，注册 + fold 逻辑不再写入）。
- *
- * @module dsh-later/domain
- */
-import type { SessionEvent } from '@deepseek-ai/dsh-session';
 /** 插件名（与 cordis 条目 id / manifest 一致）。 */
 export declare const name = "dsh-later";
 /**
@@ -176,7 +160,3 @@ export interface UserScheduleProjectionState {
         pausedAt: number;
     }[];
 }
-/** 判断事件是否属于本插件所有权流。 */
-export declare function isOwnedEvent(event: SessionEvent): event is SessionEvent & {
-    data: UserScheduleOwnedChange;
-};

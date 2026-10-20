@@ -20,7 +20,6 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import { createUserMessage, boundContextSummary } from '@deepseek-ai/dsh-llm';
 import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm';
 import {
-  foldScheduleEvents,
   renderReminderFraming,
   resolveEveryOccurrence,
   ScheduleId,
@@ -30,7 +29,6 @@ import {
   scheduleMessageSource,
 } from './schedule-compat.js';
 import type { ScheduleRecord, OneShotScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
-import { OWNED_EVENT } from './domain.js';
 import { findScheduleIdByUid, getOwnership, getPaused, removePaused } from './ownership-store.js';
 import type { ScheduledAttachment } from './ownership-store.js';
 import type { UserScheduleDelivery } from './domain.js';

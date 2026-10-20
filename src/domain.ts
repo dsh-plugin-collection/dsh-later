@@ -13,7 +13,6 @@
  *
  * @module dsh-later/domain
  */
-import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-session-projection/types';
 
@@ -190,11 +189,4 @@ export interface UserScheduleProjectionState {
     lastScheduleId: string;
     pausedAt: number;
   }[];
-}
-
-/** 判断事件是否属于本插件所有权流。 */
-export function isOwnedEvent(event: SessionEvent): event is SessionEvent & {
-  data: UserScheduleOwnedChange;
-} {
-  return event.type === OWNED_EVENT;
 }

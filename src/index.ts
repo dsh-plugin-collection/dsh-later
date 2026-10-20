@@ -32,12 +32,7 @@ import {
   userScheduleDelete,
   userScheduleList,
 } from './user-tools.js';
-import type {
-  PromptLimits,
-  UserScheduleCreateInput,
-  UserScheduleListResult,
-  UserScheduleDeleteResult,
-} from './user-tools.js';
+import type { PromptLimits, UserScheduleCreateInput } from './user-tools.js';
 import { name, SETTINGS_NAMESPACE } from './domain.js';
 import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { hostDictFor, hostFormat } from './strings.js';
@@ -310,7 +305,7 @@ function registerUserScheduleTools(
           },
           async execute(_args, exec) {
             if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: '操作失败。' });
-            const result = await userScheduleList(agent, rootCtx);
+            const result = await userScheduleList(agent);
             return JSON.stringify(result);
           },
           presentCall: () => present(t.presentList, 'read'),
@@ -557,9 +552,9 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     const stopCreated = ctx.on('agent/created', async ({ agent }: { agent: Agent }) => {
       if (stopping || runtimes.has(agent) || !ctx.agents.roots().includes(agent)) return;
       const runtime = new UserScheduleRuntime(ctx, agent, getSettings);
-      let cleanup: () => void = () => undefined;
       try {
-        cleanup = agent.ctx.effect(() => {
+        // effect 的 disposer 由 agent.ctx 生命周期托管，这里不需要自己持有。
+        agent.ctx.effect(() => {
           const getLocale = () => ctx.get('locale')?.getSnapshot().active;
           const disposeTools = registerUserScheduleTools(ctx, agent.ctx, agent, getSettings, getLocale, notifyUserChange);
           const stopStatus = agent.ctx.on('agent/status', ({ status }: { status: string }) => {

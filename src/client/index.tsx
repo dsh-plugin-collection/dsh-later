@@ -37,7 +37,6 @@ import { SchedulerSettingsCard } from './components/SchedulerSettingsCard.js';
 import type { SchedButtonInjected } from './components/SchedButton.js';
 import type { ScheduleDockInjected } from './components/ScheduleDock.js';
 import type { ClientAttachment } from './types.js';
-import type { CommandOutcome } from '../command-outcome.js';
 import { mountSessionPresence, type PresenceLocaleLike } from './session-presence.js';
 import {
   createScheduleSummaryStore,
@@ -65,6 +64,8 @@ const NS = 'settings.plugins.later';
  * 都写在 runtime-augment.d.ts。
  */
 const _dockSeatProbe: LaterDockSeatProbe = true;
+// 纯类型断言探针：只为让 tsc 校验插槽可赋值性，运行期无意义。
+void _dockSeatProbe;
 
 /** Settings 命名空间（必须与 host 端注册的字符串一致：dsh-later）。 */
 const SETTINGS_NS = 'dsh-later';
