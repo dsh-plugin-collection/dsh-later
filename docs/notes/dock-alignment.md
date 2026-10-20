@@ -121,4 +121,16 @@
 6. **源码级正则断言：匹配前先剥注释。** 本仓大量断言是对源文件文本跑正则，而注释里的三行 `//` 说明会**切断跨行匹配**——实测踩过：`#39` 的字段漂移锁因为 serializer 里一段注释被打断，把**已经输出**的 `delivery_mode` 误报成漂移，看起来像实现有 bug，其实是断言写错。新写这类断言时先剥 `//` 与 `/* */`，并在注释里说明为什么剥。
 7. **变异验证必须双向断言。** 只断言"变异后变红"不成立——变异脚本自身有 bug（例如 `before`/`after` 用了同一组下标，等于没变异）时，那一排 ✅ 全是绿的，看起来像做过完整验证，实际一次有效变异都没发生。正确形态是同时要求**变异前该绿的绿**（`holdsBefore === true`）与**变异后该红的红**，任一不满足即判该次验证无效。这条比任何单条锁都贵，因为它决定"绿"这个数字能不能信。
 8. **`data-*` 探针分两类，只有第二类必须锁。** 样式钩子（`.ss-*` 类名）改名后果是视觉变化、肉眼可查，不强制断言；**验证接口**（被测试或真机定位使用的 `data-ss-dock`、`data-ss-dock-row`、`data-ss-dock-attachments`、`data-ss-attach` 取值集合）视同公共接口，改名必须与断言同一次提交变更——它的失败形态是"查不到元素"，极易被误判成"dock 没渲染 / 这条没附件"，而不是"探针没了"。现状核实（`216f93d`）：4 个探针中 3 个曾无锁，已由 #39 第 11 项补齐。
+10. **宿主 rc 升级必查两项（管子耦合的唯一护栏）**。#41 的 B2 方案借宿主 QueueDock 根上的 `[data-queue-dock]` 做相邻兄弟检测 —— 那是宿主**私有属性**，改名不违反任何契约。`docs/design-decisions.md` §8 曾写"已追加进 rc 升级 checklist"，但当时**无处可查**（本条即补那个"处"，别再让声明悬空）。两项检查与判据：
+
+   ```sh
+   H=~/.npm/_npx/*/node_modules/@deepseek-ai   # 安装态宿主
+   # A. 借的那个 hook 还在不在 dock 根上
+   grep -o 'data-queue-dock' $H/dsh-client-ui-conversation/lib/client.js
+   # B. queue 面板是否仍是 attach 式：顶圆角 + 底直角（0 0）
+   grep -o '_panel{[^}]*border-radius:[^;]*' $H/dsh-client-ui-conversation/lib/client.js
+   ```
+
+   A 空 / B 不再是 `var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0` → **管子静默退化为修复前观感**（圆角相撞、双描边），不会报错、不会变红，只有肉眼看得到。此时要么改选择器适配，要么回到 #43 推宿主提供 dock 栈契约。哈希前缀（`_panel` 前的 `_xxxx_` 段）随构建变化，**用后缀匹配，别锁整串**。
+
 9. **`every` 跨轮是否丢附件：已查证，不需要行为级测试。** `advanceEvery`（`src/projection.ts`）返回 `{ ...record, scheduledAt: 新时刻 }`——**只换 `scheduledAt`，`record.id` 跨轮保持不变**；而投递侧 `attachmentsOf(record.id)` 按 id 取，故每轮取到同一批附件。结论：`#39` 第 5 项的源码级锁已经足够，补 FakeAgent/FakeSession 那套重假件只是在锁一个不会变的东西。**若将来出现"换轮换新 id"的路径，这条结论作废**，届时第 5 项必须升级为行为级。
