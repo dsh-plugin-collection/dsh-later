@@ -288,6 +288,35 @@
     这也补上了 #54 交接里"0.2.1 内核下的最终 typecheck 未验"那一项 —— 该错误码是在真实 0.2.1
     类型面下编译通过的，不是在 0.2.0 上"看起来没问题"。
 
+## 会话日志兼容：`session-scheduler/user-schedule`（#58，2026-10-20 定案）
+
+插件在 1.4.0 之前把「定时任务所有权」写进会话日志（自定义事件类型），之后改存 sidecar。
+旧日志里那些记录仍在，而宿主持久层对**不认识的类型**是**整份拒读**：
+
+```js
+// dsh-session-persistence/lib/index.js
+if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
+  throw unsupported(`… unknown to this harness and not marked ignorable; refusing to interpret the log …`)
+```
+
+- **上游立场**：事件名注册**不是**兼容机制。`dsh-session/lib/types/known-event-types.d.ts` 的注释写着
+  「event-name registration was rejected … would make reads composition-dependent」。上游认的是 envelope 的
+  `ignorable: true`（未知但标记为可忽略的记录按 log-only 保留、正常读过去）。
+- **决定（#58 C 路线）**：删掉启动时的读兼容注册；旧日志改由 `scripts/migrate-owned-events.mjs`
+  一次性迁移——只给这些记录补 `ignorable: true`，不动 `seq`、不动 `type`（**不能删行**：读路径要求
+  seq 连续，删行会造出缺口反而更读不了）。脚本默认 dry-run、`--apply` 时先备份、幂等可重跑。
+- **暴露面（实测，不是 grep）**：会话日志是 `session.v*.jsonl.zstd`，`grep` 读不进去。
+  按 zstd 解压 + JSON `type` 精确匹配扫全库：**1666 份日志（v3 813 / v4 853）→ 0 份命中**。
+  并且该事件在 `2026-09-10`（`80c8775` sidecar 化）就停止写入，而最早 release `v1.0.0` 是
+  `2026-09-12` —— **没有任何已发布版本写过它**，受影响面只可能是 2026-08-26 至 09-10 之间从 git
+  直装的开发版。
+  （教训：用 `grep` 扫压缩日志会同时给出假阳性和假阴性；第一次重扫时 46 个"命中"全是 `tool/result`
+  里**文本提到**这个类型名。）
+- **迁移不能承诺什么**：它让**会话历史**重新可读，但**不保证**插件从那批老日志恢复提醒状态 ——
+  1.4.0 起 sidecar 才是权威；V3 老日志在 V4 读取时还会把未知 ignorable 事件重命名进 `plugin:`
+  命名空间。`src/user-tools.ts` / `src/projection.ts` 里按 `OWNED_EVENT` 读取的代码保留（对未迁移的
+  环境仍是防御性分支），但不再是状态来源。
+
 ## 验收对照（v1.0.0）
 
 | 编号 | 场景 | 落地 |
