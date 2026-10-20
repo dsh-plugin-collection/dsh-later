@@ -372,9 +372,11 @@ test('单块图片加载失败只退化该块：每块独立实例 + 独立状�
     '每块必须是独立组件实例（key 唯一），否则 state 会在块间串用');
 
   const thumb = sliceFrom(component, 'function DockThumb(', 'DockThumb');
-  assert.match(thumb, /const \[failed, setFailed\]/, '失败态挂在每块自己身上');
+  // 失败态挂在每块自己身上；#58 起从布尔 `failed` 升级为**分类**（待发送 vs 真失败），
+  // 但"每块独立、拒绝只影响本块"这条不变。
+  assert.match(thumb, /const \[failure, setFailure\]/, '失败态挂在每块自己身上');
   assert.match(thumb, /let alive = true/, '卸载后不得 setState（宿主 QueueThumb 同款）');
-  assert.match(thumb, /if \(alive\) setFailed\(true\)/, '拒绝分支存在且不牵连同带其它块');
+  assert.match(thumb, /if \(alive\) setFailure\(classifyAttachmentFailure\(error\)\)/, '拒绝分支存在且不牵连同带其它块');
   assert.match(thumb, /attachment_id/, '加载依赖按 attachment_id 而非 block 对象——dock 每秒 tick 会重建对象，按对象依赖等于每秒重启加载');
 });
 
