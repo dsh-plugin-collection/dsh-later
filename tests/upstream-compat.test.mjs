@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { ScheduleInputError } from '@deepseek-ai/dsh-schedule';
 import { createAfterRecord as createAfterScheduleRecord } from '../lib/schedule-compat.js';
 import {
   KERNEL_GENERATIONS,
@@ -22,7 +23,7 @@ import {
   readInheritedEventCount,
   readOwnEvents,
 } from '../lib/upstream-compat.js';
-import { foldUserState } from '../lib/user-tools.js';
+import { foldUserState, toInputError } from '../lib/user-tools.js';
 import { Config } from '../lib/index.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -232,7 +233,28 @@ test('dev 与运行时代次的对齐说明（防止再次悄悄脱节）', () =
   const dev = pkg.devDependencies['@deepseek-ai/dsh-agent'].replace(/^[\^~]/, '');
   // 这条断言记录「本地开发用的代次」；升级依赖时同步更新此常量，
   // 使代次变更在 diff 中显式可见，而不是被 install 悄悄改掉。
-  assert.equal(dev, '0.2.0-rc.2', 'devDependency 代次变更需同时更新本断言');
+  assert.equal(dev, '0.2.1-rc.2', 'devDependency 代次变更需同时更新本断言');
+});
+
+/**
+ * `dsh-schedule@0.2.1-rc.2` 把 `ScheduleInputError.code` 扩了一个
+ * `subagent_session`（目标 Session 属于委派子代理 → 投递永远到不了）。
+ *
+ * 本插件不经过 `ScheduleService` 的写路径，因此自身不会产生该码；但
+ * `toInputError` 是上游闭包的**直通翻译器**，上游一多码、本地联合没跟上，
+ * 升级依赖时就会变成编译错误。这条测试把「翻译器不吞码」钉在运行期
+ * （类型面由 tsc 保证，运行期别把码改写成 internal_error 才算真兼容）。
+ */
+test('toInputError：上游 0.2.1 新增的 subagent_session 码原样透出', () => {
+  const upstream = new ScheduleInputError(
+    'subagent_session',
+    'This Session belongs to subagent routing, which never receives reminder delivery.',
+  );
+  const result = toInputError(upstream);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'subagent_session');
+  // 非 ScheduleInputError 仍收敛到稳定的内部错误，不泄露异常细节
+  assert.equal(toInputError(new Error('boom')).code, 'internal_error');
 });
 
 test('readOwnEvents：legacy 读 .events，modern 优先 ownEvents()', () => {

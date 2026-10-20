@@ -52,8 +52,37 @@ export declare function validatePrompt(raw: unknown, limits: PromptLimits): {
     ok: true;
     value: string;
 } | UserScheduleError;
-/** 用户工具稳定的闭包错误集合（在 dsh-schedule 闭包之上追加本插件专用码）。 */
-export type UserScheduleErrorCode = 'invalid_prompt' | 'invalid_selector' | 'invalid_time_zone' | 'not_future' | 'time_out_of_range' | 'frequency_too_high' | 'invalid_rule' | 'schedule_not_found' | 'already_overdue' | 'quota_exceeded' | 'persistence_uncertain' | 'unsupported_kind' | 'not_paused' | 'internal_error';
+/**
+ * 用户工具稳定的闭包错误集合（在 dsh-schedule 闭包之上追加本插件专用码）。
+ *
+ * `subagent_session` 来自 dsh-schedule 0.2.1（实测 0.2.1-rc.2）：上游对
+ * 「委派深度 > 0 的子 agent 会话」拒绝武装投递——`ScheduleService.create`
+ * 抛 `ScheduleInputError('subagent_session')`，`update` 返回同名非变更结果。
+ *
+ * 本插件**不在工具层重复这条深度守卫**，因为两边在官方宿主上构造等价：
+ *   - 用户工具只在 `agent/created` 且 `ctx.agents.roots()` 命中时注册
+ *     （src/index.ts 的 later.userToolsLifecycle()）。`roots()` 只含「没有
+ *     owning agent context」的顶层 agent；而子 agent 无论首建还是冷恢复都经
+ *     `ownerCtx.agents.create|resume({ parentAgent })` 创建（dsh-subagent 的
+ *     child-agent/materialize），必然带 owner，永远进不了 `roots()`，也就
+ *     拿不到本工具这条 create 通道。
+ *   - 子 agent 的会话头同时被 stamp `origin:'subagent'` 与
+ *     `delegationDepth = parent+1`；官方会话控制器对 `origin === 'subagent'`
+ *     的普通 resume 直接拒绝（session/agent-busy），因此「深度 > 0 却以 root
+ *     身份存活」的会话在官方路径上不可构造。
+ *   结论：`delegationDepthOf(agent) > 0` 的 agent 本就不是本插件的注册对象，
+ *   再加一次深度判断只会复制上游规则。本码仅作为**类型闭包**的一部分，接住
+ *   上游未来可能经 toInputError 透传的同名 code；上游继续增码时由
+ *   tests/error-code-superset.test.mjs 从实际类型声明里取联合、断言本类型是
+ *   它的超集。
+ *
+ * 为什么"本插件不产生它"仍必须登记：`toInputError` 是上游闭包的**直通翻译器**
+ * （`code: error.code`），本类型少一个成员就不是超集 —— 0.2.1 升级时 tsc 会如实
+ * 报 TS2322，而不是在运行期把新码折叠成 `internal_error`。另外本插件的写路径不经过
+ * `ScheduleService`（自己 append `schedule/change` 再 fold），所以即便在同代次下，
+ * 该码也只能从上游侧透传进来，不能由本插件自己编造。
+ */
+export type UserScheduleErrorCode = 'invalid_prompt' | 'invalid_selector' | 'invalid_time_zone' | 'not_future' | 'time_out_of_range' | 'frequency_too_high' | 'invalid_rule' | 'subagent_session' | 'schedule_not_found' | 'already_overdue' | 'quota_exceeded' | 'persistence_uncertain' | 'unsupported_kind' | 'not_paused' | 'internal_error';
 /** 封闭错误值。 */
 export interface UserScheduleError {
     readonly ok: false;
