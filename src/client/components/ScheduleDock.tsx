@@ -29,6 +29,7 @@ import type { SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
 import { useSchedT, type SchedTranslate } from '../useSchedT.js';
 import type { CommandOutcome } from '../../command-outcome.js';
+import { classifyAttachmentFailure, type AttachmentImageFailure } from '../../attachment-failure.js';
 import {
   barSegments,
   barWindow,
@@ -113,6 +114,13 @@ export interface ScheduleDockInjected {
    * 镜像声明，属另一处修正。
    */
   loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
+  /**
+   * 同步取宿主的图片缓存（`uiConversation.peekImageUrl`）。
+   *
+   * 有它就能在**不发请求**的情况下直接显示缩略图（例如同一会话里刚上传过、宿主缓存
+   * 还热着）。取不到时返回 undefined，组件照常走 `loadImage`。
+   */
+  peekImage?: (sessionId: string, ref: ClientAttachment) => string | undefined;
 }
 
 /**
@@ -161,7 +169,7 @@ function canPause(item: ClientSchedule, now: number): boolean {
   return Number.isFinite(epoch) && epoch > now;
 }
 
-export function ScheduleDock({ callCommand, loadImage, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
+export function ScheduleDock({ callCommand, loadImage, peekImage, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
   const now = useNow(1000);
   // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
   // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
@@ -700,7 +708,7 @@ export function ScheduleDock({ callCommand, loadImage, sessionId, useProjection,
             max-width:55% 折中我们不需要）。放在进度条**之前**，保证条仍贴底、
             不被附件挤出可视区（#16 的条长一致性回归不受影响）。
           */}
-          <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} />
+          <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} />
           <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
             <span className="ss-dock-steer-err">{steerErr.get(item.id) ?? pauseErr.get(item.id)}</span>
@@ -1137,11 +1145,13 @@ function DockAttachments({
   t,
   sessionId,
   loadImage,
+  peekImage,
 }: {
   item: ClientSchedule;
   t: ScheduleDockTranslate;
   sessionId?: string;
   loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
+  peekImage?: (sessionId: string, ref: ClientAttachment) => string | undefined;
 }): JSX.Element | null {
   const blocks = item.attachments;
   // 无附件时该键根本不出现（#37 契约）；元数据缺失也走这条，行回到两带，不占位不报错。
@@ -1162,7 +1172,7 @@ function DockAttachments({
         // 同一附件可能被多次写法逐条复用，key 用「引用 + 序号」保证同带内唯一。
         // ⚠️ 这里不能用 `ref` 当 prop 名——React 会把它当 callback ref 吃掉。
         block.kind === 'image'
-          ? <DockThumb key={`${block.attachment_id}:${index}`} block={block} t={t} sessionId={sessionId} loadImage={loadImage} />
+          ? <DockThumb key={`${block.attachment_id}:${index}`} block={block} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} />
           : <DockFileChip key={`${block.attachment_id}:${index}`} block={block} t={t} />
       ))}
       {extra > 0 && (
@@ -1183,14 +1193,16 @@ function DockThumb({
   t,
   sessionId,
   loadImage,
+  peekImage,
 }: {
   block: ClientAttachment;
   t: ScheduleDockTranslate;
   sessionId?: string;
   loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
+  peekImage?: (sessionId: string, ref: ClientAttachment) => string | undefined;
 }): JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<AttachmentImageFailure | null>(null);
   /**
    * 依赖里放 `attachment_id` 而**不是 block 对象**：dock 每秒 tick 重渲染，
    * 而 `schedules` 每帧都由 `.map()` 造出新的块对象——按对象依赖等于每秒重启一次
@@ -1202,13 +1214,23 @@ function DockThumb({
   useEffect(() => {
     // 服务缺失（旧宿主组合）或没有会话上下文：不发请求，直接走可读降级。
     if (loadImage === undefined || sessionId === undefined) return undefined;
+
+    // 宿主缓存命中就同步显示 —— 既不闪占位，也避开「未被会话引用」的拒绝。
+    const cached = peekImage?.(sessionId, blockRef.current);
+    if (cached !== undefined) {
+      setUrl(cached);
+      return undefined;
+    }
+
     let alive = true;
     loadImage(sessionId, blockRef.current).then(
       (resolved) => {
         if (alive) setUrl(resolved);
       },
-      () => {
-        if (alive) setFailed(true);
+      (error: unknown) => {
+        // 「未被本会话引用」= 待发送提醒的**预期状态**（到点发送后才可见），
+        // 与真正的读取失败分开渲染，别把预期说成损坏。
+        if (alive) setFailure(classifyAttachmentFailure(error));
       },
     );
     // 卸载后不得 setState（宿主 QueueThumb 同款 alive 标志）。
@@ -1227,18 +1249,23 @@ function DockThumb({
   if (url !== null) {
     return <img className="ss-dock-thumb" data-ss-attach="image" src={url} alt={t('attachmentImage')} />;
   }
-  if (failed) {
+  if (failure !== null) {
     /*
-     * 字节不可用，但元数据是随块带出来的 → 退化成「图片不可用 + 大小」的可读 chip，
-     * 而不是像宿主那样无声消失。这一层是宿主没有的。
+     * 字节读不到时退化成「文字 + 大小」的可读 chip，而不是像宿主那样无声消失。
+     * 两种性质必须分开说（见 attachment-failure.ts）：
+     * - pending-send：待发送提醒的附件在发出前不会被日志引用，宿主据此拒绝读取。
+     *   这是预期状态，到点会随消息一起发出（实测过），说成「不可用」会误导。
+     * - unavailable：真读不到（服务缺失/字节损坏），那才是异常。
      */
+    const pending = failure === 'pending-send';
+    const label = pending ? t('attachmentPendingSend') : t('attachmentUnavailable');
     return (
       <span
         className="ss-dock-file ss-dock-thumb-fallback"
-        data-ss-attach="image-unavailable"
-        aria-label={t('attachmentUnavailable')}
+        data-ss-attach={pending ? 'image-pending-send' : 'image-unavailable'}
+        aria-label={label}
       >
-        <span className="ss-dock-file-name">{t('attachmentUnavailable')}</span>
+        <span className="ss-dock-file-name">{label}</span>
         {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeText(block.bytes)}</span>}
       </span>
     );

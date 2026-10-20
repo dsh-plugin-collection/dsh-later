@@ -391,6 +391,21 @@ function apply(ctx: Context): void {
   };
 
   /**
+   * 同步取宿主缓存里的图片 URL（`uiConversation.peekImageUrl`）。命中时 dock 无需发请求、
+   * 也不会撞上「未被会话引用」的拒绝；未命中返回 undefined，交给 `loadAttachmentUrl`。
+   */
+  const peekAttachmentUrl = (sessionId: string, ref: ClientAttachment): string | undefined => {
+    const face = ctx.get('uiConversation') as {
+      peekImageUrl?(id: string, attachment: Record<string, unknown>): string | undefined;
+    } | undefined;
+    if (typeof face?.peekImageUrl !== 'function') return undefined;
+    return face.peekImageUrl(sessionId, {
+      attachmentId: ref.attachment_id,
+      ...(ref.media_type !== undefined ? { mediaType: ref.media_type } : {}),
+    });
+  };
+
+  /**
    * 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，
    * 不依赖设置服务，因此在顶层无条件注册。
    *
@@ -416,7 +431,7 @@ function apply(ctx: Context): void {
           // `loadImage` 是**可选**注入：内部按 `ctx.get('uiConversation')` 取，取不到
           // 时组件自动降级（见 loadAttachmentUrl 的注释）。它不构成激活依赖，所以 dock
           // 仍在顶层无条件注册——**不要**因此把 `uiConversation` 加进模块级 inject。
-          inject: () => ({ callCommand, loadImage: loadAttachmentUrl } as ScheduleDockInjected),
+          inject: () => ({ callCommand, loadImage: loadAttachmentUrl, peekImage: peekAttachmentUrl } as ScheduleDockInjected),
         },
         ScheduleDock,
       ),

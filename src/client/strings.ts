@@ -110,6 +110,7 @@ const zh = {
   /** 附件带 a11y（#38）：措辞结构对齐宿主 `queue.image` / `queue.file`，但把「排队」换成「提醒」。 */
   attachmentImage: '提醒图片',
   attachmentFile: '提醒文件 {name}',
+  attachmentPendingSend: '发送后可见',
   attachmentUnavailable: '图片不可用',
   attachmentMore: '另有 {n} 个附件未列出',
 } as const;
@@ -189,6 +190,7 @@ const en: { [K in keyof typeof zh]: string } = {
   relClock: '{time}',
   attachmentImage: 'Reminder image',
   attachmentFile: 'Reminder file {name}',
+  attachmentPendingSend: 'Available after send',
   attachmentUnavailable: 'Image unavailable',
   attachmentMore: '{n} more attachment(s)',
 };

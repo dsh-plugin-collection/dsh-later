@@ -118,13 +118,22 @@ test('uiConversation 绝不进模块级 inject（#34 事故的复发防线）', 
   assert.match(entry, /ctx\.get\('uiConversation'\)/, '必须用可选 get 取该服务');
 });
 
-test('拿不到服务时降级但不消失：能力缺失与读失败是两种形态', () => {
+test('拿不到服务时降级但不消失：能力缺失 / 待发送 / 真失败是三种形态', () => {
   // 能力缺失（这台宿主本来没这能力）→ 图片位不渲染，不刷「图片不可用」。
   assert.match(thumb, /if \(loadImage === undefined \|\| sessionId === undefined\) return null;/);
-  // 读失败（本该有却拿不到）→ 退化成可读 chip，比宿主的无声占位多做一层。
-  assert.match(thumb, /if \(failed\) \{/);
-  assert.match(thumb, /data-ss-attach="image-unavailable"/);
+  // 读不到 → 退化成可读 chip，比宿主的无声占位多做一层，且按性质分两种：
+  assert.match(thumb, /if \(failure !== null\) \{/);
+  assert.match(thumb, /data-ss-attach=\{pending \? 'image-pending-send' : 'image-unavailable'\}/,
+    '待发送（未被会话引用）与真失败必须分开渲染');
+  assert.match(thumb, /classifyAttachmentFailure\(error\)/, '失败性质必须经分类器判定，不能在组件里猜字符串');
   assert.match(thumb, /fileSizeText\(block\.bytes\)/, '失败时仍显示大小');
+});
+
+test('缩略图先查宿主缓存（peekImageUrl），命中就不发请求', () => {
+  assert.match(thumb, /const cached = peekImage\?\.\(sessionId, blockRef\.current\);/, '先同步 peek');
+  assert.match(thumb, /if \(cached !== undefined\) \{/, '命中即用，不发请求');
+  assert.match(entry, /peekImageUrl\?\(id: string/, 'index 侧通过可选 peekImageUrl 取缓存');
+  assert.match(entry, /peekImage: peekAttachmentUrl/, 'peek 能力必须注入 dock');
 });
 
 test('每块独立异步加载 + alive 标志，且依赖不能用块对象（dock 每秒 tick）', () => {
@@ -141,7 +150,7 @@ test('超出上限给 +N，且 a11y 有独立标签', () => {
 });
 
 test('四个新词条 zh/en 双语齐全（注册源是 strings.ts，见 #28 双出口）', () => {
-  for (const key of ['attachmentImage', 'attachmentFile', 'attachmentUnavailable', 'attachmentMore']) {
+  for (const key of ['attachmentImage', 'attachmentFile', 'attachmentPendingSend', 'attachmentUnavailable', 'attachmentMore']) {
     assert.equal(count(strings, `${key}:`), 2, `${key} 必须 zh/en 各一条`);
   }
 });
