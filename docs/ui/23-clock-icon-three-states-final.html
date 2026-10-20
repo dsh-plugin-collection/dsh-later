@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 新版时钟图标 · 三态预览（还原动画差异）</title>
+<style>
+  :root {
+    color-scheme: dark light;
+    --page-bg: #17181b;
+    --page-fg: #e8e9ec;
+    --page-dim: #9aa0a8;
+    --page-line: #2c2f35;
+    --page-soft: #1f2126;
+    --page-accent: #3b82f6;
+    --sidebar-bg: #0f1012;
+    --sched: #8b5cf6;
+    --urgent: #f59e0b;
+    --overdue: #f25a5a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --page-bg: #ffffff; --page-fg: #1b1d21; --page-dim: #6b7280;
+      --page-line: #e5e7eb; --page-soft: #f6f7f9;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: var(--page-bg); color: var(--page-fg);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .lede { color: var(--page-dim); margin: 0 0 32px; font-size: 13px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--page-dim); margin: 40px 0 16px; font-weight: 600;
+  }
+
+  .panel {
+    background: var(--page-soft); border: 1px solid var(--page-line);
+    border-radius: 10px; padding: 20px; margin-bottom: 24px;
+  }
+  .panel-title {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--page-dim); margin-bottom: 16px;
+  }
+
+  /* 侧栏会话行 */
+  .sidebar { background: var(--sidebar-bg); border-radius: 8px; padding: 8px; }
+  .session-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; line-height: 20px; color: var(--page-fg);
+  }
+  .session-row:hover { background: rgba(255,255,255,0.04); }
+  .slot { display: inline-flex; flex: none; align-items: center; justify-content: center; }
+  .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .time { color: var(--page-dim); font-size: 12px; flex: none; }
+
+  /* 宿主 spinner */
+  .h-spinner { flex: none; width: 14px; height: 14px; color: var(--page-dim); }
+  .h-spinner .motion { transform-origin: center; animation: dsh-spin 1.5s linear infinite; }
+  .h-spinner .track { fill: none; stroke: currentColor; opacity: .25; stroke-width: 2; }
+  .h-spinner .arc {
+    fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+    stroke-dasharray: 18 150; animation: dsh-dash 1.5s ease-in-out infinite;
+  }
+  @keyframes dsh-spin { to { transform: rotate(360deg); } }
+  @keyframes dsh-dash {
+    0% { stroke-dasharray: 2 150; stroke-dashoffset: 0; }
+    50% { stroke-dasharray: 100 150; stroke-dashoffset: -24; }
+    100% { stroke-dasharray: 2 150; stroke-dashoffset: -124; }
+  }
+
+  /* 新版时钟 badge — 三态动画差异 */
+  .clk-modern { display: inline-flex; flex: none; }
+  .clk-modern .face {
+    fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+  }
+  .clk-modern .hand { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .clk-modern .hand-m { opacity: .85; }
+
+  /* scheduled: 慢呼吸 2.4s */
+  .clk-scheduled { color: var(--sched); }
+  .clk-scheduled .face { animation: ss-clock-breathe 2.4s ease-in-out infinite; }
+  @keyframes ss-clock-breathe { 0%,100% { opacity: .65; } 50% { opacity: 1; } }
+
+  /* urgent: 快脉冲 0.9s */
+  .clk-urgent { color: var(--urgent); }
+  .clk-urgent .face { animation: ss-clock-pulse 0.9s ease-in-out infinite; }
+  @keyframes ss-clock-pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+
+  /* overdue: 静止 */
+  .clk-overdue { color: var(--overdue); }
+  .clk-overdue .face { animation: none; opacity: 1; }
+
+  /* 状态标签 */
+  .state-tag {
+    display: inline-block; font-size: 11px; padding: 2px 8px;
+    border-radius: 4px; color: #fff; font-weight: 500; margin-left: 8px;
+  }
+  .state-tag.scheduled { background: var(--sched); }
+  .state-tag.urgent { background: var(--urgent); }
+  .state-tag.overdue { background: var(--overdue); }
+
+  /* 放大预览 */
+  .zoom-row {
+    display: flex; align-items: center; gap: 48px;
+    padding: 24px 20px 8px; justify-content: center;
+  }
+  .zoom-item { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .zoom-label { font-size: 11px; color: var(--page-dim); text-align: center; }
+  .zoom-item .z { transform: scale(5); transform-origin: center; margin-bottom: 30px; }
+
+  .note {
+    font-size: 12px; color: var(--page-dim); margin-top: 12px;
+    padding: 10px 12px; background: var(--page-soft);
+    border-left: 3px solid var(--page-accent); border-radius: 4px;
+  }
+  .panel .note { background: var(--page-bg); }
+  .note code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+  @media (prefers-color-scheme: light) {
+    .note code { background: rgba(0,0,0,0.06); }
+  }
+
+  /* 对比表 */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--page-line); vertical-align: top; }
+  th { color: var(--page-dim); font-weight: 600; font-size: 12px; }
+  td code { background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  @media (prefers-color-scheme: light) {
+    td code { background: rgba(0,0,0,0.06); }
+  }
+
+  .arrow { color: var(--page-accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>新版时钟图标 · 三态预览（还原动画差异）</h1>
+  <p class="lede">
+    旧版点阵时钟三态<strong>不只是颜色不同，动画也不同</strong>。新版完整还原：
+    scheduled 慢呼吸、urgent 快脉冲、overdue 静止。
+  </p>
+
+  <!-- ============ 1. 旧版三态行为回顾 ============ -->
+  <h2>1. 旧版三态行为（实测源码）</h2>
+  <div class="panel">
+    <div class="panel-title">styles.ts 中的三态样式（旧版）</div>
+    <table>
+      <tr>
+        <th>状态</th>
+        <th>颜色</th>
+        <th>表盘环动画</th>
+        <th>语义</th>
+      </tr>
+      <tr>
+        <td><code>scheduled</code></td>
+        <td><code>#8b5cf6</code> 定时紫</td>
+        <td><code>ss-presence-breathe</code><br/>opacity .65↔1, <strong>2.4s</strong></td>
+        <td>慢呼吸 — 正常等待，无紧迫感</td>
+      </tr>
+      <tr>
+        <td><code>urgent</code></td>
+        <td><code>var(--dsw-alias-state-warn-secondary)</code> 琥珀</td>
+        <td><code>ss-presence-pulse</code><br/>opacity .5↔1, <strong>0.9s</strong></td>
+        <td>快脉冲 — 紧迫！≤5min 即将触发</td>
+      </tr>
+      <tr>
+        <td><code>overdue</code></td>
+        <td><code>var(--dsw-alias-state-error-primary)</code> 红</td>
+        <td><code>none</code>（静止）</td>
+        <td>停止 — 已到期，等待会话空闲发送</td>
+      </tr>
+    </table>
+    <div class="note">
+      <strong>关键差异：</strong>urgent 的动画周期（0.9s）比 scheduled（2.4s）快 <strong>2.67 倍</strong>，
+      且 opacity 下限更低（.5 vs .65），视觉上更"急促"。overdue 完全静止，表达"已停止等待处理"。
+    </div>
+  </div>
+
+  <!-- ============ 2. 新版三态实景 ============ -->
+  <h2>2. 新版三态实景（完整还原）</h2>
+  <div class="panel">
+    <div class="panel-title">侧栏会话行中的三态表现</div>
+    <div class="sidebar">
+      <div class="session-row">
+        <span class="slot">
+          <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+            <g class="motion">
+              <circle class="track" cx="12" cy="12" r="9.5"/>
+              <circle class="arc" cx="12" cy="12" r="9.5"/>
+            </g>
+          </svg>
+        </span>
+        <span class="clk-modern clk-scheduled">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="face" cx="12" cy="12" r="9.5"/>
+            <g class="hand">
+              <line class="hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+              <line class="hand-m" x1="12" y1="12" x2="17" y2="12"/>
+            </g>
+          </svg>
+        </span>
+        <span class="title">定时提醒会话</span>
+        <span class="time">刚刚</span>
+        <span class="state-tag scheduled">scheduled</span>
+      </div>
+      <div class="session-row">
+        <span class="slot">
+          <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+            <g class="motion">
+              <circle class="track" cx="12" cy="12" r="9.5"/>
+              <circle class="arc" cx="12" cy="12" r="9.5"/>
+            </g>
+          </svg>
+        </span>
+        <span class="clk-modern clk-urgent">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="face" cx="12" cy="12" r="9.5"/>
+            <g class="hand">
+              <line class="hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+              <line class="hand-m" x1="12" y1="12" x2="17" y2="12"/>
+            </g>
+          </svg>
+        </span>
+        <span class="title">紧急提醒会话（2 分钟后触发）</span>
+        <span class="time">刚刚</span>
+        <span class="state-tag urgent">urgent</span>
+      </div>
+      <div class="session-row">
+        <span class="slot">
+          <svg class="h-spinner" viewBox="0 0 24 24" aria-hidden="true">
+            <g class="motion">
+              <circle class="track" cx="12" cy="12" r="9.5"/>
+              <circle class="arc" cx="12" cy="12" r="9.5"/>
+            </g>
+          </svg>
+        </span>
+        <span class="clk-modern clk-overdue">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="face" cx="12" cy="12" r="9.5"/>
+            <g class="hand">
+              <line class="hand-h" x1="12" y1="12" x2="12" y2="6.5"/>
+              <line class="hand-m" x1="12" y1="12" x2="17" y2="12"/>
+            </g>
+          </svg>
+        </span>
+        <span class="title">到期提醒会话（等待发送）</span>
+        <span class="time">5 分钟前</span>
+        <span class="state-tag overdue">overdue</span>
+      </div>
+    </div>
+    <div class="note">
+      <strong>三态差异完整还原：</strong><br>
+      • <code>scheduled</code> → 紫色 + 慢呼吸（2.4s）— 正常等待<br>
+      • <code>urgent</code> → 琥珀 + 快脉冲（0.9s）— 紧迫！<br>
+      • <code>overdue</code> → 红色 + 静止 — 已到期等待处理
+    </div>
+  </div>
+
+  <!-- ============ 3. 放大对比 ============ -->
+  <h2>3. 放大 5× · 三态动画对比</h2>
+  <div class="panel">
+    <div class="panel-title">同一几何，三种颜色 + 三种动画</div>
+    <div class="zoom-row">
+      <div class="zoom-item">
+        <svg class="z" width="14" height="14" viewBox="0 0 24 24" style="color:#8b5cf6">
+          <circle class="face" cx="12" cy="12" r="9.5" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round"
+                  style="animation: ss-clock-breathe 2.4s ease-in-out infinite;"/>
+          <line x1="12" y1="12" x2="12" y2="6.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="12" y1="12" x2="17" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <span class="zoom-label">scheduled<br/><code>#8b5cf6</code><br/>呼吸 2.4s</span>
+      </div>
+      <div class="zoom-item">
+        <svg class="z" width="14" height="14" viewBox="0 0 24 24" style="color:#f59e0b">
+          <circle class="face" cx="12" cy="12" r="9.5" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round"
+                  style="animation: ss-clock-pulse 0.9s ease-in-out infinite;"/>
+          <line x1="12" y1="12" x2="12" y2="6.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="12" y1="12" x2="17" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <span class="zoom-label">urgent<br/><code>#f59e0b</code><br/>脉冲 0.9s</span>
+      </div>
+      <div class="zoom-item">
+        <svg class="z" width="14" height="14" viewBox="0 0 24 24" style="color:#f25a5a">
+          <circle class="face" cx="12" cy="12" r="9.5" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round"
+                  style="animation: none; opacity: 1;"/>
+          <line x1="12" y1="12" x2="12" y2="6.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="12" y1="12" x2="17" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <span class="zoom-label">overdue<br/><code>#f25a5a</code><br/>静止</span>
+      </div>
+    </div>
+    <div class="note">
+      <strong>动画语义：</strong><br>
+      • <code>ss-clock-breathe</code>（2.4s）：慢呼吸，表达"活着但平静"<br>
+      • <code>ss-clock-pulse</code>（0.9s）：快脉冲，表达"紧迫！快到时间了"<br>
+      • <code>none</code>：静止，表达"已停止，等待处理"
+    </div>
+  </div>
+
+  <!-- ============ 4. 新旧对比 ============ -->
+  <h2>4. 新旧三态对比</h2>
+  <div class="panel">
+    <div class="panel-title">表现层切换，语义层保留</div>
+    <table>
+      <tr>
+        <th>维度</th>
+        <th>旧版（点阵）</th>
+        <th></th>
+        <th>新版（官方风格）</th>
+      </tr>
+      <tr>
+        <td>几何</td>
+        <td><code>10×10 + fill 方块 + crispEdges</code></td>
+        <td class="arrow">→</td>
+        <td><code>24×24 + stroke 圆头线帽</code></td>
+      </tr>
+      <tr>
+        <td>scheduled 动画</td>
+        <td><code>breathe</code> opacity .65↔1, 2.4s</td>
+        <td class="arrow">→</td>
+        <td><code>breathe</code> opacity .65↔1, 2.4s（保留）</td>
+      </tr>
+      <tr>
+        <td>urgent 动画</td>
+        <td><code>pulse</code> opacity .5↔1, 0.9s</td>
+        <td class="arrow">→</td>
+        <td><code>pulse</code> opacity .5↔1, 0.9s（保留）</td>
+      </tr>
+      <tr>
+        <td>overdue 动画</td>
+        <td><code>none</code> 静止</td>
+        <td class="arrow">→</td>
+        <td><code>none</code> 静止（保留）</td>
+      </tr>
+      <tr>
+        <td>颜色</td>
+        <td>紫 / 琥珀 / 红</td>
+        <td class="arrow">→</td>
+        <td>紫 / 琥珀 / 红（保留，改用宿主 token）</td>
+      </tr>
+    </table>
+    <div class="note">
+      <strong>结论：</strong>新版只切换表现层（像素 → 描边），语义层（颜色 + 动画差异）完整保留。
+    </div>
+  </div>
+
+  <!-- ============ 5. 实现说明 ============ -->
+  <h2>5. 实现说明</h2>
+  <div class="panel">
+    <div class="panel-title">代码改动（session-presence.ts + styles.ts）</div>
+    <table>
+      <tr>
+        <th>文件</th>
+        <th>改动</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td><code>session-presence.ts</code></td>
+        <td>替换 <code>CLOCK_SVG</code> 常量</td>
+        <td>
+          旧：<code>10×10 + fill 方块 + crispEdges</code><br>
+          新：<code>24×24 + stroke 圆头线帽</code>
+        </td>
+      </tr>
+      <tr>
+        <td><code>styles.ts</code></td>
+        <td>新增三态动画类</td>
+        <td>
+          <code>.ss-clock-face</code>（scheduled 呼吸）<br>
+          <code>[data-state="urgent"] .ss-clock-face</code>（urgent 脉冲）<br>
+          <code>[data-state="overdue"] .ss-clock-face</code>（overdue 静止）
+        </td>
+      </tr>
+      <tr>
+        <td><code>styles.ts</code></td>
+        <td>保留三态颜色选择器</td>
+        <td>
+          <code>[data-state="scheduled"]</code> → <code>#8b5cf6</code><br>
+          <code>[data-state="urgent"]</code> → <code>--dsw-alias-state-warn-secondary</code><br>
+          <code>[data-state="overdue"]</code> → <code>--dsw-alias-state-error-primary</code>
+        </td>
+      </tr>
+      <tr>
+        <td><code>upstream-compat.ts</code></td>
+        <td>无改动</td>
+        <td>版本检测逻辑复用，0.1.x 继续用旧 SVG，0.2.0+ 用新 SVG</td>
+      </tr>
+    </table>
+    <div class="note">
+      <strong>插件只有一个点阵时钟图标。</strong>三种状态通过 CSS 颜色 + 动画区分，不准备三套 SVG。
+      这与旧版行为完全一致（旧版也是同一个 SVG，不同 <code>data-state</code> 不同颜色 + 动画）。
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
