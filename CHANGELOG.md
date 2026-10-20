@@ -4,6 +4,20 @@
 
 ## 未发布
 
+- **fix** 移除会话事件的「读兼容注册」，旧日志改由一次性迁移处理（#58）。
+  - 删掉启动时把 `session-scheduler/user-schedule` 加进宿主 `KNOWN_SESSION_EVENT_TYPES` 的做法。
+    上游明确否决了事件名注册这条路（`known-event-types` 注释：那会让读取变成
+    composition-dependent），它认可的兼容机制是 envelope 上的 `ignorable: true`；而且那个注册
+    只在「插件与宿主解析到同一份 `dsh-session` 实例」时有效，`link:` 开发态下已知失效。
+  - **实际上没有需要救的数据**：该事件自 2026-09-10（sidecar 化）起不再写入，最早 release
+    `v1.0.0` 是 09-12 —— 没有任何已发布版本写过它；按 zstd 解压 + JSON `type` 精确匹配扫全库，
+    1666 份会话日志里 **0 份**包含。
+  - 如果你确实留着 pre-1.4 的日志（脚本在仓库里，不随 npm 包发布）：在仓库 checkout 里跑
+    `node scripts/migrate-owned-events.mjs` 只报告（默认 dry-run），
+    加 `--apply` 才写，且先备份到 `backups/migrate-owned-events-<时间戳>/`。它只给这些记录补
+    `ignorable: true`，不动 `seq`、不动 `type`，可重复执行。
+  - 迁移不承诺的事：它让**会话历史**重新可读，但**不保证**这些老日志里的提醒状态被插件恢复
+    —— 1.4.0 起 sidecar 才是权威。
 - **fix** 新增**内核模块同源护栏**（#57）：启动时比较插件侧与宿主侧解析到的 `@deepseek-ai/dsh-*`
   是否同一份真实模块，给出 `same` / `different` / `unknown` 三态。
   - 起因是 `link:` 开发态下进程内有两份内核实例（插件侧 0.2.0、宿主 npx 那份 0.2.1），读兼容用的

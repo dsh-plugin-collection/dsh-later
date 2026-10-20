@@ -35,7 +35,7 @@ try {
   }
   console.warn(FALLBACK_ALLOWED_NOTICE);
   hostFallbackUsed = true;
-  const entries = ['src/index.ts', 'src/domain.ts', 'src/owned-event-registration.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/presence.ts', 'src/schedule-summary.ts', 'src/schedule-summary-store.ts', 'src/smart-window.ts', 'src/time-utils.ts', 'src/upstream-compat.ts', 'src/kernel-identity.ts'];
+  const entries = ['src/index.ts', 'src/domain.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/presence.ts', 'src/schedule-summary.ts', 'src/schedule-summary-store.ts', 'src/smart-window.ts', 'src/time-utils.ts', 'src/upstream-compat.ts', 'src/kernel-identity.ts'];
   for (const entry of entries) {
     const name = entry.replace('src/', '').replace('.ts', '.js');
     const result = await build({
