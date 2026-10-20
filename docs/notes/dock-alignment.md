@@ -133,4 +133,6 @@
 
    A 空 / B 不再是 `var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0` → **管子静默退化为修复前观感**（圆角相撞、双描边），不会报错、不会变红，只有肉眼看得到。此时要么改选择器适配，要么回到 #43 推宿主提供 dock 栈契约。哈希前缀（`_panel` 前的 `_xxxx_` 段）随构建变化，**用后缀匹配，别锁整串**。
 
+   真机复核不要靠肉眼：`scripts/seam-check/capture.mjs` 负责实机取帧（带安全闸：拒绝默认端口 3080、必须显式 `--allow-state-write`），`scripts/seam-check/criteria.mjs` 负责判据 1–4。用例与"矩阵齐备 8 帧"的断言在 `tests/seam-pixel-criteria.test.mjs`，采样帧在 `docs/media/seam-matrix/`。
+
 9. **`every` 跨轮是否丢附件：已查证，不需要行为级测试。** `advanceEvery`（`src/projection.ts`）返回 `{ ...record, scheduledAt: 新时刻 }`——**只换 `scheduledAt`，`record.id` 跨轮保持不变**；而投递侧 `attachmentsOf(record.id)` 按 id 取，故每轮取到同一批附件。结论：`#39` 第 5 项的源码级锁已经足够，补 FakeAgent/FakeSession 那套重假件只是在锁一个不会变的东西。**若将来出现"换轮换新 id"的路径，这条结论作废**，届时第 5 项必须升级为行为级。

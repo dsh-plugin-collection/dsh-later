@@ -18,7 +18,6 @@ import { detectTimeZone } from '../../time-utils.js';
 import { useNow } from '../useCountdown.js';
 import {
   appendPending,
-  clearPending,
   readPending,
   removePending,
   type PendingSchedule,
@@ -89,7 +88,8 @@ export function useSchedules(inject: UseSchedulesInject): UseSchedulesResult {
   const [anchorBottom, setAnchorBottom] = useState<number>(80);
   const [pendingSync, setPendingSync] = useState<PendingSchedule[]>(() => readPending());
   const rowRef = useRef<HTMLSpanElement | null>(null);
-  const now = useNow(1000);
+  // 每秒 tick：让列表里的相对时间/紧急度随时间重渲染；值本身不在此处读取。
+  useNow(1000);
 
   // 草稿：优先取 owner 快照；否则回退 useInput hook。
   const draft =

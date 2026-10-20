@@ -909,7 +909,7 @@ export function userScheduleCommands(
     description: t.cmdListDesc,
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
-      const result = await userScheduleList(invocation.agent, ctx);
+      const result = await userScheduleList(invocation.agent);
       if (!result.ok) {
         return { kind: 'error', text: `${result.code}: ${result.message}` };
       }

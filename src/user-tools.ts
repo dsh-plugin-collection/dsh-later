@@ -10,7 +10,9 @@
  * （ownership-store.ts），**不再写入会话日志**——2026-09 根治：伴生事件
  * `session-scheduler/user-schedule` 曾因宿主持久化静默丢行而留下永久 seq
  * 缺口，让整份历史被拒读。日志里若仍残留旧的伴生事件（历史日志），fold
- * 会继续读取（读兼容），但本模块不再产生它们。
+ * 会继续读取（读兼容），但本模块不再产生它们；前提是那份历史日志已按 #58 迁移
+ * （`scripts/migrate-owned-events.mjs` 补 `ignorable: true`）——未迁移时宿主持久层
+ * 会整份拒读，根本轮不到这里 fold。
  *
  * 所有读改写操作按 agent 串行化（同 dsh-schedule 的 agent-scoped 队列），
  * 保证 id 分配与 fold 不会并发竞争。
@@ -281,7 +283,12 @@ export function isValidIanaZone(value: string): boolean {
   }
 }
 
-/** 从会话日志导出「用户创建过的 schedule id 集合」（历史遗留读兼容）。 */
+/**
+ * 从会话日志导出「用户创建过的 schedule id 集合」。
+ *
+ * 只对**已迁移**的 pre-1.4 历史日志有意义（见 #58 与 `scripts/migrate-owned-events.mjs`）；
+ * 新日志不再包含该事件，本函数对它们恒为空集。
+ */
 export function foldOwnedIds(events: readonly SessionEvent[]): Set<string> {
   const owned = new Set<string>();
   for (const event of events) {
@@ -375,7 +382,7 @@ export function foldUserState(session: Session): UserFoldState {
   // 0.1.1 直接收 number。
   const folded = asLegacySchedules(foldScheduleEvents(events, inheritedEventCount as never));
   // 所有权与投递形态：sidecar 为准（新写入），日志中的历史 OWNED 事件作底
-  // （读兼容，旧日志可能仍有残留行）。
+  // （仅对已迁移的历史日志有效，见 #58：未迁移的旧日志会被宿主整份拒读）。
   const sessionId = session.header?.id;
   const owned = foldOwnedIds(events);
   const delivery = new Map(foldOwnedDelivery(events));
@@ -585,10 +592,7 @@ export async function userScheduleCreate(
 }
 
 /** `user_schedule_list` 核心实现。 */
-export async function userScheduleList(
-  agent: Agent,
-  ctx: Context,
-): Promise<UserScheduleListResult> {
+export async function userScheduleList(agent: Agent): Promise<UserScheduleListResult> {
   return runUserScheduleTransaction(agent, async () => {
     let folded;
     let owned;

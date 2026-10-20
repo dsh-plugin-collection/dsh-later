@@ -157,7 +157,7 @@ test('单 session 上限 quota_exceeded', async () => {
 test('list 只返回用户创建的任务，且含状态', async () => {
   const agent = fakeAgent();
   await userScheduleCreate(atInput, agent, fakeCtx);
-  const list = await userScheduleList(agent, fakeCtx);
+  const list = await userScheduleList(agent);
   assert.ok(list.ok);
   if (!list.ok) return;
   assert.equal(list.schedules.length, 1);

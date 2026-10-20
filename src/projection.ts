@@ -20,7 +20,6 @@ import type {
   AfterScheduleRecord,
   AtScheduleRecord,
   EveryScheduleRecord,
-  ScheduleRecord,
 } from '@deepseek-ai/dsh-schedule';
 import { OWNED_EVENT, PROJECTION_KEY } from './domain.js';
 import {
