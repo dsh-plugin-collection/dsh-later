@@ -83,7 +83,7 @@ dsh-later/
 │   ├── bar-geometry.ts           # dock 进度条窗口/比例（两侧共享）
 │   ├── strings.ts                # Host 侧用户可见文案（zh/en）
 │   ├── command-outcome.ts        # 命令受理语义（只回 matched）
-│   ├── owned-event-registration.ts / schedule-compat.ts / upstream-compat.ts  # 加载与跨代兼容
+│   ├── schedule-compat.ts / upstream-compat.ts   # 跨代兼容与内核代次（自有事件注册已随 #58 移除）
 │   └── client/
 │       ├── index.tsx             # 浏览器入口：conversation.input.right / input.dock 两个插槽注册 + 命令通道
 │       ├── styles.ts             # 单一注入的 ss- 命名空间样式串（走宿主 --dsw-* / --dsh-composer-* 变量）

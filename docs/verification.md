@@ -356,24 +356,12 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 代码中留有 `TODO(0.1.7 配置迁移)`。**这是跨 15 个插件的架构课题，不应塞进单插件适配**：
 需要先确定 profile 声明式配置的写法，再统一迁移各插件的设置面。
 
-### `dsh-later` 依赖「`KNOWN_SESSION_EVENT_TYPES` 未被冻结」
+### 已解决（2026-10-20，issue #58）：读兼容注册已移除
 
-`src/owned-event-registration.ts` 运行时 `mutate` 一个只读集合：
+历史上这里记着一条**已知限制**：插件需要 `Set.add()` 改写宿主的只读集合
+`KNOWN_SESSION_EVENT_TYPES` 才能读旧日志 —— 非官方支持面、`link:` 开发态下还会静默失效（#57）。
 
-```js
-(KNOWN_SESSION_EVENT_TYPES as unknown as Set<string>).add(OWNED_EVENT);
-```
-
-这**不是官方支持的注册面**。`dsh-session` 文档明确记载该做法被否决：
-
-> event-name registration was rejected because it does not classify omission safety
-> and would make reads composition-dependent
-
-正确的兼容机制是 envelope 上的 `ignorable: true`，但 `append()` **至今不透传该字段**
-（0.1.7 实测：`append` 只透传 `sourceEventSeqs` / `surfaceOp`）。故此处仍是必要的
-读兼容手段 —— 用于读取 2026-09 之前版本写入的历史伴生事件。
-
-**风险**：一旦上游冻结该 Set，注册会静默失败（被 `catch` 降级为 `console.warn`），
-含旧伴生事件的日志将再次被拒读。届时需改为直接改写存量日志（剥离该事件类型）。
-
-当前版本**已不再写入**该事件（所有权改存 sidecar），故不会产生新的不可读会话。
+该限制已消除：注册模块与调用已删除，旧日志改由 `scripts/migrate-owned-events.mjs` 一次性迁移
+（补 envelope 的 `ignorable: true`，不动 seq/type）。实测暴露面、为什么不删行、以及踩过的坑
+（用 `grep` 扫 zstd 日志会同时给假阴性与假阳性）都已收在本文档的
+**「会话日志兼容：`session-scheduler/user-schedule`」** 一节，此处不再重复。
