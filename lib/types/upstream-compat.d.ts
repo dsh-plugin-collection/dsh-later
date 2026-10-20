@@ -79,6 +79,30 @@ export declare const KERNEL_GENERATIONS: readonly [{
     readonly id: "0.2.0-rc.2";
     readonly peerRange: "^0.2.0-rc.2";
     readonly sessionApi: "own-events";
+}, {
+    /**
+     * `0.2.1` 代次：版本号只跳了补丁位，但**不是零差异**，逐项核对如下
+     * （详见 docs/verification.md「0.2.1 兼容核对」）：
+     *
+     * - Session：形状未变 —— `ownEvents(): readonly SessionEvent[]` 与
+     *   `inheritedEventCount: SessionLogOffset` 仍在（0.2.1-rc.2 类型声明实测），
+     *   `readOwnEvents` / `readInheritedEventCount` 原样可用
+     * - dsh-schedule：`renderRecurringReminderBatchFraming` 仍在导出，
+     *   `scheduleMessageSource()` 的 `isV17` 存在性探测继续命中 `kind:'schedule'`，
+     *   不新增分支；`createAfterScheduleRecord` arity 仍为 5；其余依赖的导出面完整
+     * - 唯一差异：`ScheduleInputError` 多一个 `subagent_session` 码。它由上游
+     *   `create` 对「委派子代理 Session」的拒绝产生，而本插件自己 append
+     *   `schedule/change`、不经过该服务，故只需在 `user-tools.ts` 的错误码联合里
+     *   登记（翻译器直通），业务逻辑无分支
+     * - dsh-llm / dsh-tools：`createUserMessage` / `boundContextSummary` /
+     *   `defineTool` 均在
+     *
+     * 实证：devDependencies 全量固定到 0.2.1-rc.2 后，host + client 两条
+     * `tsc --noEmit` 零错误，`npm test` 407 项全绿。
+     */
+    readonly id: "0.2.1-rc.2";
+    readonly peerRange: "^0.2.1-rc.2";
+    readonly sessionApi: "own-events";
 }];
 /**
  * 随内核代次一起 bump 的 peer 包（宿主 hoisting 变化会波及这些运行时 import）。

@@ -124,6 +124,17 @@ export type UserScheduleErrorCode =
   | 'persistence_uncertain'
   | 'unsupported_kind'
   | 'not_paused'
+  /**
+   * `dsh-schedule@0.2.1-rc.2` 新增的上游闭包码：目标 Session 属于委派子代理
+   * （delegation depth > 0），投递永远到不了，故上游 `create` 拒绝、
+   * `update` 返回非变更结果。
+   *
+   * 本插件的写路径**不经过** `ScheduleService`（自己 append `schedule/change`
+   * 再 fold），故自身不会产生此码；列入本联合仅因为 `toInputError` 是上游闭包
+   * 的直通翻译器 —— 不列入就会让「上游多一个码」变成编译错误（升级到 0.2.1
+   * 时 tsc 已如实报出）。
+   */
+  | 'subagent_session'
   | 'internal_error';
 
 /** 封闭错误值。 */
