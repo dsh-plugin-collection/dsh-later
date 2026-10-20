@@ -40,6 +40,7 @@ import type {
 } from './user-tools.js';
 import { name, SETTINGS_NAMESPACE } from './domain.js';
 import { registerOwnedSessionEventType } from './owned-event-registration.js';
+import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { hostDictFor, hostFormat } from './strings.js';
 
 /** 插件配置 schema（全可选，默认开箱即用；经 cordis config 覆盖）。 */
@@ -377,6 +378,14 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
   //    的日志会被任何加载了本插件的读者以 SessionFormatUnsupportedError 拒读
   //    （GUI 表现为「历史加载失败」）。详见 domain.ts 中的说明。
   registerOwnedSessionEventType();
+
+  // 0b. 内核模块同源护栏（issue #57）：link: 开发态下插件可能解析到自己的
+  //     @deepseek-ai/dsh-* 实例（自己 node_modules/.pnpm），而宿主用的是 dsh
+  //     安装目录那份。此时上面的注册只写进插件侧孤岛 Set，宿主读路径完全没被
+  //     影响——「看起来生效了」的静默失效。这里在启动时把它显形：不同源告警
+  //     一次（进程级去重），探测失败给 unknown，绝不伪装成同源。
+  //     只观测、不修复：双实例下读兼容注册该保留/迁移/放弃属 #58 的取舍。
+  checkKernelIdentityAtStartup();
 
   // 1. `userSchedules` 会话投影（GUI 读状态）。
   // `as never`：本插件 dev 依赖解析到的 @deepseek-ai/dsh-session-projection
