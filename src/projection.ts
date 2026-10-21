@@ -52,8 +52,50 @@ const wireAttachmentSchema = z
     media_type: z.string().optional(),
     width: z.number().optional(),
     height: z.number().optional(),
+    host_path: z.string().optional(),
   })
   .strict();
+
+/**
+ * 耐久图片引用 → 宿主绝对路径的解析器（由 `index.ts` 在 apply 时注入）。
+ *
+ * 为什么是**注入**而不是让本模块直接依赖 `ctx`：投影单元是纯 fold + 纯 view，
+ * 宿主按事件到达推进它、并按 seq 消费 view 出的帧，模块内不持有任何服务引用
+ * （`ownership-store` 同理，走的是 sessionId 键控的模块级状态）。注入一个函数
+ * 既能拿到 `ctx.attachments`，又保住这条边界，也让 `attachmentWireOf` 可在
+ * 无服务环境下（`node --test`）直接测。
+ *
+ * 未注入（旧宿主 / 无 attachments 后端 / 测试）时返回 `undefined`，即不带
+ * `host_path`，客户端退回 `uiConversation.imageUrl` 那条通道。
+ */
+/** 耐久图片引用（= sidecar 里 image 块的 `attachment`，宿主 `imageHostPath` 的入参）。 */
+type ImageRefLike = Extract<ScheduledAttachment, { type: 'image' }>['attachment'];
+
+type ImageHostPathResolver = (ref: ImageRefLike) => string | undefined;
+
+let imageHostPathResolver: ImageHostPathResolver | undefined;
+
+/** 注入解析器（幂等；插件重载时重复调用是预期行为）。 */
+export function setImageHostPathResolver(resolver: ImageHostPathResolver | undefined): void {
+  imageHostPathResolver = resolver;
+}
+
+/**
+ * 现算一条图片引用的宿主绝对路径，任何失败都收敛成 `undefined`。
+ *
+ * 必须吞异常：`imageHostPath` 对非法 `attachmentId` 抛 `AttachmentError`
+ * （`INVALID_ATTACHMENT_REF`），而 sidecar 是本地文件、可能被外部改写——
+ * 一个坏引用不该让整份投影拒读，只该让这张缩略图退回降级 chip。
+ */
+function imageHostPathOf(ref: ImageRefLike): string | undefined {
+  if (imageHostPathResolver === undefined) return undefined;
+  try {
+    const path = imageHostPathResolver(ref);
+    return typeof path === 'string' && path.length > 0 ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * 单条任务最多带出多少个附件块（issue #37）。
@@ -65,7 +107,8 @@ const wireAttachmentSchema = z
 const MAX_WIRE_ATTACHMENTS = 8;
 
 /**
- * 把 sidecar 的附件块映射成 wire 引用（只出不透明 id + 展示元数据）。
+ * 把 sidecar 的附件块映射成 wire 引用（不透明 id + 展示元数据；image 另带一个
+ * **现算**的 `host_path`，供客户端走宿主 `/api/file` 出图，见 `domain.ts`）。
  *
  * 两个 builder 共用同一份映射，保证活动项与暂停项规则一致——两面分叉的历史根因
  * 就是规则各写各的。`undefined`/空数组都返回 `{}`，即**整个键不出现**，与
@@ -80,6 +123,8 @@ function attachmentWireOf(
   const mapped = list.map((block): WireAttachment => {
     if (block.type === 'image') {
       const ref = block.attachment;
+      // host_path 从引用**现算**（不是从 sidecar 读），所以改写 sidecar 造不出假路径。
+      const hostPath = imageHostPathOf(ref);
       return {
         kind: 'image',
         attachment_id: ref.attachmentId,
@@ -87,6 +132,7 @@ function attachmentWireOf(
         ...(typeof ref.bytes === 'number' ? { bytes: ref.bytes } : {}),
         ...(typeof ref.width === 'number' ? { width: ref.width } : {}),
         ...(typeof ref.height === 'number' ? { height: ref.height } : {}),
+        ...(hostPath === undefined ? {} : { host_path: hostPath }),
       };
     }
     const ref = block.attachment;

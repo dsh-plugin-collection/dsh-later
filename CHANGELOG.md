@@ -2,6 +2,32 @@
 
 本文件记录面向使用者的重要变更。细粒度提交历史见 git log。
 
+## Unreleased
+
+- **feat** 待发附件在 dock 行里显示**真缩略图**，不再只有「发送后可见 + 大小」。
+  - 先说清这不是渲染问题：宿主 `session.readAttachment` 只放行**已被本会话事件引用**的
+    附件（`referencedImage` → `imageInEvent` 只扫 `user/message`、`tool/result` 等第一方
+    事件类型，未知事件一律不透明），而 `/later` 的附件按设计只进 sidecar、不进日志
+    （`schedule/change` 被 dsh-schedule 严格解码，塞字段会读坏整份历史）。所以代发前
+    那条通道**必然**被拒 —— #73 的 chip 说的是实话，只是不好看。
+  - 于是换通道：走宿主已有的本地文件路由 `GET /api/file`（markdown 本地图片用的就是它）。
+    内核用 `ctx.attachments.imageHostPath(ref)` 从引用**现算**绝对路径，经 wire 新可选字段
+    `host_path` 带出；客户端用宿主自己的 `fileMediaUrl` 换算成 URL（web 与桌面
+    `dsh-app://` 两种基址由它判别）。**零新路由、零自建鉴权、零上游改动。**
+  - 取图顺序：`host_path` → 宿主 `peekImageUrl` → `imageUrl` → 降级 chip。非文件后端
+    （`imageHostPath` 返回 `undefined`）不带该键，行为与改动前逐字一致。
+  - 三条安全约束：路径**不落 sidecar**（改写 sidecar 造不出假路径）；`imageHostPath` 只认
+    sha256 形态的 `attachmentId`，非法即抛，故无路径穿越面；解析抛错/空值一律收敛成
+    「整个键不出现」，一张缩略图的问题不会升级成整份投影拒读。`attachments` **不进**
+    模块级 `inject`（否则重演 #34：服务不来 → 插件永久 pending → `/later` 集体消失）。
+  - 新增 `tests/attachment-host-path.test.mjs`（9 条：默认态不变、image 带/file 永不带、
+    入参是引用本身、抛错只降级单块、四种非法返回值、活动项与暂停项同规则、wire schema
+    不炸、inject 护栏）；`dock-attachments` 两处源码锁随探针变更同步更新，并补一条
+    「host_path 优先且不发无谓请求」的顺序锁。
+- **docs** README 中英各补一节「带图片 / 文件」。1.3.0 的 changelog 写着「README 补上附件
+  说明」，实际 `README.md` 里「附件」出现 **0 次**（`README.en.md` 只在多次写法那句顺带提了
+  一句）—— 用户翻手册根本不知道 `/later` 能带图，更不知道只有 `/later` 能带。
+
 ## 1.5.0 — 2026-10-20
 
 - **fix** 待发提醒的附件不再显示「图片不可用」（#73）。宿主的 `readAttachment` 只允许读

@@ -26,6 +26,13 @@
  * @module dsh-later/client
  */
 import type { Context } from '@deepseek-ai/cordis';
+// 宿主同款「本地绝对路径 → 媒体 URL」解析器（web: `<base>api/file?path=`，桌面:
+// `dsh-app://app/api/file?path=`）。这是本文件开头那条「不引 dsh-client-* 运行时
+// 包」例外的**例外**：它是纯字符串工具，没有服务/插槽身份，也不会因复制模块实例
+// 而漂移主题——上游自己的 client bundle 同样把它内联进去（dsh-client-ui-chat
+// lib/client.js 里有 `function fileMediaUrl` 的定义，而非 require）。走它而不是
+// 自己拼 URL，是为了宿主将来收紧规则（如新增 scheme 白名单）时我们自动跟上。
+import { fileMediaUrl } from '@deepseek-ai/dsh-util-workspace-path';
 import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from './runtime-augment.js';
 import { name } from '../domain.js';
 import { dictFor, schedDicts } from './strings.js';
@@ -406,6 +413,18 @@ function apply(ctx: Context): void {
   };
 
   /**
+   * 把内核带出的 `host_path` 换算成浏览器可显示的 URL（宿主 `GET /api/file`）。
+   *
+   * 这条是**待发附件唯一**能出图的路：附件在代发前不被会话日志引用，
+   * `imageUrl` / `peekImageUrl` 那条要求「已被本会话引用」，必然被拒。
+   *
+   * `document.baseURI` 在**调用时**读而不是在模块顶层读：客户端 bundle 可能在
+   * 文档定稿前被求值，且桌面载体走 `dsh-app://app/` 基址——两种形态由宿主
+   * `fileMediaUrl` 自己判别，非法基址或非法路径它返回 `undefined`，组件据此降级。
+   */
+  const localMediaUrl = (path: string): string | undefined => fileMediaUrl(document.baseURI, path);
+
+  /**
    * 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，
    * 不依赖设置服务，因此在顶层无条件注册。
    *
@@ -431,7 +450,14 @@ function apply(ctx: Context): void {
           // `loadImage` 是**可选**注入：内部按 `ctx.get('uiConversation')` 取，取不到
           // 时组件自动降级（见 loadAttachmentUrl 的注释）。它不构成激活依赖，所以 dock
           // 仍在顶层无条件注册——**不要**因此把 `uiConversation` 加进模块级 inject。
-          inject: () => ({ callCommand, loadImage: loadAttachmentUrl, peekImage: peekAttachmentUrl } as ScheduleDockInjected),
+          // `localMediaUrl` 不依赖任何服务（纯字符串换算 + document.baseURI），因此
+          // 待发附件的缩略图在「宿主没有 uiConversation face」这种旧组合下也能出图。
+          inject: () => ({
+            callCommand,
+            loadImage: loadAttachmentUrl,
+            peekImage: peekAttachmentUrl,
+            localMediaUrl,
+          } as ScheduleDockInjected),
         },
         ScheduleDock,
       ),

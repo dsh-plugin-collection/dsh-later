@@ -6,8 +6,9 @@
 /**
  * 一条待发送提醒携带的附件引用（issue #37）。
  *
- * 只有不透明 `attachment_id` + 展示元数据：**没有字节、没有路径**。图片要显示时
- * 由客户端向宿主解析 URL（`uiConversation.imageUrl(sessionId, …)`）。
+ * 只有不透明 `attachment_id` + 展示元数据：**没有字节**。图片显示有两条通道，按
+ * 可用性依次尝试：`host_path` → 宿主 `/api/file`（待发提醒**只有**这条，详见该字段），
+ * 以及 `uiConversation.imageUrl(sessionId, …)`（发出之后 / 宿主缓存命中时）。
  *
  * ⚠️ 与 host 侧 `WireAttachment`（`src/domain.ts`）是**手写镜像**，成员名必须逐字
  * 一致，由 `tests/wire-type-parity.test.mjs` 锁住。两边不共用类型，是为了不让
@@ -28,6 +29,15 @@ export interface ClientAttachment {
   /** 仅 image：intrinsic 尺寸，缩略图裁切用。 */
   readonly width?: number;
   readonly height?: number;
+  /**
+   * 仅 image：耐久对象在宿主文件系统中的绝对路径，由内核从引用**现算**后带出。
+   *
+   * 客户端拿它走宿主一等公民的 `GET /api/file`（markdown 本地图片同一条路）出图。
+   * **待发提醒只有这条通道**：发出前附件不被会话日志引用，`imageUrl` 会按
+   * 「not referenced by this session」拒读（那是预期状态、不是损坏，见
+   * `attachment-failure.ts`）。非文件后端不带这个键，客户端自动退回 `imageUrl`。
+   */
+  readonly host_path?: string;
 }
 
 /** 一条用户任务（投影 wire 项）。 */

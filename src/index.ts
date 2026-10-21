@@ -21,7 +21,10 @@ import type {} from '@deepseek-ai/dsh-session-projection';
 // Type-only：把 ctx.settings 的 Context merge 引入本程序（两代内核都有该包）。
 import type {} from '@deepseek-ai/dsh-settings';
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings';
-import { userSchedulesProjectionUnit } from './projection.js';
+// Type-only：把 ctx.attachments 的 Context merge 引入本程序（同上两行的用法）。
+// 只为拿到 `AttachmentStore.imageHostPath` 的真实签名，不新增运行时依赖。
+import type {} from '@deepseek-ai/dsh-attachment';
+import { setImageHostPathResolver, userSchedulesProjectionUnit } from './projection.js';
 import { registerUserScheduleCommands } from './commands.js';
 import { UserScheduleRuntime } from './runtime.js';
 import {
@@ -378,7 +381,24 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
   //    scripts/migrate-owned-events.mjs 一次性迁移。护栏只观测、不修复。
   checkKernelIdentityAtStartup();
 
-  // 1. `userSchedules` 会话投影（GUI 读状态）。
+  // 1a. 耐久图片 → 宿主绝对路径的解析器（dock 缩略图经宿主 `/api/file` 出图用）。
+  //
+  // 为什么必须现算而不是存进 sidecar：路径是 `DSH_HOME/attachments/v1/objects/…`
+  // 的派生值，落盘等于把「后端换了仍自称有路径」的 stale 风险请进仓库；现算则天然
+  // 跟着后端走，非文件后端返回 undefined，wire 就不带这个键。
+  //
+  // 为什么用 `ctx.get` 而不是 `ctx.inject(['attachments'])`：附件存储缺席时投影必须
+  // 照常工作（只少一张缩略图）。把 `attachments` 放进激活门控会重演 #34——服务不来
+  // 则整个插件永久 pending、`/later` 与 `/schedule` 集体消失。
+  setImageHostPathResolver((ref) => {
+    // 每次调用现取：attachments 可能晚于本插件挂载。非法引用抛的 AttachmentError
+    // 由 projection 侧收敛成 undefined（一张图降级，不让整份投影拒读）。
+    const store = ctx.get('attachments');
+    if (store === undefined) return undefined;
+    return store.imageHostPath(ref);
+  });
+
+  // 1b. `userSchedules` 会话投影（GUI 读状态）。
   // `as never`：本插件 dev 依赖解析到的 @deepseek-ai/dsh-session-projection
   // 可能是旧版（rc.1，契约 `schema`+顶层 `view`），而宿主运行时是 rc.2
   // （契约 `stateSchema`+`wire{viewSchema,view}`）。两者在类型层冲突，
