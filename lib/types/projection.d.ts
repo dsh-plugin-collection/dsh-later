@@ -16,8 +16,27 @@
 import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import type { AfterScheduleRecord, AtScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
-import type { PausedEntry } from './ownership-store.js';
+import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
 import type { UserScheduleProjectionValue } from './domain.js';
+/**
+ * 耐久图片引用 → 宿主绝对路径的解析器（由 `index.ts` 在 apply 时注入）。
+ *
+ * 为什么是**注入**而不是让本模块直接依赖 `ctx`：投影单元是纯 fold + 纯 view，
+ * 宿主按事件到达推进它、并按 seq 消费 view 出的帧，模块内不持有任何服务引用
+ * （`ownership-store` 同理，走的是 sessionId 键控的模块级状态）。注入一个函数
+ * 既能拿到 `ctx.attachments`，又保住这条边界，也让 `attachmentWireOf` 可在
+ * 无服务环境下（`node --test`）直接测。
+ *
+ * 未注入（旧宿主 / 无 attachments 后端 / 测试）时返回 `undefined`，即不带
+ * `host_path`，客户端退回 `uiConversation.imageUrl` 那条通道。
+ */
+/** 耐久图片引用（= sidecar 里 image 块的 `attachment`，宿主 `imageHostPath` 的入参）。 */
+type ImageRefLike = Extract<ScheduledAttachment, {
+    type: 'image';
+}>['attachment'];
+type ImageHostPathResolver = (ref: ImageRefLike) => string | undefined;
+/** 注入解析器（幂等；插件重载时重复调用是预期行为）。 */
+export declare function setImageHostPathResolver(resolver: ImageHostPathResolver | undefined): void;
 /** 投影 wire 值 schema（wire.viewSchema：离开宿主前校验客户端载荷）。 */
 export declare const userSchedulesSchema: z.ZodObject<{
     schedules: z.ZodArray<z.ZodObject<{
@@ -42,6 +61,7 @@ export declare const userSchedulesSchema: z.ZodObject<{
             media_type: z.ZodOptional<z.ZodString>;
             width: z.ZodOptional<z.ZodNumber>;
             height: z.ZodOptional<z.ZodNumber>;
+            host_path: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>>>;
         attachments_total: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
@@ -187,6 +207,7 @@ export declare const userSchedulesProjectionUnit: {
                     media_type: z.ZodOptional<z.ZodString>;
                     width: z.ZodOptional<z.ZodNumber>;
                     height: z.ZodOptional<z.ZodNumber>;
+                    host_path: z.ZodOptional<z.ZodString>;
                 }, z.core.$strict>>>;
                 attachments_total: z.ZodOptional<z.ZodNumber>;
             }, z.core.$strict>>;
@@ -195,3 +216,4 @@ export declare const userSchedulesProjectionUnit: {
     };
     readonly stateVersion: 4;
 };
+export {};

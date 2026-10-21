@@ -61,11 +61,15 @@ test('附件带是正文的兄弟节点，且排在进度条之前（三带结�
   assert.ok(lineClose > 0 && lineClose < bandAt, '附件带必须在正文带闭合之后（兄弟节点）');
 });
 
-test('无附件与只剩图片但没解析能力时，整带不渲染（不得留空容器）', () => {
+test('无附件与只剩图片但没任何出图能力时，整带不渲染（不得留空容器）', () => {
   assert.match(band, /blocks === undefined \|\| blocks\.length === 0\) return null;/, '无附件键不出现时不渲染');
-  assert.match(band, /const canResolve = loadImage !== undefined && sessionId !== undefined;/, '能力判定只看两个可选注入');
-  assert.match(band, /blocks\.filter\(\(block\) => block\.kind === .file.\)/, '没能力时只留文件 chip');
-  assert.match(band, /shown\.length === 0\) return null;/, '只剩图片且没能力 → 整带不渲染');
+  assert.match(band, /const canResolve = loadImage !== undefined && sessionId !== undefined;/, '异步通道的能力判定只看两个可选注入');
+  // 图片能不能出图 = 异步通道可用 **或** host_path 能换算成 URL（后者不依赖任何服务）。
+  assert.match(band, /block\.host_path !== undefined && localMediaUrl\?\.\(block\.host_path\) !== undefined/,
+    'host_path 通道必须同时要求「内核带出了路径」与「换算结果非 undefined」');
+  assert.match(band, /blocks\.filter\(\(block\) => block\.kind === .file. \|\| imageRenderable\(block\)\)/,
+    '两条通道都没有时只留文件 chip');
+  assert.match(band, /shown\.length === 0\) return null;/, '只剩图片且两条通道都不通 → 整带不渲染');
 });
 
 test('缩略图与文件 chip 的取值逐条照抄宿主，不许自己发明', () => {
@@ -136,11 +140,42 @@ test('缩略图先查宿主缓存（peekImageUrl），命中就不发请求', ()
   assert.match(entry, /peekImage: peekAttachmentUrl/, 'peek 能力必须注入 dock');
 });
 
+test('localMediaUrl 走宿主自己的解析器，且基址在调用时读（#待发缩略图）', () => {
+  // 不自己拼 `/api/file?path=`：用宿主 `fileMediaUrl`，宿主收紧规则时自动跟上。
+  assert.match(entry, /import \{ fileMediaUrl \} from .@deepseek-ai\/dsh-util-workspace-path./,
+    '必须复用宿主的解析器');
+  assert.match(entry, /const localMediaUrl = \(path: string\): string \| undefined => fileMediaUrl\(document\.baseURI, path\);/,
+    '基址取 document.baseURI（web 与桌面 dsh-app:// 两种形态由宿主判别）');
+  assert.doesNotMatch(entry, /['"`]\/api\/file/, '禁止在插件里硬编码路由');
+  assert.match(entry, /localMediaUrl,\s*\} as ScheduleDockInjected\)/, '必须注入 dock');
+});
+
 test('每块独立异步加载 + alive 标志，且依赖不能用块对象（dock 每秒 tick）', () => {
   assert.match(thumb, /let alive = true;/);
   assert.match(thumb, /alive = false;/, '卸载后不得 setState');
-  assert.match(thumb, /\[attachmentId, sessionId, loadImage\]\);/, '依赖必须是 attachment_id 而非 block 对象');
+  assert.match(thumb, /\[attachmentId, sessionId, loadImage, localUrl\]\);/,
+    '依赖必须是 attachment_id 而非 block 对象（localUrl 是稳定的派生字符串，可以进依赖）');
   assert.match(thumb, /const blockRef = useRef\(block\);/, '用 ref 拿最新块内容而不进依赖');
+});
+
+test('host_path 通道优先于异步通道，且不发无谓请求（待发附件唯一出图路）', () => {
+  // 派生必须是「取 host_path 再换算」，不能整块参与渲染判断（dock 每秒 tick 造新对象）。
+  assert.match(thumb, /const hostPath = block\.host_path;/, '只读 host_path，不读 block 对象');
+  assert.match(thumb, /const localUrl = hostPath === undefined \? undefined : localMediaUrl\?\.\(hostPath\);/);
+  // 顺序即正确性：host_path 命中就**不进** effect，否则待发附件会先跑一趟注定被拒的
+  // readAttachment，把 failure 态写进去（表现为缩略图闪一下再变 chip）。
+  assert.match(thumb, /if \(localUrl !== undefined\) return undefined;/, 'effect 里必须最先短路');
+  const effectAt = thumb.indexOf('useEffect(() => {');
+  const localReturnAt = thumb.indexOf('if (localUrl !== undefined) {\n    // `data-ss-attach`');
+  assert.ok(effectAt > 0 && localReturnAt > effectAt, '渲染分支在 effect 之后（顺序无语义，仅锚定两段都在）');
+  // 探针取值集合是锁住的验证接口（docs/notes/dock-alignment.md 第 8 条）：
+  // host_path 产出的就是正常缩略图，**不得**为它新增 data-ss-attach 取值。
+  assert.match(thumb, /data-ss-attach="image" src=\{localUrl\}/, '复用既有 image 探针取值');
+  const values = new Set(
+    [...thumb.matchAll(/data-ss-attach=(?:"([^"]+)"|\{[^}]*\})/g)].map((m) => m[1] ?? 'dynamic'),
+  );
+  assert.deepEqual([...values].sort(), ['dynamic', 'image', 'pending'],
+    '取值集合仍是 image / pending / 那条二选一的 dynamic，没被扩写');
 });
 
 test('超出上限给 +N，且 a11y 有独立标签', () => {
@@ -157,7 +192,7 @@ test('四个新词条 zh/en 双语齐全（注册源是 strings.ts，见 #28 双
 
 test('数据契约字段名与 #37 逐字一致', () => {
   assert.match(types, /export interface ClientAttachment \{/);
-  for (const field of ['attachment_id', 'media_type', 'kind', 'name', 'bytes', 'width', 'height']) {
+  for (const field of ['attachment_id', 'media_type', 'kind', 'name', 'bytes', 'width', 'height', 'host_path']) {
     assert.match(types, new RegExp(`readonly ${field}\\??:`), `ClientAttachment 缺字段 ${field}`);
   }
   assert.match(types, /readonly attachments\?: readonly ClientAttachment\[\]/, '无附件时键不出现（可选）');

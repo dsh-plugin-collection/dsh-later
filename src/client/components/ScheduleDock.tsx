@@ -121,6 +121,17 @@ export interface ScheduleDockInjected {
    * 还热着）。取不到时返回 undefined，组件照常走 `loadImage`。
    */
   peekImage?: (sessionId: string, ref: ClientAttachment) => string | undefined;
+  /**
+   * 把内核带出的 `host_path` 换算成浏览器可显示的 URL（宿主 `GET /api/file`）。
+   *
+   * **待发附件只有这条路**：代发前附件不被会话日志引用，`loadImage` / `peekImage`
+   * 背后那条 `readAttachment` 要求「已被本会话引用」，必然被拒（#73 那个
+   * 「发送后可见」chip 就是这么来的）。所以取图顺序是 host_path 优先、异步通道兜底。
+   *
+   * 声明为可选：非文件后端（`imageHostPath` 返回 undefined）时内核根本不带
+   * `host_path`，此时行为与改动前完全一致。
+   */
+  localMediaUrl?: (path: string) => string | undefined;
 }
 
 /**
@@ -169,7 +180,7 @@ function canPause(item: ClientSchedule, now: number): boolean {
   return Number.isFinite(epoch) && epoch > now;
 }
 
-export function ScheduleDock({ callCommand, loadImage, peekImage, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
+export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
   const now = useNow(1000);
   // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
   // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
@@ -708,7 +719,7 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, sessionId, use
             max-width:55% 折中我们不需要）。放在进度条**之前**，保证条仍贴底、
             不被附件挤出可视区（#16 的条长一致性回归不受影响）。
           */}
-          <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} />
+          <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} localMediaUrl={localMediaUrl} />
           <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
             <span className="ss-dock-steer-err">{steerErr.get(item.id) ?? pauseErr.get(item.id)}</span>
@@ -1146,12 +1157,14 @@ function DockAttachments({
   sessionId,
   loadImage,
   peekImage,
+  localMediaUrl,
 }: {
   item: ClientSchedule;
   t: ScheduleDockTranslate;
   sessionId?: string;
   loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
   peekImage?: (sessionId: string, ref: ClientAttachment) => string | undefined;
+  localMediaUrl?: (path: string) => string | undefined;
 }): JSX.Element | null {
   const blocks = item.attachments;
   // 无附件时该键根本不出现（#37 契约）；元数据缺失也走这条，行回到两带，不占位不报错。
@@ -1162,7 +1175,15 @@ function DockAttachments({
    * 若这一行了只剩图片，整带不渲染，避免留下一个空的 flex 容器。
    */
   const canResolve = loadImage !== undefined && sessionId !== undefined;
-  const shown = canResolve ? blocks : blocks.filter((block) => block.kind === 'file');
+  /*
+   * 一条图片能不能出图，现在有两个独立来源，任一成立即可：
+   *  - `canResolve`：宿主的异步通道（imageUrl / peekImageUrl）可用；
+   *  - `host_path` 能换算成 URL：走宿主 `/api/file`，**不依赖任何服务**，
+   *    所以旧宿主没有 uiConversation face 时，待发附件照样有缩略图。
+   */
+  const imageRenderable = (block: ClientAttachment): boolean =>
+    canResolve || (block.host_path !== undefined && localMediaUrl?.(block.host_path) !== undefined);
+  const shown = blocks.filter((block) => block.kind === 'file' || imageRenderable(block));
   if (shown.length === 0) return null;
   const total = item.attachments_total ?? blocks.length;
   const extra = total - blocks.length;
@@ -1172,7 +1193,7 @@ function DockAttachments({
         // 同一附件可能被多次写法逐条复用，key 用「引用 + 序号」保证同带内唯一。
         // ⚠️ 这里不能用 `ref` 当 prop 名——React 会把它当 callback ref 吃掉。
         block.kind === 'image'
-          ? <DockThumb key={`${block.attachment_id}:${index}`} block={block} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} />
+          ? <DockThumb key={`${block.attachment_id}:${index}`} block={block} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} localMediaUrl={localMediaUrl} />
           : <DockFileChip key={`${block.attachment_id}:${index}`} block={block} t={t} />
       ))}
       {extra > 0 && (
@@ -1194,12 +1215,14 @@ function DockThumb({
   sessionId,
   loadImage,
   peekImage,
+  localMediaUrl,
 }: {
   block: ClientAttachment;
   t: ScheduleDockTranslate;
   sessionId?: string;
   loadImage?: (sessionId: string, ref: ClientAttachment) => Promise<string>;
   peekImage?: (sessionId: string, ref: ClientAttachment) => string | undefined;
+  localMediaUrl?: (path: string) => string | undefined;
 }): JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null);
   const [failure, setFailure] = useState<AttachmentImageFailure | null>(null);
@@ -1211,7 +1234,17 @@ function DockThumb({
   const blockRef = useRef(block);
   blockRef.current = block;
   const attachmentId = block.attachment_id;
+  /*
+   * host_path 通道：同步、无服务依赖、无异步竞态。放在异步通道**之前**，因为
+   * 待发提醒走 `imageUrl` 必然被宿主拒绝（附件还没被会话日志引用），那条路只会
+   * 得到「发送后可见」chip；而这条直接就是真缩略图。
+   * 换算失败（宿主 `fileMediaUrl` 判基址/路径不合法）返回 undefined，自动落回原路径。
+   */
+  const hostPath = block.host_path;
+  const localUrl = hostPath === undefined ? undefined : localMediaUrl?.(hostPath);
   useEffect(() => {
+    // host_path 已经能出图：不发请求，也不去写 failure（否则会留下无意义的降级态）。
+    if (localUrl !== undefined) return undefined;
     // 服务缺失（旧宿主组合）或没有会话上下文：不发请求，直接走可读降级。
     if (loadImage === undefined || sessionId === undefined) return undefined;
 
@@ -1237,13 +1270,19 @@ function DockThumb({
     return () => {
       alive = false;
     };
-  }, [attachmentId, sessionId, loadImage]);
+  }, [attachmentId, sessionId, loadImage, localUrl]);
 
   /*
-   * 能力缺失（这台宿主没有 uiConversation face，或拿不到会话上下文）→ 图片位**直接不渲染**。
-   * 与下面的 `failed` 区分开：那不是异常，是这个部署本来没这能力，满屏「图片不可用」
-   * 反而是噪音；而 failed 是「本该有却读不到」，才值得明说。
+   * 能力缺失（这台宿主没有 uiConversation face，或拿不到会话上下文）**且** host_path
+   * 通道也不可用 → 图片位直接不渲染。与下面的 `failed` 区分开：那不是异常，是这个
+   * 部署本来没这能力，满屏「图片不可用」反而是噪音；而 failed 是「本该有却读不到」，
+   * 才值得明说。
    */
+  if (localUrl !== undefined) {
+    // `data-ss-attach` 的取值集合是**锁住的验证接口**（见 docs/notes/dock-alignment.md
+    // 第 8 条）：这条通道产出的就是正常缩略图，不新增取值，来源差异不进探针。
+    return <img className="ss-dock-thumb" data-ss-attach="image" src={localUrl} alt={t('attachmentImage')} />;
+  }
   if (loadImage === undefined || sessionId === undefined) return null;
 
   if (url !== null) {
