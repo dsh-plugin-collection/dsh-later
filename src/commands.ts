@@ -29,8 +29,11 @@ import { epochFromLocal, localFieldsOf } from './smart-window.js';
 import { detectTimeZone, formatAbsolute, formatHhmm, formatRelative } from './time-utils.js';
 import { hostDictFor } from './strings.js';
 
-/** 用户创建/删除成功后的通知回调（宿主用它重驱用户调度器）。 */
-export type UserChangeNotifier = (agent: Agent) => void;
+/**
+ * 用户创建/删除成功后的通知回调（宿主用它重驱用户调度器）。
+ * @returns 调度器是否在位。false 表示"这条不会被触发"，创建路径必须把它说出来。
+ */
+export type UserChangeNotifier = (agent: Agent) => boolean;
 
 /**
  * 用户主动插话回调（GUI「插话发送」按钮触发）。handler 返回 steer 结果；
@@ -883,6 +886,20 @@ export function userScheduleCommands(
     }
     return { maxSchedules: getSettings, limits: { allowLong: false, maxChars: 1000 }, advancedSyntax: true };
   };
+  /**
+   * 重驱该 agent 的调度器并回答"是否在位"。
+   *
+   * 为什么要有返回值：#71 那次事故的代价不只是"到点不响"，而是**安静**——创建
+   * 返回成功、dock 正常显示、用户以为排上了。宿主没注入通知器时无从判断，按
+   * 在位处理（不冤枉自己，也不给用户假告警）。
+   */
+  const armScheduler = (agent: Agent): boolean => {
+    try {
+      return onUserChange?.(agent) ?? true;
+    } catch {
+      return false;
+    }
+  };
   const create: CommandDefinition = {
     name: `${PREFIX}-create`,
     description: t.cmdLaterDesc,
@@ -895,12 +912,11 @@ export function userScheduleCommands(
       if (!result.ok) {
         return { kind: 'error', text: `${result.code}: ${result.message}` };
       }
-      try {
-        onUserChange?.(invocation.agent);
-      } catch {
-        /* 通知失败不影响命令成功结果 */
-      }
-      return { kind: 'success', text: JSON.stringify({ ...result }) };
+      const armed = armScheduler(invocation.agent);
+      return {
+        kind: 'success',
+        text: JSON.stringify(armed ? { ...result } : { ...result, warning: t.warnSchedulerNotArmed }),
+      };
     },
   };
 
@@ -1087,11 +1103,7 @@ export function userScheduleCommands(
       }
       if (epochs.length === 0) return renderError(failure ?? '创建失败。');
 
-      try {
-        onUserChange?.(invocation.agent);
-      } catch {
-        /* 通知失败不影响命令成功结果 */
-      }
+      const armed = armScheduler(invocation.agent);
       const verb = delivery === 'user' ? '将于' : '已设定提醒：';
       const hint =
         epochs.length === 1
@@ -1111,7 +1123,9 @@ export function userScheduleCommands(
         failure !== undefined && epochs.length < parsed.targets.length
           ? `｜注意：只建成 ${epochs.length}/${parsed.targets.length} 条，${failure}`
           : '';
-      return { kind: 'success', text: `${head}「${content}」${attachNote}${hint}${partial}` };
+      // 调度器不在位：这条承诺（"将于 X 发送"）兑现不了，必须跟着文案说出来。
+      const notArmed = armed ? '' : `｜${t.warnSchedulerNotArmed}`;
+      return { kind: 'success', text: `${head}「${content}」${attachNote}${hint}${partial}${notArmed}` };
     };
   };
 

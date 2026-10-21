@@ -11,7 +11,11 @@
  *   1. **水合**：apply 时已存在的 root agent 必须被挂上（重载后唯一的补挂机会）；
  *   2. **自愈**：表里丢了（模拟重载后清表）时，下一次 drive/ensure 要补挂并生效；
  *   3. **边界**：非 root、teardown 中、attach 失败都不得入表，且必须返回 undefined
- *      —— 让调用方如实报 no_runtime，而不是假装成功。
+ *      —— 让调用方如实报 no_runtime，而不是假装成功；
+ *   4. **可撤销**：attach 必须交回 disposer，且 `unmountAll()` 真的执行它 ——
+ *      否则重载后旧注册还挂在 agent 上，新实例 attach 会撞内核的同名守卫
+ *      （`tool "…" is already registered in this scope`）→ 该会话**永久** no_runtime。
+ *      这条是 1.5.0 修完"水合 + 自愈"之后仍然复现 no_runtime 的真因。
  *
  * 这三条若靠"启动宿主点一遍 UI"来验，是测不到的（沙箱里 HMR 不触发，且新会话
  * 天然会收到 created）——这正是该 bug 长期没护栏的原因。
@@ -29,6 +33,8 @@ function harness(initialRoots = []) {
     stopping: false,
     creates: [],
     attachCalls: [],
+    /** 已交回的 disposer 被执行的 agent（用于证明"拆的时候真拆了"）。 */
+    detachCalls: [],
     driveCalls: [],
     warnings: [],
   };
@@ -42,6 +48,9 @@ function harness(initialRoots = []) {
     },
     attach: (agent, runtime) => {
       state.attachCalls.push(`${agent.id}:${runtime.id}`);
+      return () => {
+        state.detachCalls.push(agent.id);
+      };
     },
     drive: (runtime) => {
       state.driveCalls.push(runtime.id);
@@ -70,16 +79,16 @@ test('水合：apply 时已存在的 root agent 全部挂上（重载后唯一�
   assert.equal(registry.get(a)?.id, 'a1');
 });
 
-test('自愈：表被清空（重载）后，下一次 drive 会补挂并真正重驱', () => {
+test('自愈：表被清空（重载）后，下一次 drive 会补挂并真正重驱', async () => {
   const a = agent('a1');
   const { registry, state } = harness([a]);
 
   registry.hydrate();
   assert.equal(registry.size(), 1);
 
-  // 模拟 teardown/重载：表被清空，但会话还在（不会重发 agent/created）。
-  const drained = registry.drain();
-  assert.equal(drained.length, 1);
+  // 模拟 teardown/重载：拆掉挂载并清空表，但会话还在（不会重发 agent/created）。
+  assert.equal(await registry.unmountAll(), 1, 'unmountAll 应报告拆掉的数量');
+  assert.deepEqual(state.detachCalls, ['a1'], 'teardown 必须执行 attach 交回的 disposer');
   assert.equal(registry.size(), 0);
 
   // 用户此时点「Send now」→ drive → 必须自愈，而不是报 no_runtime。
@@ -139,6 +148,7 @@ test('attach 失败只告警、不入表；下次调用会重试', () => {
     create: (agent) => ({ id: agent.id }),
     attach: () => {
       if (fail) throw new Error('boom');
+      return () => {};
     },
     drive: () => {},
     warn: (message) => work.state.warnings.push(message),
@@ -153,12 +163,12 @@ test('attach 失败只告警、不入表；下次调用会重试', () => {
   assert.equal(registry.size(), 1);
 });
 
-test('forget 只清同一实例：旧 disposer 不能拆掉新挂载', () => {
+test('forget 只清同一实例：旧 disposer 不能拆掉新挂载', async () => {
   const a = agent('a1');
   const { registry } = harness([a]);
 
   const oldRuntime = registry.ensure(a);
-  registry.drain();
+  await registry.unmountAll();
   const newRuntime = registry.ensure(a);
 
   assert.notEqual(oldRuntime, newRuntime, '拆卸后应是新实例');
@@ -170,6 +180,61 @@ test('forget 只清同一实例：旧 disposer 不能拆掉新挂载', () => {
   assert.equal(registry.size(), 0);
 });
 
+test('可撤销：模拟内核同名守卫 —— 不先 unmountAll 就再挂，必然失败；先拆则成功', async () => {
+  // 这条测试是 `no_runtime` 复发的唯一护栏。它把宿主真实行为搬进假件：
+  // 工具注册挂在 agent.ctx 上（跟着 agent 的命），插件重载不会撤掉它，
+  // 而内核 NamedEntries.insert 对同名**直接抛错**（dsh-scope/dsh-tools）。
+  const registered = new Set();
+  const warnings = [];
+  const a = agent('a1');
+  /** 一次 apply = 一个新注册表实例；`registered` 模拟跨 apply 活着的 agent 注册表。 */
+  const applyOnce = () =>
+    createRuntimeRegistry({
+      roots: () => [a],
+      isStopping: () => false,
+      create: (agent) => ({ id: agent.id }),
+      attach: (agent) => {
+        if (registered.has(agent.id)) {
+          throw new Error('tool "user_schedule_create" is already registered in this scope');
+        }
+        registered.add(agent.id);
+        return () => registered.delete(agent.id);
+      },
+      drive: () => {},
+      warn: (message) => warnings.push(message),
+    });
+
+  const first = applyOnce();
+  assert.notEqual(first.mount(a), undefined, '首次挂载应成功');
+
+  // 新 apply：注册表是新建的（旧表随上一次 apply 一起没了），但那份注册**还挂在 agent 上**。
+  const second = applyOnce();
+  assert.equal(second.mount(a), undefined, '旧注册没拆就重挂，必须撞上同名守卫而失败（= 线上 no_runtime）');
+  assert.match(warnings.at(-1) ?? '', /already registered/, '失败要留下可读的告警');
+
+  // 正确姿势：上一次 apply 的 teardown 先 unmountAll，把自己注册的带走。
+  assert.equal(await first.unmountAll(), 1);
+  assert.notEqual(second.mount(a), undefined, '拆干净后新实例必须能挂上');
+});
+
+test('attach 漏交 disposer 会被告警点名（不可撤销 == 重载后必现 no_runtime）', () => {
+  const a = agent('a1');
+  const warnings = [];
+  const registry = createRuntimeRegistry({
+    roots: () => [a],
+    isStopping: () => false,
+    create: (agent) => ({ id: agent.id }),
+    // 假件"忘记"返回 disposer —— 类型上不允许，但 JS 调用方/旧测试可能漏。
+    attach: () => undefined,
+    drive: () => {},
+    warn: (message) => warnings.push(message),
+  });
+
+  assert.notEqual(registry.mount(a), undefined, '不因此拒绝挂载（那会把能用换成立刻不能用）');
+  assert.equal(warnings.length, 1, '但必须喊出来');
+  assert.match(warnings[0], /未交回 disposer/);
+});
+
 test('roots() 抛错（agents 服务未就绪）按"暂无 root"处理，不向外抛', () => {
   const registry = createRuntimeRegistry({
     roots: () => {
@@ -177,7 +242,7 @@ test('roots() 抛错（agents 服务未就绪）按"暂无 root"处理，不向�
     },
     isStopping: () => false,
     create: (agent) => ({ id: agent.id }),
-    attach: () => {},
+    attach: () => () => {},
     drive: () => {},
     warn: () => {},
   });
