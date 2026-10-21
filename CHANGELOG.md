@@ -4,6 +4,27 @@
 
 ## Unreleased
 
+- **fix** 插件详情页不再出现两个「显示设置」标题。
+  - 详情页（`surface === 'detail'`）先渲染「在设置中显示」开关段（标题 key
+    `sectionDisplayToggle`），紧接着渲染字段组第一段（标题 key `sectionDisplay`），
+    两者取值同为「显示设置」（英文同为 `Display`）：连着两行一模一样的标题，
+    看不出哪段管开关、哪段管显示项，`aria-labelledby` 的区域名也失去区分度。
+  - 改的是**开关段**的标题 → 中文「设置入口」/ 英文 `Settings entry`，字段组保留
+    「显示设置」：那段才是真的显示设置（显示定时按钮、时钟图标风格），而且设置对话框
+    那个面只渲染字段组，保留它可让两个面的标题继续对得上。
+  - 护栏：新增 `tests/settings-section-headings.test.mjs`，解析源码里详情页会渲染的
+    全部 section 标题 key 与 zh/en 字典取值，断言同名不重复。变异验证：把开关段标题
+    改回「显示设置」，2 条测试变红。字典按语言分块截断这点有讲究——早先的写法让 zh
+    窗口把 en 整块包进来、英文值盖掉中文值，只在中文重名的情况会漏网。
+  - `node --test "tests/*.test.mjs"` 483/483 通过（基线 481 加 2 条新增），host 与
+    client 的 typecheck 均干净；`npm run build` 产物 `lib/client.js` 随本 PR 同步。
+  - 基线口径要说清：干净 main 上跑测试是 **479/4 红**，红的 4 条全在
+    `runtime-registry.test.mjs`——main 的 host 产物落后于 src（#78 只带了源码，
+    `chore/78-sync-build-artifacts` 在补产物），与本改动无关。另有一条会咬人的机制：
+    `build-no-silent-deploy.test.mjs` 以 `cwd: repoRoot` 跑 `build.mjs`，所以**跑一次
+    测试就会把仓库里的 `lib/` 重建成最新**，第二次跑自然全绿。提交前得核对脏文件只剩
+    自己那一份产物，别把别人的 host 同步捎进 PR。
+
 - **fix** 插件热重载后，重载前就已存在的会话不再永久 `no_runtime`（#71 的残留洞）。
   症状与 #71 相同：提醒能建、dock 能显示、到点不响，点「插话发送」报
   `no_runtime: 该会话尚未挂载用户调度器`。
