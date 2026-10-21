@@ -59,6 +59,10 @@ const zh = {
   errUnsupportedKind: '不支持的操作类型。',
   errNotPaused: '提醒未暂停。',
   errInternalError: '操作失败。',
+
+  // 创建成功、但调度器不在位时的显式告警（#71 的教训：静默是最贵的部分）
+  warnSchedulerNotArmed:
+    '注意：本会话的调度器未挂载，这条提醒到点不会触发。请重启宿主进程或新开一个会话后重建（插件热重载后，重载前就已存在的会话可能挂不回来）。',
 } as const;
 
 const en: { [K in keyof typeof zh]: string } = {
@@ -109,6 +113,10 @@ const en: { [K in keyof typeof zh]: string } = {
   errUnsupportedKind: 'Unsupported operation type.',
   errNotPaused: 'Reminder is not paused.',
   errInternalError: 'Operation failed.',
+
+  // Explicit warning when the create succeeded but the scheduler is not mounted
+  warnSchedulerNotArmed:
+    'Warning: this session has no scheduler mounted, so this reminder will NOT fire. Restart the host process or open a new session and recreate it (sessions that existed before a plugin hot-reload may fail to remount).',
 };
 
 /** 单语言文案字典类型（宽化为 string，zh/en 通用）。 */

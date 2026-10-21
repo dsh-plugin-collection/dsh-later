@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 const host = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const commands = readFileSync(new URL('../src/commands.ts', import.meta.url), 'utf8');
 const dock = readFileSync(new URL('../src/client/components/ScheduleDock.tsx', import.meta.url), 'utf8');
+const readDict = readFileSync(new URL('../src/strings.ts', import.meta.url), 'utf8');
 
 /** 取锚点后的源码片段。 */
 function sliceAround(source, marker, span = 1200) {
@@ -57,9 +58,30 @@ test('插话路径先 ensure 再决定，自愈失败才报 no_runtime', () => {
   assert.match(dock, /user-schedule-steer-now/, '客户端 dock 仍按该命令名发插话');
 });
 
-test('teardown 走 drain（清表并交给调用方 dispose）', () => {
+test('teardown 走 unmountAll（执行自己交回的 disposer，把 agent 上的注册带走）', () => {
   const lifecycle = sliceAround(host, "const stopCreated = ctx.on('agent/created'", 900);
   assert.match(lifecycle, /stopping = true;/, 'teardown 必须先置 stopping，阻止新挂载');
-  assert.match(lifecycle, /runtimeRegistry\.drain\(\)/, 'teardown 必须 drain 注册表');
-  assert.match(lifecycle, /Promise\.allSettled/, '逐个 dispose 且不因单个失败中断');
+  assert.match(lifecycle, /await runtimeRegistry\.unmountAll\(\)/, 'teardown 必须 unmountAll —— 只 dispose runtime 不够');
+  // 回到"只 dispose runtime"就是本次事故的复发形态：注册留在 agent.ctx 上，
+  // 下一次 apply 的 attach 撞内核同名守卫 → 该会话永久 no_runtime。
+  assert.doesNotMatch(lifecycle, /runtimeRegistry\.drain\(\)/, '不得退回 drain() + 手工 dispose');
+});
+
+test('attach 必须把 agent.ctx.effect 的 disposer 交回，不得丢弃', () => {
+  const attach = sliceAround(host, 'attach: (agent, runtime) =>', 1400);
+  assert.match(attach, /const disposeMount = agent\.ctx\.effect\(/, 'effect 返回值必须接住');
+  assert.match(attach, /return \(\) => disposeMount\(\);/, '必须把 disposer 交回注册表');
+  // 反面：直接 `agent.ctx.effect(...)` 不接返回值 == 本次挂载不可撤销。
+  assert.doesNotMatch(attach, /^\s*agent\.ctx\.effect\(/m, '不得丢弃 effect disposer');
+});
+
+test('创建路径必须把"调度器未挂载"说出来（#71 的病根是安静）', () => {
+  const notify = sliceAround(host, 'const notifyUserChange =', 500);
+  assert.match(notify, /: boolean =>/, 'notifyUserChange 必须回报是否挂上');
+
+  const tools = sliceAround(host, 'const armScheduler =', 400);
+  assert.match(tools, /return onUserChange\(target\)/, '工具侧要有统一的"重驱并回报"入口');
+  assert.match(host, /warning: t\.warnSchedulerNotArmed/, 'user_schedule_create 的结果要带 warning');
+  assert.match(commands, /notArmed/, '/later 与 /schedule 的成功文案要带上告警');
+  assert.match(readDict, /warnSchedulerNotArmed/, '告警文案走双语字典，不硬编码在逻辑里');
 });

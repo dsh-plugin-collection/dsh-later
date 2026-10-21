@@ -4,6 +4,30 @@
 
 ## Unreleased
 
+- **fix** 插件热重载后，重载前就已存在的会话不再永久 `no_runtime`（#71 的残留洞）。
+  症状与 #71 相同：提醒能建、dock 能显示、到点不响，点「插话发送」报
+  `no_runtime: 该会话尚未挂载用户调度器`。
+  - 1.5.0 补的「水合 + 按需自愈」只解决了一半：它假设 `attach` 可以重复执行，实际不能。
+    挂载的副作用（`user_schedule_*` 工具、`agent/status` 监听）注册在 `agent.ctx` 上，
+    生命周期跟着 **agent** 走，插件 fiber 被拆时宿主不替插件撤销；而内核对同名注册直接抛
+    （`@deepseek-ai/dsh-scope` 的 `NamedEntries.insert`，报错文案
+    `tool "…" is already registered in this scope`）。于是重载后新实例每次 attach 都失败，
+    注册表按「失败不污染」不入表，该会话从此挂不回来，直到重启宿主或换一个新会话。
+    新建会话不受影响：它的工具作用层是干净的。
+  - 现在 `attach` 必须交回 `agent.ctx.effect(...)` 的 disposer，注册表保管它，
+    teardown 走 `unmountAll()` 逐个执行：谁注册的谁带走。`drain()` 随之删除
+    （只 dispose runtime 而留下注册，正是本次故障的形态）。
+  - 创建路径不再静默：调度器不在位时 `user_schedule_create` 的结果带 `warning` 字段，
+    `/later` 与 `/schedule` 的成功文案追加同一句告警（双语字典 `warnSchedulerNotArmed`）。
+    #71 的代价一半在"不响"，一半在"没人知道"。
+  - 护栏：新增一条把内核同名守卫搬进假件的行为测试（不先 `unmountAll` 就重挂必须失败，
+    先拆则成功），这是 `no_runtime` 复发的唯一自动防线；`node --test "tests/*.test.mjs"`
+    481/481 通过（基线 477 加 4 条新增），host 与 client 的 typecheck 均干净。
+    变异验证：让 `unmountAll` 不执行 disposer，2 条测试变红。
+  - 归因边界：机制部分由代码与内核行为确定；本次触发点（10:02:33 与 10:11:26 之间发生过
+    一次重载）由会话日志时间线与文件时间推断，宿主 `ctx.logger` 那句挂载失败告警
+    未能在本机可读日志中找到。
+
 - **feat** 待发附件在 dock 行里显示**真缩略图**，不再只有「发送后可见 + 大小」。
   - 先说清这不是渲染问题：宿主 `session.readAttachment` 只放行**已被本会话事件引用**的
     附件（`referencedImage` → `imageInEvent` 只扫 `user/message`、`tool/result` 等第一方

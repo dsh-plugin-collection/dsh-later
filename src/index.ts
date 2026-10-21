@@ -233,12 +233,24 @@ function registerUserScheduleTools(
   agent: Agent,
   getSettings: () => SchedulerSettings,
   getLocale: () => string | undefined,
-  onUserChange: (agent: Agent) => void,
+  onUserChange: (agent: Agent) => boolean,
 ): () => void {
   const dispose = () => undefined;
   try {
     const t = hostDictFor(getLocale());
     const maxChars = resolveSchedulerPromptLimits(getSettings()).maxChars;
+    /**
+     * 重驱该 agent 的调度器。
+     * @returns 调度器是否在位（false == 这条提醒不会被触发，必须告诉用户）。
+     */
+    const armScheduler = (target: Agent): boolean => {
+      try {
+        return onUserChange(target);
+      } catch {
+        /* 通知失败不影响工具结果 */
+        return false;
+      }
+    };
     const disposers = [
       toolCtx.tools.register(
         defineTool({
@@ -287,11 +299,11 @@ function registerUserScheduleTools(
               resolveSchedulerPromptLimits(settings),
             );
             if (result.ok) {
-              try {
-                onUserChange(agent);
-              } catch {
-                /* 通知失败不影响结果 */
-              }
+              // 调度器不在位就如实标注：返回 ok:true 却永远等不到投递，是 #71 里
+              // 这个 bug 最贵的部分（安静）。warning 不改 ok，调用方仍可继续用 id。
+              return JSON.stringify(
+                armScheduler(agent) ? result : { ...result, warning: t.warnSchedulerNotArmed },
+              );
             }
             return JSON.stringify(result);
           },
@@ -539,8 +551,12 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     drive: (runtime) => runtime.requestDrive(),
     warn: (message) => ctx.logger.warn(message),
     attach: (agent, runtime) => {
-      // effect 的 disposer 由 agent.ctx 生命周期托管，这里不需要自己持有。
-      agent.ctx.effect(() => {
+      // 把 effect disposer 交回注册表，别丢。这些副作用挂在 agent.ctx 上（跟着 agent
+      // 的命，不是跟着插件的命）：插件 fiber 被拆时宿主不会替我们撤销，所以必须由
+      // 注册表在 unmountAll() 里主动拆 —— 否则重载后旧实例留下的同名工具注册会让
+      // 新实例的 attach 撞上内核守卫（tool "…" is already registered in this
+      // scope），该会话从此永久 no_runtime：提醒能建、dock 能显示、到点不响。
+      const disposeMount = agent.ctx.effect(() => {
         const getLocale = () => ctx.get('locale')?.getSnapshot().active;
         const disposeTools = registerUserScheduleTools(ctx, agent.ctx, agent, getSettings, getLocale, notifyUserChange);
         const stopStatus = agent.ctx.on('agent/status', ({ status }: { status: string }) => {
@@ -558,15 +574,21 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
           }
         };
       }, 'later.userTools()');
+      return () => disposeMount();
     },
   });
 
-  /** 用户创建/删除成功 → 重驱该 agent 的调度器（缺挂载时自愈补挂，见注册表）。 */
-  const notifyUserChange = (agent: Agent): void => {
+  /**
+   * 用户创建/删除成功 → 重驱该 agent 的调度器（缺挂载时自愈补挂，见注册表）。
+   * @returns 是否真的挂上了。false 意味着这条提醒**不会被触发**，调用方必须如实说，
+   *   不能再给用户一句"将于 X 发送"。（#71 的教训：静默是最贵的部分。）
+   */
+  const notifyUserChange = (agent: Agent): boolean => {
     try {
-      runtimeRegistry.drive(agent);
+      return runtimeRegistry.drive(agent);
     } catch {
       /* 调度失败不影响工具/命令的结果 */
+      return false;
     }
   };
 
@@ -606,8 +628,10 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     return async () => {
       stopping = true;
       stopCreated();
-      const drained = runtimeRegistry.drain();
-      await Promise.allSettled(drained.map((runtime) => runtime.dispose()));
+      // 关键一步：拆掉自己注册过的东西（工具 / 状态监听 / runtime）。
+      // 只 dispose runtime 是不够的 —— 工具注册在 agent.ctx 上，宿主不会替插件撤，
+      // 留着它们，下一次 apply 的 attach 就会撞内核的同名守卫而永久失败。
+      await runtimeRegistry.unmountAll();
     };
   }, 'later.userToolsLifecycle()');
 
