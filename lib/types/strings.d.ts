@@ -46,6 +46,7 @@ declare const zh: {
     readonly errUnsupportedKind: "不支持的操作类型。";
     readonly errNotPaused: "提醒未暂停。";
     readonly errInternalError: "操作失败。";
+    readonly warnSchedulerNotArmed: "注意：本会话的调度器未挂载，这条提醒到点不会触发。请重启宿主进程或新开一个会话后重建（插件热重载后，重载前就已存在的会话可能挂不回来）。";
 };
 /** 单语言文案字典类型（宽化为 string，zh/en 通用）。 */
 export type HostStrings = {

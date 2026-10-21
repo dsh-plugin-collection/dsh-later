@@ -15,8 +15,11 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands';
 import type { PromptLimits } from './user-tools.js';
-/** 用户创建/删除成功后的通知回调（宿主用它重驱用户调度器）。 */
-export type UserChangeNotifier = (agent: Agent) => void;
+/**
+ * 用户创建/删除成功后的通知回调（宿主用它重驱用户调度器）。
+ * @returns 调度器是否在位。false 表示"这条不会被触发"，创建路径必须把它说出来。
+ */
+export type UserChangeNotifier = (agent: Agent) => boolean;
 /**
  * 用户主动插话回调（GUI「插话发送」按钮触发）。handler 返回 steer 结果；
  * - `{ ok: true, steered: true }` 表示已成功把消息立即推给 in-flight agent；
