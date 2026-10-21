@@ -225,7 +225,12 @@ function apply(ctx: Context): void {
         saveFailed: '保存失败，请重试。',
         loading: '加载中…',
         unavailable: '设置暂不可用。',
-        sectionDisplayToggle: '显示设置',
+        /**
+         * 详情页「在设置中显示」开关的 section 标题。
+         * 取值必须与 `sectionDisplay` 不同：详情页把这两段连着渲染，同名时页面上会
+         * 出现两个「显示设置」。护栏见 tests/settings-section-headings.test.mjs。
+         */
+        sectionDisplayToggle: '设置入口',
         showInSettings: '在设置中显示',
         showInSettingsHint: '在设置对话框中显示本插件的设置页（刷新页面后生效）',
       },
@@ -294,7 +299,7 @@ function apply(ctx: Context): void {
         saveFailed: 'Save failed, please try again.',
         loading: 'Loading…',
         unavailable: 'Settings unavailable.',
-        sectionDisplayToggle: 'Display',
+        sectionDisplayToggle: 'Settings entry',
         showInSettings: 'Show in settings',
         showInSettingsHint: 'Show this plugin\'s settings page in the settings dialog (refresh to take effect)',
       },
