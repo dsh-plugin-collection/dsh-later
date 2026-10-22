@@ -251,7 +251,7 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 ## For plugin developers: the schedule summary API (cross-plugin)
 
 dsh-later exposes a workspace-wide schedule summary as a public data face
-([issue #17](http://192.168.4.77:3000/dsh-plugins/dsh-later/issues/17)), so other client
+(issue #17), so other client
 plugins (e.g. dsh-group-status) can aggregate schedule state on folders/sidebar rows
 **without** parsing the `userSchedules` projection themselves — and without drifting
 from the inline row badge.
@@ -298,7 +298,7 @@ Contract notes:
 
 "How many sessions in this group have scheduled reminders" is now owned end to end: dsh-later
 registers `dsh-later.schedule` inside its own client `apply`, following
-[the facet protocol v1](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md),
+[the facet protocol v1](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md),
 and hands over fold / merge / label / renderIcon. The counting basis (sessions **with** schedules),
 the tone (purple scheduled / orange urgent / red overdue), the pulse (only urgent and overdue
 blink), the wording (`N 定时任务` / `N Scheduled`) and the glyph (the official outline clock at

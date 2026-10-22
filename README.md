@@ -250,7 +250,7 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 ## 给插件开发者：定时摘要 API（跨插件）
 
 dsh-later 把「全会话定时任务摘要」作为公共数据面暴露出来
-（[issue #17](http://192.168.4.77:3000/dsh-plugins/dsh-later/issues/17)），其它客户端插件
+（issue #17），其它客户端插件
 （如 dsh-group-status）据此在分组/侧栏聚合显示定时状态，**无需**自己解析
 `userSchedules` 投影，也不会与行内 badge 漂移。
 
@@ -294,7 +294,7 @@ const live = useScheduleSummary()
 ### 折叠分组徽标：由我们自己注册 facet（issue #36）
 
 「组内有几个会话挂着定时任务」这一格，**语义与实现现在同侧**：本插件按 dsh-group-status 的
-[facet 协议 v1](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md)
+[facet 协议 v1](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md)
 在自己 client 的 `apply` 里登记 `dsh-later.schedule`，交出 fold / merge / label / renderIcon。
 徽标数字的口径（组内**有任务的会话数**）、色档（scheduled 紫 / urgent 橙 / overdue 红）、
 脉冲（只有 overdue 与 urgent 闪）、文案（`N 定时任务` / `N Scheduled`）与图标（官方描边时钟
