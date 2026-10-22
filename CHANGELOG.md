@@ -4,6 +4,22 @@
 
 ## Unreleased
 
+- **fix** dock 只有**一条**任务时，行首补上时钟 glyph，与原生队列左边缘对齐。
+  - 宿主 `QueueDock.tsx:197` 有专门分支并写明理由："Single-item strip has no count
+    header, so the row itself carries the queue glyph" —— 多条时图标在计数 header 里，
+    单条时 header 不渲染，行首就空了，缩略图直接顶到 12px padding。
+  - 实测：原生单条行缩略图 `dx=36`；我们加 glyph 后 `12 padding + 16 图标 + 10 gap = 38`。
+  - 图标用**官方时钟** `IconClockOutlineRegular`（header 已在用，零新增依赖、CSS 一行没改：
+    `.ss-dock-lead` 本来就是通用规则）。**特意记录为什么不是闹钟**：图标集里
+    `IconAlarmClockOutline*` 存在，但在整个上游仓库**零消费方**；宿主定时任务 UI 全程用
+    时钟（`ui-schedule/ScheduleTaskTab.tsx:121` 空状态、`DeliveryHistory.tsx:152` 行级
+    `deliveryGlyph`）—— 别自作聪明换。
+  - 测试：`dock-attachments` 加三处锁（glyph 在行内第一个子元素 / 只在 `schedules.length === 1`
+    时出现 / 全组件 `ss-dock-lead` 恰好两处）。
+  - `docs/notes/dock-alignment.md` 新增 I12（本条）与 **I13**（正文不走
+    `conversation.user.text` 投影 → `@文件引用` 渲染成原始字符串；卡点是 dock 拿不到
+    `renderFactorySlot`，属另一处契约查证，没塞进本 PR）。
+
 - **fix** 插件详情页不再出现两个「显示设置」标题。
   - 详情页（`surface === 'detail'`）先渲染「在设置中显示」开关段（标题 key
     `sectionDisplayToggle`），紧接着渲染字段组第一段（标题 key `sectionDisplay`），

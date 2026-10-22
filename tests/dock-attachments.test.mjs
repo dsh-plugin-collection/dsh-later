@@ -60,6 +60,17 @@ test('附件带在行首、正文左侧（与宿主 QueueDock 同位置）', () 
   assert.ok(rowAt < bandAt && bandAt < previewAt, '附件带必须是 .ss-dock-row 的第一个子元素');
   assert.ok(previewAt < lineAt && lineAt < barAt, '正文与进度条仍在 preview 内，且正文先于条');
   /*
+   * 单条时行首必须有 glyph —— 宿主 QueueDock.tsx:197 的 `rowCount === 1` 同款分支：
+   * 多条时图标在计数 header 里，单条时 header 不渲染，行首空出来、左边缘与原生对不齐。
+   * 三处一起锁：位置（行内第一个）、条件（只单条）、总数（别处不许再加第三个）。
+   */
+  const leadAt = component.indexOf('className="ss-dock-lead"');
+  assert.ok(leadAt > 0 && leadAt < bandAt, '单条行的第一个子元素必须是 .ss-dock-lead');
+  assert.match(component.slice(leadAt - 120, leadAt), /schedules\.length === 1 &&/,
+    '行首 glyph 只能单条时出现（多条由 header 承担）');
+  assert.equal(count(component, 'className="ss-dock-lead"'), 2,
+    'lead 只该有两处：单条行内 + 计数 header');
+  /*
    * 移到行首**新引入**的风险：附件带开始与正文抢横向了（旧的下方独占带不会）。
    * 所以必须锁收缩能力——挤不下时它自己缩并横向滚动，而不是把正文顶出可视区。
    * 这正是我们不照抄宿主 max-width:55% 的地方：宿主缩完是静默裁切，我们是可滚。

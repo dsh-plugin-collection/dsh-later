@@ -713,6 +713,20 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
           仍然**不抄**宿主的 `max-width:55% + overflow:hidden`（那是给它单行正文让路的
           折中，代价是静默裁切）：我们靠可收缩 + 横向滚动兜住，见 styles.ts。
         */}
+        {/*
+          单条时行首补一个时钟 glyph。宿主 QueueDock 就是这么做的（`QueueDock.tsx:197`
+          「Single-item strip has no count header, so the row itself carries the queue
+          glyph」）：多条时图标在计数 header 里，单条时 header 不渲染，行首就空了。
+          图标用**官方时钟** `IconClockOutlineRegular`（与 header 同一个，零新增依赖）：
+          宿主自己的定时任务 UI 全程用它（`ui-schedule/ScheduleTaskTab.tsx:121`、
+          `DeliveryHistory.tsx:152` 的行级 `deliveryGlyph`），而图标集里的闹钟
+          `IconAlarmClockOutline*` 在上游**零消费方** —— 官方选的"定时/提醒"就是时钟。
+        */}
+        {schedules.length === 1 && (
+          <span className="ss-dock-lead" aria-hidden="true">
+            <IconClockOutlineRegular size={16} />
+          </span>
+        )}
         <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} localMediaUrl={localMediaUrl} />
         <div className="ss-dock-preview">
           <div className="ss-dock-row-line">
