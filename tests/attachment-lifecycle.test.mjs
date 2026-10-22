@@ -356,12 +356,14 @@ test('附件带留在文档流内且列表滚动上限不动（#39-9 · 高度�
   assert.match(list, /max-height:\s*180px/, '列表滚动上限不得被改小/去掉，否则 8 附件时进度条被推出可视区');
   assert.match(list, /overflow-y:\s*auto/);
 
-  // 结构顺序即纵向预算：正文 → 附件 → 进度条（附件排在进度条之前，才可能把它挤出可视区，
-  // 所以顺序本身是要守的东西）。
-  const rowLine = component.indexOf('<div className="ss-dock-row-line">');
+  // 结构顺序（本轮改）：附件带提到**行首**，与宿主 QueueDock 同位置。纵向预算比旧布局
+  // 更松——附件不再独占一带，行从「正文/附件/条」三带回到「正文/条」两带，「附件把
+  // 进度条挤出可视区」这个旧风险随之消失；仍要守的是它留在流内 + 超宽可滚（上面三条）。
+  const previewAt = component.indexOf('<div className="ss-dock-preview">');
   const bandAt = component.indexOf('<DockAttachments ');
   const barAt = component.indexOf('<MultiBar item={item}');
-  assert.ok(rowLine > 0 && bandAt > rowLine && barAt > bandAt, '必须是 正文 / 附件 / 进度条 的顺序');
+  assert.ok(bandAt > 0 && bandAt < previewAt && previewAt < barAt,
+    '必须是 附件（行首）→ 正文 → 进度条');
 });
 
 // ── 10 同带内单块失败不牵连 ─────────────────────────────────────────────────

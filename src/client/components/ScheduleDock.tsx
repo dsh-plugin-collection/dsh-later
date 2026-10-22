@@ -705,6 +705,15 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
         className={`ss-dock-row${isPaused ? ' ss-paused' : ''}`}
         data-ss-dock-row={item.id}
       >
+        {/*
+          附件带（#38）：**行的第一个子元素**，在正文左侧同一行 —— 与宿主 QueueDock
+          同位置（宿主是 `[lead] [attachments] [preview] [status] [actions]`）。
+          原先放在正文下方独占第三带，两 dock 叠在一起时（原生队列就在我们上面）
+          观感明显不是一族，故改回行首。
+          仍然**不抄**宿主的 `max-width:55% + overflow:hidden`（那是给它单行正文让路的
+          折中，代价是静默裁切）：我们靠可收缩 + 横向滚动兜住，见 styles.ts。
+        */}
+        <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} localMediaUrl={localMediaUrl} />
         <div className="ss-dock-preview">
           <div className="ss-dock-row-line">
             <span className="ss-dock-row-time">{formatHhmm(epoch, detectTimeZone())}</span>
@@ -713,13 +722,6 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
             </span>
             <span className="ss-dock-row-prompt" title={item.prompt}>{item.prompt}</span>
           </div>
-          {/*
-            附件带（#38）：与 `.ss-dock-row-line` 是**兄弟**而非嵌套——行的三带结构是
-            正文 / 附件 / 进度条，附件不与正文抢横向（宿主 `.attachments` 的
-            max-width:55% 折中我们不需要）。放在进度条**之前**，保证条仍贴底、
-            不被附件挤出可视区（#16 的条长一致性回归不受影响）。
-          */}
-          <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} localMediaUrl={localMediaUrl} />
           <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
             <span className="ss-dock-steer-err">{steerErr.get(item.id) ?? pauseErr.get(item.id)}</span>
