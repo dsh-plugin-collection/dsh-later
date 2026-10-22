@@ -84,7 +84,7 @@ const SCAN_DEBOUNCE_MS = 60;
 const STATE_TICK_MS = 30_000;
 
 /** 旧版时钟 glyph（10×10 crispEdges，外圈 8 方块 + 上/右指针，中心留空）。 */
-const CLOCK_SVG_CLASSIC =
+export const CLOCK_SVG_CLASSIC =
   '<svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true">' +
   '<g class="ss-presence-ring">' +
   '<rect x="0" y="0" width="2" height="2"/><rect x="4" y="0" width="2" height="2"/>' +
@@ -115,7 +115,7 @@ const CLOCK_FACE_CIRCUMFERENCE = 2 * Math.PI * CLOCK_FACE_R;
  * 比例改写。**无从算进度时那条弧会被隐藏**，于是退回改造前的"恒定整环" ——
  * 旧形状即新形状的退化态，不需要分支渲染。
  */
-const CLOCK_SVG_MODERN =
+export const CLOCK_SVG_MODERN =
   '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">' +
   `<circle class="ss-clock-track" cx="12" cy="12" r="${CLOCK_FACE_R}"/>` +
   `<circle class="ss-clock-prog" cx="12" cy="12" r="${CLOCK_FACE_R}" ` +
