@@ -436,7 +436,7 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
         <section className="ss-section" aria-labelledby="ss-section-display-toggle">
           <h3 className="ss-section-heading" id="ss-section-display-toggle">{t('sectionDisplayToggle')}</h3>
           <div className="ss-section-fields">
-            <div className="ss-field ss-fieldToggle">
+            <div className="ss-field">
               <div className="ss-toggle-row">
                 <div className="ss-label-group">
                   <label className="ss-toggle-label" htmlFor="ss-show-settings">{t('showInSettings')}</label>
@@ -499,7 +499,7 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
               if (field.kind === 'boolean') {
                 const checked = displayValue(field) !== 'false';
                 return (
-                  <div className="ss-field ss-fieldToggle" key={field.key}>
+                  <div className="ss-field" key={field.key}>
                     <div className="ss-toggle-row">
                       <div className="ss-label-group">
                         <label htmlFor={fieldId} className="ss-toggle-label">

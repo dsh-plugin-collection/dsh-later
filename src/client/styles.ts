@@ -690,6 +690,15 @@ const COMPONENTS = [
 '.ss-card-discard:focus-visible, .ss-card-save:focus-visible {',
 '  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px;',
 '}',
+/* Section Beta 徽标（对齐官方 Tag tone="info" 样式：无 border、10% 背景透明度） */
+'.ss-section-beta {',
+'  display: inline-flex; align-items: center;',
+'  padding: 1px 8px; margin-left: 8px;',
+'  font-size: 11px; font-weight: 500; line-height: 17px;',
+'  color: var(--dsw-alias-state-business-primary);',
+'  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);',
+'  border-radius: 999px; corner-shape: round; white-space: nowrap;',
+'}',
 ].join('\n');
 
 export function injectStyles(): () => void {

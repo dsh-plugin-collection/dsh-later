@@ -4,6 +4,32 @@
 
 ## Unreleased
 
+- **fix** 设置页「高级语法」旁的 Beta 徽标不再是裸文本。
+  - 缺陷性质：`SchedulerSettingsCard.tsx` 早就在渲染 `<span className="ss-section-beta">`，
+    但 `styles.ts` 里**从来没有**这条规则 —— 编译不报错（className 是字符串，TS 管不着）、
+    测试不报错（没有断言看过它）、肉眼也难发现（徽标确实渲染了，只是长得不对）。
+    补齐规则，对齐官方 `Tag tone="info"`：无描边、10% 业务主色底、`radius 999px`。
+  - 真机实测（渲染后的 computed style）：`bg = color(srgb … / 0.1)`、
+    `color = rgb(122,170,255)`、`radius = 999px`、`padding = 1px 8px`、`display = inline-flex`、
+    盒 37×19。
+  - **新增结构性守护** `tests/client-class-guard.test.mjs`（3 条）：组件 `className` 用到的
+    每个 `ss-*` 类必须在 `styles.ts` 有定义，**零豁免**。提取规则是踩出来的，都在文件头写明：
+    只认 `className=` 属性（全域扫 `ss-` 会把 `data-ss-dock` 探针、`id="ss-show-settings"`、
+    `aria-labelledby` 全误判成类名，误报 6 个，守护立刻失去可信度）；`className={…}` 走花括号
+    平衡再取字符串/模板字面量（三元里的 `' ss-due'` 必须看得见）；剔除 `${…}` 插值并要求 token
+    不以 `-` 结尾（否则 `ss-section-${id}` 被截成半截名）；窗口式启发会把类名从中间截断
+    （`ss-tasklist-header` → `ss-tasklist-h`），已弃用。
+    三条测试分别是：正向零未定义、**提取器非空转**（类名数下限 + 探针，防"扫不到东西→永远通过"）、
+    **反向自证**（内存里摘掉那条规则，守护必须立刻抓到 —— 防判据永真）。
+  - 顺带清掉三个**死类**（组件引用、样式表无定义、无任何测试依赖，删除零视觉变化）：
+    `ss-editing`（编辑态行）、`ss-paused-label`（暂停态倒计时，实际由
+    `.ss-dock-row.ss-paused .ss-dock-row-countdown` 祖先规则生效）、`ss-fieldToggle`
+    （开关字段行，实际由已定义的 `.ss-toggle-row` 承担布局）。不删它们这条守护就得开豁免名单，
+    而豁免名单正是守护最先烂掉的地方。
+  - 术语未动：徽标仍按 `docs/ui/08-microcopy.md` §6.3 的规定显示 `Beta`（"不翻译，双语同一拼写"）。
+    是否改成中文「实验性」是一条**有记录的旧决策的推翻**，单独提案，见另一份 PR。
+  - `node --test` 493/493（基线 490 + 3），host 与 client typecheck 均干净。
+
 - **fix** dock 正文改走宿主 `conversation.user.text` 投影，`@会话引用` 不再在行里露出 base64。
   - 起因：宿主队列行的正文走 `renderFactorySlot('conversation.user.text', …)`，我们直接
     渲染 `item.prompt` 原文。而会话引用的**线格式**是
