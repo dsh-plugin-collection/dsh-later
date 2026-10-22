@@ -2,6 +2,21 @@ import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { IconInfoOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import { isValidHhmm } from '../../smart-window.js';
+import { CLOCK_SVG_CLASSIC, CLOCK_SVG_MODERN } from '../session-presence.js';
+
+/**
+ * 时钟风格预览 —— 直接复用 session-presence.ts 里线上 badge 用的**同一份** SVG
+ * 字符串（单一可信源）：改 glyph 只需改一处，预览不可能与线上漂移。此前手抄一份
+ * 正是尺寸/颜色对不上的根源。
+ *
+ * 必须包在 .ss-presence 容器里 —— styles.ts 中所有时钟样式（rect fill、track/hand
+ * 的 stroke 与 stroke-width、紫色、呼吸动画）都作用域于 .ss-presence，缺了这层
+ * 容器线上样式一条都不会命中。SVG 为插件自带常量，dangerouslySetInnerHTML 可信。
+ */
+function ClockIconPreview({ style }: { style: string }): JSX.Element {
+  const svg = style === 'classic' ? CLOCK_SVG_CLASSIC : CLOCK_SVG_MODERN;
+  return <span className="ss-presence" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
 
 /**
  * 宿主 settingsScope 服务的最小结构视图（client 侧契约，仅列出本组件用到的成员）。
@@ -527,8 +542,11 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
                 <div className="ss-field" key={field.key}>
                   <div className="ss-card-fieldHead">
                     <div className="ss-label-group">
-                      <label htmlFor={fieldId} className="ss-card-label">
+                      <label htmlFor={fieldId} className="ss-card-label" style={field.key === 'clockIconStyle' ? { display: 'inline-flex', alignItems: 'center', gap: 8, flex: '0 0 auto' } : undefined}>
                         {t(labelKey)}
+                        {field.key === 'clockIconStyle' && (
+                          <ClockIconPreview style={displayValue(field)} />
+                        )}
                       </label>
                       {helpHint && (
                         <button
