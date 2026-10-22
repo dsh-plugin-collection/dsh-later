@@ -156,6 +156,22 @@ export interface ScheduleDockProps extends ScheduleDockInjected {
   useProjection?: (key: string) => { schedules?: readonly ClientSchedule[] } | undefined;
   /** 会话 id。 */
   sessionId?: string;
+  /**
+   * 宿主 factory slot 渲染器（标准 kit **无条件**提供，见 `ui-renderer` 的
+   * `scoped-slots.tsx:556`：`kit = { ...standard, renderFactorySlot: boundRenderFactorySlot(entry) }`）。
+   *
+   * 本插件用它把正文走宿主的 `conversation.user.text` 投影，于是 `@[标签](dsh-session:…)`
+   * 这类线格式渲染成引用 chip，而不是在行里露出 base64 —— 与原生队列同源。
+   *
+   * 声明为可选：更老的 renderer 可能压根不给这一项，此时 `DockPrompt` 退回原文。
+   * 身份**按 entry 稳定**（宿主用 `WeakMap` 缓存，注释明写是为了让 memo 组件不因
+   * 无关重渲染而重订阅），所以可以进 `useMemo` 依赖 —— 本仓 dock 每秒 tick，这点必须成立。
+   */
+  renderFactorySlot?: (
+    name: string,
+    props: object,
+    options?: { fallback?: JSX.Element | string },
+  ) => JSX.Element | string | null;
 }
 
 const deleteLine = (id: string): string => `/user-schedule-delete ${JSON.stringify({ id })}`;
@@ -180,7 +196,7 @@ function canPause(item: ClientSchedule, now: number): boolean {
   return Number.isFinite(epoch) && epoch > now;
 }
 
-export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl, sessionId, useProjection, t: seatT }: ScheduleDockProps): JSX.Element | null {
+export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl, sessionId, useProjection, renderFactorySlot, t: seatT }: ScheduleDockProps): JSX.Element | null {
   const now = useNow(1000);
   // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
   // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
@@ -734,7 +750,13 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
             <span className={`ss-dock-row-countdown${!isPaused && state === 'overdue' ? ' ss-due' : ''}${isPaused ? ' ss-paused-label' : ''}`}>
               {countdownText}
             </span>
-            <span className="ss-dock-row-prompt" title={item.prompt}>{item.prompt}</span>
+            {/*
+              正文走宿主的 conversation.user.text 投影（与原生队列同源），于是
+              `@[标签](dsh-session:…)` 渲染成引用 chip 而不是在行里露出 base64。
+              必须是**独立组件**而不是在这里直接调：`renderRow` 是被 `.map()` 调用的
+              普通函数，不是组件，在里面写 `useMemo` 直接违反 hooks 规则。
+            */}
+            <DockPrompt text={item.prompt} renderFactorySlot={renderFactorySlot} />
           </div>
           <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
@@ -1153,6 +1175,55 @@ function DockEditor({
       }}
     />
   );
+}
+
+/* ==================== DockPrompt：正文（走宿主 user-text 投影） ==================== */
+
+/**
+ * 投影的显示期事实。取值**照抄宿主 `QUEUE_TEXT_FACTS`**（`ui-conversation` 的
+ * `queue/QueueDock.tsx:19`）：只做空白归一，**不给 `sessionLabels`** —— 给了会让
+ * dock 每秒 tick 时去读会话标签列表，白涨成本，而显式线格式本来就能被规则匹配。
+ */
+const DOCK_TEXT_FACTS = { collapseWhitespace: true, trimWhitespace: true } as const;
+
+/**
+ * 一行正文。
+ *
+ * 为什么必须单独成组件：`renderRow` 是被 `.map()` 调用的**普通函数**，不是组件，
+ * hooks 写在里面直接违反规则；而这里又**必须** memo —— dock 每秒 tick 重渲染每一行，
+ * 不缓存等于每秒把每行正文重解析一遍（宿主 dock 没有 tick，所以它能直接内联。
+ * 这与 I9「依赖不能用块对象」是同一类前提差异，照抄宿主形状就会踩）。
+ *
+ * 三层降级，任一层缺失都只是「少个 chip」，不炸行：
+ *  1. `renderFactorySlot` 不存在（更老 renderer）→ 原文；
+ *  2. factory 未注册（宿主没挂 user-text）→ 我们传的 `fallback`，即原文
+ *     （`FactoryOutlet`：`if (definition === undefined) return <>{fallback ?? null}</>`）；
+ *  3. 投影渲染期抛错 → 宿主外层 `FactoryErrorBoundary` 吞成 `<div data-factory-error>`，
+ *     只影响这一块。
+ * 另加 try/catch 兜**调用期**抛错（kit 来自上一次热重载的残留闭包时可能发生）。
+ */
+function DockPrompt({
+  text,
+  renderFactorySlot,
+}: {
+  text: string;
+  renderFactorySlot?: ScheduleDockProps['renderFactorySlot'];
+}): JSX.Element {
+  const projected = useMemo(() => {
+    if (renderFactorySlot === undefined) return text;
+    try {
+      return renderFactorySlot('conversation.user.text', {
+        text,
+        facts: DOCK_TEXT_FACTS,
+        interactive: false,
+        ellipsis: true,
+      }, { fallback: text }) ?? text;
+    } catch {
+      return text;
+    }
+  }, [text, renderFactorySlot]);
+  // title 仍给原文：chip 化之后没有别的途径能还原整行文本。
+  return <span className="ss-dock-row-prompt" title={text}>{projected}</span>;
 }
 
 /* ==================== DockAttachments：行内附件带（issue #38） ==================== */

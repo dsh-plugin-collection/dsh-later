@@ -4,6 +4,41 @@
 
 ## Unreleased
 
+- **fix** dock 正文改走宿主 `conversation.user.text` 投影，`@会话引用` 不再在行里露出 base64。
+  - 起因：宿主队列行的正文走 `renderFactorySlot('conversation.user.text', …)`，我们直接
+    渲染 `item.prompt` 原文。而会话引用的**线格式**是
+    `@[标签](dsh-session:<base64url(sessionId)>)`（`dsh-session-reference/lib/types/uri.js:45`，
+    40~60 字符 base64），composer 提交用的又正是 clipboard 投影
+    （`input/facade.ts:426` `draft: projection.clipboardText`，"chips expanded to their
+    clipboard form"）→ 这串 base64 **会**进 sidecar 并原样显示。所以这不是"少个 chip"的
+    美观问题，是行里会出现一坨乱码。
+  - **接线前我误判过一次**，记录以免后人重走：以为 dock 拿不到 `renderFactorySlot`、
+    属上游契约缺口。实际 `ui-renderer/scoped-slots.tsx:556` 是
+    `{ ...standard, renderFactorySlot: boundRenderFactorySlot(entry) }` —— **每个 slot 条目
+    无条件拿到**（对照：`renderSlot` 只在声明 `children` 时给、`useStore` 只在有 store 时给）。
+    真机 React fiber 探针也证实我们 dock 的 props 里就有它。
+  - 两个**必须注意的前提差异**（照抄宿主形状就会踩）：
+    ① 函数身份按 entry 稳定（宿主 `WeakMap` 缓存，注释明写为 memo 设计）→ 可以进
+      `useMemo` deps，实测跨 2.5s（≥2 次 tick）是同一个函数对象；
+    ② 我们有每秒 tick 而宿主 dock 没有 → 投影必须 memo，且必须待在**组件** `DockPrompt`
+      里（`renderRow` 是被 `.map()` 调用的普通函数，hooks 写进去编译不报错、运行时才炸）。
+  - `facts` 照抄宿主 `QUEUE_TEXT_FACTS`（`collapseWhitespace` + `trimWhitespace`），**刻意不给
+    `sessionLabels`** —— 给了会让 dock 每秒 tick 去读会话标签列表，白涨成本，而显式线格式
+    本来就能被规则匹配。
+  - 降级四层，任一层缺失都只是"退回原文"，不炸行：prop 不存在 → 原文；factory 未注册 →
+    我们传的 `{ fallback: text }`（宿主 `FactoryOutlet` 就是 `return <>{fallback ?? null}</>`）；
+    返回 null → `?? text`；调用期抛错 → try/catch。渲染期抛错另有宿主 `FactoryErrorBoundary`
+    兜成 `<div data-factory-error>`，只影响那一块。
+  - 真机验收（合法线格式，base64url 按宿主同算法现算）：行内渲染出官方 chip
+    （`_refChip` + `data-ref-chip="session"`），可见文本 `dsh-later 会话 投影验收`，
+    **无裸 base64**，未触发 error boundary。长文本另测一处叠加风险：宿主工厂自己包了
+    `.ellipsis`，我们外层也有 CSS 省略号 —— 实测只裁一层（内层 `scrollWidth 1196 → 417`，
+    外层 `sw == w` 不触发），**只有一个省略号、不换行、行高仍 38px**。
+  - 测试：新增 `tests/dock-user-text-projection.test.mjs` 7 条 —— 含两条防"回退后没人看见"
+    的锁：**`renderRow` 内不得出现任何 hook**、**memo deps 只准 `[text, renderFactorySlot]`**。
+  - 文档：`dock-alignment.md` 的 **I6**（原标"待产品决策，不算漂移"）与 **I13** 一并改写为
+    ✅ —— I6 那个判断是错的，这不是产品取向问题，是没接线。
+
 - **fix** dock 只有**一条**任务时，行首补上时钟 glyph，与原生队列左边缘对齐。
   - 宿主 `QueueDock.tsx:197` 有专门分支并写明理由："Single-item strip has no count
     header, so the row itself carries the queue glyph" —— 多条时图标在计数 header 里，
