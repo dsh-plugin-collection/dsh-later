@@ -670,7 +670,7 @@ const COMPONENTS = [
 '  color: var(--dsw-alias-label-tertiary);',
 '}',
 '.ss-card-footer {',
-'  justify-content: flex-end; align-items: center; gap: 8px;',
+'  justify-content: flex-start; align-items: center; gap: 8px;',
 '  padding-top: 16px; display: flex;',
 '}',
 '.ss-card-failed {',
