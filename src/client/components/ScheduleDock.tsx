@@ -682,7 +682,7 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
     const state = epoch <= now ? 'overdue' : 'scheduled';
     if (editingId === item.id) {
       return (
-        <li key={item.id} className="ss-dock-row ss-editing" data-ss-dock-row={item.id}>
+        <li key={item.id} className="ss-dock-row" data-ss-dock-row={item.id}>
           <DockEditor
             text={editingText}
             label={t('editTask')}
@@ -747,7 +747,7 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
         <div className="ss-dock-preview">
           <div className="ss-dock-row-line">
             <span className="ss-dock-row-time">{formatHhmm(epoch, detectTimeZone())}</span>
-            <span className={`ss-dock-row-countdown${!isPaused && state === 'overdue' ? ' ss-due' : ''}${isPaused ? ' ss-paused-label' : ''}`}>
+            <span className={`ss-dock-row-countdown${!isPaused && state === 'overdue' ? ' ss-due' : ''}`}>
               {countdownText}
             </span>
             {/*
