@@ -424,14 +424,14 @@ test('/later 明天9点+1h：建出 2 条 at 记录，间隔一小时，内容�
   }
 });
 
-// ── 5. 高级语法开关（Beta，默认开）────────────────────────────────────────
+// ── 5. 高级语法开关（实验性，默认开）──────────────────────────────────────
 
 test('开关关闭：三种多次写法一律拒绝，并指明去哪儿开', () => {
   const off = { advancedSyntax: false };
   for (const raw of ['+1h*3 内容', '+1h+1h+0.5h 内容', '15:32+16:32 内容', '9:00+1d 内容']) {
     const r = parseScheduleInput(raw, NOW, TZ, undefined, off);
     assert.ok(!r.ok, `应当拒绝：${raw}`);
-    assert.match(r.error, /Beta 高级语法/);
+    assert.match(r.error, /实验性功能「高级语法」/);
     assert.match(r.error, /设置 → 插件 → 定时提醒 → 高级语法/);
   }
 });
@@ -448,14 +448,16 @@ test('开关关闭：单条写法与默认（不传 options）都不受影响', 
   assert.ok(explicitOn.ok && explicitOn.targets.length === 2);
 });
 
-test('开关关闭 ≠ 回到旧 bug：残片守卫始终生效（报的是残片，不是 Beta 提示）', () => {
+test('开关关闭 ≠ 回到旧 bug：残片守卫始终生效（报的是残片，不是实验性提示）', () => {
   // 「关闭高级语法」绝不能把 `+1h*3测试` 退回成「静默建一条内容为 *3测试 的任务」
   const off = { advancedSyntax: false };
   for (const raw of ['+1h*3测试 内容', '+1h..3h 内容', '15:32*3 内容']) {
     const r = parseScheduleInput(raw, NOW, TZ, undefined, off);
     assert.ok(!r.ok, `应当拒绝：${raw}`);
     assert.match(r.error, /没有生效/, `${raw} 应报残片错误，说明守卫没被开关旁路`);
-    assert.doesNotMatch(r.error, /Beta/);
+    // 两种措辞都不该出现在残片错误里：钉住"这是残片、不是被开关拦下"。
+    // 留 Beta 是防术语回退时这条断言悄悄变成永真。
+    assert.doesNotMatch(r.error, /实验性|Beta/);
   }
 });
 
@@ -471,7 +473,7 @@ test('/later handler：开关来自 settings，关闭时一条事件都不写', 
     signal: new AbortController().signal,
   });
   assert.equal(result.kind, 'error');
-  assert.match(result.text, /Beta 高级语法/);
+  assert.match(result.text, /实验性功能「高级语法」/);
   assert.equal(agent.session.appended.length, 0);
 
   // 同一个 agent 换回默认（getter 省略该字段 = 开），写法应正常展开

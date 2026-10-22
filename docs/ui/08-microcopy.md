@@ -152,11 +152,13 @@ reminders_json: [{"schedule_id":"schedule-2","occurrence_at":"2026-08-19T14:00:0
 | `maxPromptChars` | "提醒内容最大字符数（仅在「允许长文本提醒」开启时生效）。" | "Maximum characters per reminder (takes effect only when "Allow long reminder prompts" is on)." |
 | `advancedSyntax` | "让 /later 与 /schedule 一次写多条：等间隔重复、相对序列、绝对锚点序列。每条都是可单独取消/编辑的独立任务；单次最多 10 条。" | "Let /later and /schedule create several tasks at once: fixed interval, relative chain, or anchored on a wall clock. Each occurrence is an independent task you can cancel or edit; up to 10 per command." |
 
-### 6.3 Beta 徽标与拒绝文案
+### 6.3 实验性徽标与拒绝文案
 
-- Section 标题「高级语法」/ "Advanced syntax"，右侧徽标固定 `Beta`（不翻译，双语同一拼写）；`aria-label` 中文「Beta 功能，行为可能随版本调整」/ 英文 "Beta feature; behaviour may change between versions"。
+- Section 标题「高级语法」/ "Advanced syntax"，右侧徽标**中文「实验性」/ 英文 "Beta"**；`aria-label` 中文「实验性功能，行为可能随版本调整」/ 英文 "Beta feature; behaviour may change between versions"。
+  - ⚠️ **本条推翻旧规则**，原文是「右侧徽标固定 `Beta`（不翻译，双语同一拼写）」。改的核心理由是**同语言内必须同词**：徽标、开关的提示文案、命令的拒绝文案说的是同一个东西，中文里一处「实验性」一处 "Beta"，用户会以为是两件事。所以中文三处统一成「实验性」；英文侧 "Beta" 本身是通用词，保持不变——"双语同一拼写"这个约束本来就是多余的。
+  - 诚实标注：原始改动的作者没有留下理由说明，上面这条理由是代为整理 PR 的人补的**推断**。**请原作者确认后再合**。
 - 关闭该开关后的拒绝文案（`ADVANCED_SYNTAX_DISABLED`，中英暂同为中文——命令输出尚未 i18n）：
-  「多次写法（+1h\*3、+1h+1h+0.5h、15:32+16:32）属于 Beta 高级语法，当前已在设置中关闭。开启路径：设置 → 插件 → 定时提醒 → 高级语法。」
+  「多次写法（+1h\*3、+1h+1h+0.5h、15:32+16:32）属于实验性功能「高级语法」，当前已在设置中关闭。开启路径：设置 → 插件 → 定时提醒 → 高级语法。」
 - 拒绝文案必须**给出开启路径**，不能只说「不支持」：用户看到的是自己刚敲过的语法被拒，需要知道去哪儿改。
 
 ### 6.4 联动提示（maxPromptChars 禁用态）

@@ -4,6 +4,21 @@
 
 ## Unreleased
 
+- **change**（提案）中文界面里的 "Beta" 统一改成「实验性」，英文侧保留 "Beta"。
+  - 动的是**同一个功能在三处的三种叫法**：设置页徽标、该开关的提示文案、命令被拒时的
+    拒绝文案。原文混用 "Beta" 与中文说明，用户看不出说的是同一件事。
+  - 具体：`betaBadge` 中文 `Beta` → 「实验性」（`betaBadgeAria` 同步）；设置提示
+    「标记为 Beta」→「标记为实验性」；`ADVANCED_SYNTAX_DISABLED`「属于 Beta 高级语法」→
+    「属于实验性功能「高级语法」」；`/later` 命令描述「多次写法为 Beta 语法」→
+    「多次写法为实验性功能」；README 中文三处同步。
+  - **英文一律不动**（徽标、提示、README.en 仍是 "Beta"）：英文里它是通用词，翻译反而更陌生。
+  - 这条**推翻 `docs/ui/08-microcopy.md` §6.3 的旧规则**（原文：「徽标固定 `Beta`，不翻译，
+    双语同一拼写」）。§6.3 已改写，并如实标注：原始改动的作者未留理由，文档里那条理由是
+    整理 PR 的人补的推断，**需原作者确认**。因此本 PR 定位为提案，不是既成事实。
+  - 测试：`occurrences.test.mjs` 三条断言随文案同步（拒绝文案两处、残片守卫一处）。残片那条
+    改成 `doesNotMatch(/实验性|Beta/)` —— 两种措辞都不许出现在残片错误里；留 "Beta" 是防术语
+    回退时这条断言悄悄变成永真。
+
 - **fix** 设置页「高级语法」旁的 Beta 徽标不再是裸文本。
   - 缺陷性质：`SchedulerSettingsCard.tsx` 早就在渲染 `<span className="ss-section-beta">`，
     但 `styles.ts` 里**从来没有**这条规则 —— 编译不报错（className 是字符串，TS 管不着）、

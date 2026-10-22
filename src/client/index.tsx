@@ -174,13 +174,13 @@ function apply(ctx: Context): void {
         sectionTime: '时间设置',
         sectionDelivery: '投递设置',
         sectionAdvanced: '高级语法',
-        betaBadge: 'Beta',
-        betaBadgeAria: 'Beta 功能，行为可能随版本调整',
+        betaBadge: '实验性',
+        betaBadgeAria: '实验性功能，行为可能随版本调整',
         advancedSyntaxLabel: '启用多次写法（+1h*3 / 15:32+16:32）',
         advancedSyntaxHint:
             '让 /later 与 /schedule 支持一次写多条：+1h*3（等间隔 3 次）、+1h+1h+0.5h（相对序列）、'
             + '15:32+16:32 与 9:00+1d（锚点序列，按墙钟推进，跨夏令时不漂）。每条都是独立任务，'
-            + '可单独取消或编辑；单次最多 10 条。标记为 Beta：展开后的观感与条数上限仍需观察。',
+            + '可单独取消或编辑；单次最多 10 条。标记为实验性：展开后的观感与条数上限仍需观察。',
         showButtonLabel: '显示定时按钮',
         showButtonHint: '关闭后输入框右侧不再显示时钟按钮；已创建的提醒仍会照常触发，并在输入框下方的待发送列表中显示。',
         maxSchedulesLabel: '单会话任务上限',
