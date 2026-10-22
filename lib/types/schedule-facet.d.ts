@@ -3,7 +3,7 @@
  *
  * dsh-later 自己向 dsh-group-status 注册「定时任务」facet，于是折叠徽标的数字、色档、
  * 脉冲、文案都由**状态所有者**判定，不再由消费方按具名字段 + 色档反推。契约见
- * group-status 仓库 [`docs/facet-protocol.md`](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md)（协议 v1）。
+ * group-status 仓库 [`docs/facet-protocol.md`](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md)（协议 v1）。
  *
  * 为什么再拆一层（与本仓 `schedule-summary.ts` / client 组件同一姿态）：
  *  - 本文件**零 React、零 DOM**，`node --test` 直接跑。「徽标数字与 label 同口径」

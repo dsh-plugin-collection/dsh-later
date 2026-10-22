@@ -6,7 +6,7 @@
  * 折叠分组徽标上「组内有几个会话挂着定时任务」这件事，语义一直归本插件，实现却写在
  * 对方仓库里（具名字段 `scheduledSessions` / `scheduleState` + 一份色档反推）。任何一方
  * 改口径，对方不会报错，只会静默显示成旧口径。现在按
- * [`docs/facet-protocol.md`](http://192.168.4.77:3000/dsh-plugins/dsh-group-status/src/branch/main/docs/facet-protocol.md)
+ * [`docs/facet-protocol.md`](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md)
  * v1 由本插件自己注册，对方只认协议形状。
  *
  * facet id 与它的过渡适配器**同名**（`dsh-later.schedule`）：同 id 冲突由来源决胜，
