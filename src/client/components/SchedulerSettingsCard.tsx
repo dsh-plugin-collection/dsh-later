@@ -490,6 +490,8 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
               const hintKey = field.hintKey;
               const userHas = isUserOverridden(field.key);
               const fieldId = `ss-${field.key}`;
+              // 该字段的 label 末尾是否内联一个图标预览（目前仅时钟图标风格）。
+              const hasLabelIcon = field.key === 'clockIconStyle';
               const helpHint = hintKey !== undefined && t(hintKey).length > 0;
               /**
                * 联动锁：字段声明了 `requiresEnabled` 且那个开关当前为关 → 本字段
@@ -542,9 +544,9 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
                 <div className="ss-field" key={field.key}>
                   <div className="ss-card-fieldHead">
                     <div className="ss-label-group">
-                      <label htmlFor={fieldId} className="ss-card-label" style={field.key === 'clockIconStyle' ? { display: 'inline-flex', alignItems: 'center', gap: 8, flex: '0 0 auto' } : undefined}>
+                      <label htmlFor={fieldId} className={hasLabelIcon ? 'ss-card-label ss-card-label--withIcon' : 'ss-card-label'}>
                         {t(labelKey)}
-                        {field.key === 'clockIconStyle' && (
+                        {hasLabelIcon && (
                           <ClockIconPreview style={displayValue(field)} />
                         )}
                       </label>
