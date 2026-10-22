@@ -49,16 +49,24 @@ function sliceFrom(source, marker, label) {
 const band = sliceFrom(component, 'function DockAttachments(', 'DockAttachments');
 const thumb = sliceFrom(component, 'function DockThumb(', 'DockThumb');
 
-test('附件带是正文的兄弟节点，且排在进度条之前（三带结构）', () => {
-  const rowLine = component.indexOf('<div className="ss-dock-row-line">');
+test('附件带在行首、正文左侧（与宿主 QueueDock 同位置）', () => {
+  const rowAt = component.indexOf('data-ss-dock-row={item.id}');
   const bandAt = component.indexOf('<DockAttachments ');
+  const previewAt = component.indexOf('<div className="ss-dock-preview">');
+  const lineAt = component.indexOf('<div className="ss-dock-row-line">');
   const barAt = component.indexOf('<MultiBar item={item}');
-  assert.ok(rowLine > 0 && bandAt > 0 && barAt > 0, '三个锚点都必须存在');
-  // 顺序即结构：正文带 → 附件带 → 进度条。附件排在 MultiBar 之前，进度条才不会被挤出可视区。
-  assert.ok(rowLine < bandAt && bandAt < barAt, '必须是 正文 / 附件 / 进度条 的顺序');
-  // 兄弟而非嵌套：附件带不能出现在 .ss-dock-row-line 内部（否则它会跟正文抢横向）。
-  const lineClose = component.indexOf('</div>', rowLine);
-  assert.ok(lineClose > 0 && lineClose < bandAt, '附件带必须在正文带闭合之后（兄弟节点）');
+  assert.ok(rowAt > 0 && bandAt > 0 && previewAt > 0 && lineAt > 0 && barAt > 0, '五个锚点都必须存在');
+  // 顺序即结构：行 → 附件带 → 正文 → 进度条。附件必须在正文**之前**（同一行的左侧）。
+  assert.ok(rowAt < bandAt && bandAt < previewAt, '附件带必须是 .ss-dock-row 的第一个子元素');
+  assert.ok(previewAt < lineAt && lineAt < barAt, '正文与进度条仍在 preview 内，且正文先于条');
+  /*
+   * 移到行首**新引入**的风险：附件带开始与正文抢横向了（旧的下方独占带不会）。
+   * 所以必须锁收缩能力——挤不下时它自己缩并横向滚动，而不是把正文顶出可视区。
+   * 这正是我们不照抄宿主 max-width:55% 的地方：宿主缩完是静默裁切，我们是可滚。
+   */
+  assert.match(styles, /\.ss-dock-attachments \{[^}]*flex: 0 1 auto/, '附件带必须可收缩（flex-shrink:1）');
+  assert.match(styles, /\.ss-dock-attachments \{[^}]*min-width: 0/, '收缩需要 min-width:0，否则撑破容器');
+  assert.match(styles, /\.ss-dock-attachments \{[^}]*overflow-x: auto/, '挤不下要可滚，不静默裁切');
 });
 
 test('无附件与只剩图片但没任何出图能力时，整带不渲染（不得留空容器）', () => {
