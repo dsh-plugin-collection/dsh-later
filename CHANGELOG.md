@@ -79,7 +79,8 @@
     记进宿主日志。真实那句 throw 发生在宿主写入路径，插件侧 `followup()` 不抛也拿不到（实测），所以
     透出不了「真实错误」；能把「当时凭什么这么选」留在线上，下次同类事故就不必重跑跨代次实测。
     `DELIVERY_CONFIRM_TIMEOUT_MS` 仍是 2000ms，本次未调。
-  - 验收：`node devkit/func-later.mjs --case drive-gates --dsh ~/dsh-versions/<版本> --hold 8`，判据是
+  - 验收：`node devkit/func-later.mjs --case drive-gates --dsh <内核版本树> --hold 8`（`devkit/` 与 `~/dsh-versions/`
+    都是本工作区的本机工具与版本树、**不随插件发布**，外人照抄跑不了；判据是
     **事件形状**（带正文的 `agent/inbox/spliced` + 随后的 `dispatch`），不是「日志里能不能搜到文本」——
     创建事件与命令回执也含同样文本。修复前 0.1.7-rc.1 为 RED（同机基线已复现），修复后
     `0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-rc.2` **四代全 GREEN**。
@@ -113,7 +114,7 @@
     偏移量里就漏进 500ms，反推的候选整整错开一秒——`09:00:00.5` 曾经算不出时刻。现在毫秒在偏移
     定下之后才加回，并与上游落在同一瞬点（测试第 3 组逐形状对账）。
   - 工具描述（`paramAtDesc` 中英）同步写清接受的形状与「无偏移会被拒」，模型看到的文法不再比实现松。
-  - 验收：`node devkit/func-later.mjs --case at-normalize` 从 **RED 3/5 变 GREEN 5/5**，
+  - 验收：`node devkit/func-later.mjs --case at-normalize`（同上，devkit 不随插件发布）从 **RED 3/5 变 GREEN 5/5**，
     `drive-gates` 仍 GREEN（投递链未受影响）。
   - 测试：新增 `tests/at-time-normalize.test.mjs` 13 条，`npm test` 526 → **539**。三层断言
     （文法单测 / 守门人规范化与中文拒绝 / **喂真上游 `@deepseek-ai/dsh-schedule` 对账**——凡放行的
@@ -122,6 +123,48 @@
     一直没人钉住的那条信号。
   - 对用户的影响：面板行为不变（它本来就补秒）；模型与任何直接送 JSON 的通道从今天起可以用
     `HH:mm` / `H:mm:ss`；不改变任何已建任务的时刻。
+
+- **refactor** 待发送提醒 dock 与宿主 dock 的接缝判据，从「嗅探宿主队列条的私有属性」换成「我在 dock 栈里排第几」。
+  - 病灶：#41 的管子方案靠 `[data-queue-dock] + .ss-dock-root` 实现，而那是宿主 QueueDock 根上的**私有属性**
+    （它唯一的稳定 hook）。三个后果：① 邻居改名/改属性、或上面换成 goal／todo／第三方 dock，判据**静默失效**；
+    ② 它答不上真正要表达的事实——「我上面还有东西」与「我是栈底」，邻居身份对而位置不对时照样画错；
+    ③ 规模不对：同一条插槽宿主自己占着 `todo(0)/goal(10)/queue(20)`（实测注册处
+    `dsh-client-ui-conversation` 与 `dsh-client-ui-goal`），各家各画自己的壳，把 attach 式（负下边距贴 composer）
+    写死的有两家——queue 与我们（`order: 30`），而**没有任何 API 声明谁是栈底**。
+  - 新判据（`src/client/styles.ts`，规则文本唯一事实来源 `docs/notes/dock-stack-contract.md` §2）三条：
+    `[data-slot="conversation.input.dock"] > .ss-dock-root:not(:last-child) { margin-bottom: 0 }`（让出栈底位）
+    + 两条 `:not(:first-child)`（顶边直角、无顶描边）。地基是渲染器把 `list` 型插槽的每个条目**直接**渲染成
+    `[data-slot]` 锚点（`display:contents`）的兄弟元素——真机实测确认（见下）。
+  - **机制别记错**：新规则盖过基础规则靠**特指度**（基础 (0,1,0)、A (0,3,0)、B (0,4,0)、走 `::after` 那支 (0,4,1)），
+    A/B 命中不同元素的不同声明、互不争优先级；**源码次序不承载正确性**。据此**删掉了原「源序」回归断言**——
+    它在任何真实改动下恒为真，是一条假装在守护的永真断言（`tests/dock-tube-seam.test.mjs` 文件头记着删除理由）。
+  - 真机验证（宿主 0.2.1-rc.2 的**隔离实例** + 独立 headless chromium，全程未触本机 GUI）：结构前提成立
+    （`.ss-dock-root.parentElement.dataset.slot === "conversation.input.dock"`、出口 `display: contents`）；
+    独存现场四项 computed 改前/改后**逐字相同**（`-9px` / `16px 16px 0px 0px` / `1px solid` / `0px none`）、
+    像素 **AE=0**；真队列条现场同样 AE=0（与 #41 等价，无回归）；**真 GoalDock 现场**——本改动的全部理由——
+    改前是圆角顶 + 多一条顶描边（旧方案静默失效），改后 `border-radius:0px` + `border-top:0px none`，
+    且两边差异只在顶边、底边/负边距/几何零差异。正对照（独存 vs 加假兄弟 AE=171240）排除「AE=0 是比较失效」。
+  - demo 侧补齐可看证据：`docs/dock-stacking-demo.html` 新增 **B3 段**，五个现场每现场左右两半 DOM 逐字符相同、
+    只差套哪套判据，故像素差只能来自判据。关键第 ③ 档（上方是**非队列** dock）：B2 判出 **95.8% 满宽横线**（缺陷
+    像素形态），B3 判为无缝。第 ⑤ 档（我们不在栈底）给出 A 规则唯一的可见覆盖（`-9px`→`0`），其结论是**实测校正**
+    出来的：先写「顶边带应相同」，跑出 1845 差、查差异行才确认落在最后 5 行，遂改成「差异只许在底边带」。
+    B3 段排在全页末尾，以免改页高→设备像素相位→扰动 #42 已入库基线（挪后 `docs/media/seam-matrix` 14 帧逐字节不变）。
+  - 测试：`tests/dock-tube-seam.test.mjs` 7 → 9 条，`npm test` **541 全绿**。新增/改写：反向守卫 1（`data-queue-dock`
+    在 styles.ts 原文出现 0 次）、反向守卫 2（`deepEqual(所有把下边距归零的规则, [§2 A 逐字])`，只允许
+    `:not(:last-child)` 归零，无前缀／`:last-child` 反向／`margin` 简写三种反例照样红）、「恰好三条」（防有人绕过
+    §2 私自补第四条规则——第四条的破绽只在两条 dock 同屏时暴露，单人回归抓不到）、demo 以 `styles.ts` 为**唯一基准**
+    反查（原实现比 demo↔测试常量，两边同时旧所以**假绿**）、demo 形状按**元素与 DOM 顺序**断言（原按 substring 数，
+    把两个空锚点元素整个删掉照样绿），以及内存内变异自证。**像素 AE 不进 CI**：CI 只守结构判据，AE 走
+    `scripts/seam-check/capture-b3-scenes.mjs` 手工采（同一份 `criteria.mjs`/`png.mjs` 口径、DPR=1）。
+  - 已知边界（写死在 `docs/notes/dock-stack-contract.md` §4，不留「以后再补」）：① 上方某条 dock 崩溃时渲染器留的
+    `[data-slot-error]` 空 div 会占掉一个兄弟位，于是顶边画成方角而上方无内容——已在 demo 第 ④ 档量化，
+    不为此引入 `:nth-child(… of …)` 这类脆弱写法；② 仍然耦合 `[data-slot]` 出口 DOM（比私有属性公开得多，
+    但终归是结构耦合），所以 #43 那条「向宿主要 dock 栈契约」继续追，且**a（只发属性）单独落地不解决壳复用**、
+    b（共享壳公共导出）才是收口；③ 接缝像素判据至今只在 DPR=1 采过，DPR=2 复测是遗留项 #62，本改动不动任何几何。
+  - fail-open 方向：任何一条新选择器若在真实宿主里永不命中，结果只是退回 #41 之前的观感（接缝多一条描边），
+    **不会更糟**——所以基础态仍是末位 attach、只有明确不是末位时才让位，常见路径不依赖「选择器必须命中」。
+  - 对用户的影响：dock 外观在现有全部现场逐像素不变；新增的是「上面是 goal／todo／第三方 dock」时不再画错，
+    以及「我们不在栈底」时不再占着 composer 的贴合位。
 
 ## 1.6.0 — 2026-10-22
 

@@ -15,8 +15,12 @@
  *   3. **不需要模型凭据** —— 真机路线要跑 agent 回合才会有队列条，容器里配不通。
  *
  * 代价是它仿真的是宿主 QueueDock 的**外观契约**而非宿主本体。这由 §4 的升级复查
- * 兜住（`data-queue-dock` 是否仍在、queue 是否仍 attach 式），两者的分工写在
- * `docs/notes/dock-alignment.md` §8 第 10 项。
+ * 兜住 —— 但复查项已随 #42 换判据而改轨：插件样式不再嗅探 `data-queue-dock`（那是宿主
+ * QueueDock 的私有属性），改读**栈内位置**（`[data-slot="conversation.input.dock"] >
+ * .ss-dock-root:not(:first-child|:last-child)`）。所以现在要复查的是**出口结构与位置选择器
+ * 是否仍成立**（`.ss-dock-root` 是否仍是 `[data-slot]` 锚点的直接子元素、锚点是否仍
+ * display:contents），而不是「那个私有属性还在不在」；两者分工写在
+ * `docs/notes/dock-alignment.md` §8 第 10 项，判据本身在 `docs/notes/dock-stack-contract.md`。
  *
  * 用法：
  *   node scripts/seam-check/capture-demo.mjs [--out-dir docs/media/seam-matrix]

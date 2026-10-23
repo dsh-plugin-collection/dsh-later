@@ -531,6 +531,78 @@
   /* 注意：B2 不改任何 margin —— 队列条的 -9px 拉出 3px 重叠（段间消缝），
      提醒条的 -9px 拉出与 composer 的 3px 重叠（底段接合），各司其职。 */
 
+  /* ============ 方案 B3：栈内位置契约（#42 现行方案，取代 B2 的邻居嗅探） ============ */
+  /* 下面三条与 docs/notes/dock-stack-contract.md §2 **逐字同源**（tests/dock-tube-seam.test.mjs
+     以 src/client/styles.ts 为唯一基准做同源比对：剥掉 `.scheme[data-scheme="B3"] ` 前缀后
+     选择器必须逐字相同、声明体必须含同一条声明）。所以这里不许"顺手优化"选择器，也不许加规则。
+     与 B2 的分工：B2 问「上面那条是不是宿主队列条」（邻居身份，宿主私有属性），
+     B3 问「我在 dock 栈里排第几」（自己的位置，只依赖公开的 [data-slot] 锚点）。
+     两条判据在「队列条在上、我们在下」这一格给同一个观感，差别在另外三格：
+     上面是别的 dock（B2 漏、B3 中）、上面是崩溃留下的空锚点（B2 漏、B3 中＝已知降级）、
+     我们不在栈底（B2 没有这个概念、B3 让出贴 composer 的位置）。
+     形状前提：.ss-dock-root 必须是 [data-slot] 锚点的**直接子元素**（渲染器的 list 型插槽如此，
+     锚点本身 display:contents 不产生盒子）—— 所以 B3 段的 DOM 比 B2 段多这一层包裹，
+     不包就等于没验。B2 段保持 #41 当时的写法原样，作为历史基线（它不依赖这一层）。 */
+  .scheme[data-scheme="B3"] [data-slot="conversation.input.dock"] > .ss-dock-root:not(:last-child) { margin-bottom: 0; }
+  .scheme[data-scheme="B3"] [data-slot="conversation.input.dock"] > .ss-dock-root:not(:first-child) .ss-dock-body { border-radius: 0; }
+  .scheme[data-scheme="B3"] [data-slot="conversation.input.dock"] > .ss-dock-root:not(:first-child) .ss-dock-body::after { border-top: none; }
+
+  /* ---- B3 段的排版与判定读数（demo 自己的，不属于任何方案的几何） ---- */
+  /* 每个现场一个 .b3-scene：标题 + 左右两半。左半 data-impl="B2"（沿用上面 B2 段**原有**那两条规则，
+     一字不改地重放 #41 现物），右半 data-impl="B3"（用 §2 三条）。两半的 DOM 逐字符相同，
+     所以像素差只能来自判据 —— 这就是「肉眼可比」的全部要点。 */
+  .b3-scene {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .b3-duo {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
+  .b3-duo > .scheme { margin: 0; }
+  @media (max-width: 900px) {
+    .b3-duo { grid-template-columns: minmax(0, 1fr); }
+  }
+  .b3-scene-head {
+    padding: 10px 14px;
+    border: 1px solid var(--card-ring);
+    border-left: 3px solid var(--dsw-alias-brand-primary);
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--dsw-alias-label-secondary);
+  }
+  .b3-scene-head b { color: var(--dsw-alias-label-primary); font-weight: 600; }
+  .b3-scene-head code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--dsw-alias-interactive-bg-hover);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+  }
+  .b3-verdict {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 0 16px 10px;
+    color: var(--dsw-alias-label-tertiary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+  .b3-verdict span b { color: var(--dsw-alias-label-secondary); font-weight: 600; }
+  .b3-verdict .call-ok { color: #3fb950; }
+  .b3-verdict .call-bad { color: #f25a5a; }
+  .b3-verdict .call-warn { color: #d29922; }
+  /* 崩溃留下的空锚点：真实渲染器给插槽锚点的是 display:contents（不产生盒子），
+     所以这一档**不写任何改几何的样式** —— 它零盒、不产生高度也不产生间距，只占一个兄弟位，
+     而这正是 §4 那条降级的全部成因。给它加 height / outline 都会让现场失真
+     （display:contents 下 outline 根本画不出来），标注只走文字。 */
+  .b3-error-anchor { display: contents; }
+
   /* ============ 方案 C：保持现状，只加视觉区隔 ============ */
   .scheme[data-scheme="C"] .ss-dock-body::after {
     border-top-color: var(--dsw-alias-border-l2);
@@ -774,6 +846,295 @@
     <div class="scheme-meta" data-meta></div>
   </section>
 
+  <!-- B3 段排在**全页最后**（不是紧跟 B2）：它的高度会把后面的段推下去，
+       而 backdrop-filter 与文字抗锯齿取决于元素在视口里的分数像素相位 ——
+       实测把 B3 插在 solo 之前，solo 的两张基线帧就出现 ±1 通道抖动
+       （docs/media/seam-matrix 那 14 帧是 #42 的比对基线，必须逐字节不动）。 -->
+  <!-- ==================================================================
+       B3：栈内位置契约 · 五种现场（每种现场左=B2 判据、右=B3 判据，DOM 逐字符相同）
+       设计：docs/notes/dock-stack-contract.md §2/§3；判据的同源断言：tests/dock-tube-seam.test.mjs
+       ------------------------------------------------------------------
+       为什么左半仍用 data-scheme="B2" 而不是在 B3 段里再造一套对照规则：对照要证的是
+       「#41 那套真跑起来是什么样」，所以它用的必须是 B2 段**原有**那两条规则本身。
+       两半的 DOM 完全相同（都带 [data-slot] 锚点包裹，display:contents），差别只有一个：
+       套用哪套判据。于是同一现场里两半的任何像素差，都能归因到判据，而不是归因到形状。
+       形状前提由 #42 §3 判据 5 在隔离实例实测：.ss-dock-root 是 [data-slot] 锚点的直接子元素，
+       锚点 computed display = contents。不照这个形状搭 DOM，这段就什么都没验。
+       ================================================================== -->
+
+  <div class="b3-scene" data-b3-scene="1">
+    <div class="b3-scene-head">
+      <b>现场① 栈里只有我们一条 dock（独存基线）</b>
+      我们是 <code>:first-child</code> 又是 <code>:last-child</code> → B3 三条规则<b>一条都不命中</b>。
+      这一档的意义是「零变化」：左右两半必须<b>逐像素相同</b>，且与 <code>solo</code> 档相同。
+      <code>display:contents</code> 的锚点包裹层不产生盒子，所以加了这一层也不该挪动任何像素。
+    </div>
+    <div class="b3-duo">
+      <section class="scheme" data-scheme="B2" data-scene="1" data-impl="B2">
+        <div class="scheme-head">
+          <span class="scheme-badge">①·B2</span>
+          <span class="scheme-title">B2 判据（#41 现物：嗅探 <code>[data-queue-dock]</code>）</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+      <section class="scheme" data-scheme="B3" data-scene="1" data-impl="B3">
+        <div class="scheme-head">
+          <span class="scheme-badge">①·B3</span>
+          <span class="scheme-title">B3 判据（#42 契约：读栈内位置）</span>
+          <span class="scheme-verdict"><b>基线</b> · 与左半应逐像素相同</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="b3-scene" data-b3-scene="2">
+    <div class="b3-scene-head">
+      <b>现场② 上方是宿主队列条（<code>[data-queue-dock]</code>）</b>
+      这是 #41 已经修好的那一格，也是这次<b>不许退化</b>的那一格：邻居身份与栈内位置在这一格恰好同真，
+      所以 B2 与 B3 必须给出<b>逐像素相同</b>的管子（顶直角、无顶描边、保留 -9px 消缝重叠）。
+      两半若出现像素差，就是这次改动把已修好的东西改坏了。
+    </div>
+    <div class="b3-duo">
+      <section class="scheme" data-scheme="B2" data-scene="2" data-impl="B2">
+        <div class="scheme-head">
+          <span class="scheme-badge">②·B2</span>
+          <span class="scheme-title">B2 判据（嗅探邻居身份）</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+                <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+                <ul class="host-list" data-host-list></ul>
+              </div></div>
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+      <section class="scheme" data-scheme="B3" data-scene="2" data-impl="B3">
+        <div class="scheme-head">
+          <span class="scheme-badge">②·B3</span>
+          <span class="scheme-title">B3 判据（读栈内位置）</span>
+          <span class="scheme-verdict"><b>不许退化</b> · 与左半应逐像素相同</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="host-dock" data-queue-dock><div class="host-panel" data-host-panel>
+                <div class="host-header"><span class="host-lead">☰</span><span class="host-count" data-host-count>1 条排队消息</span></div>
+                <ul class="host-list" data-host-list></ul>
+              </div></div>
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="b3-scene" data-b3-scene="3">
+    <div class="b3-scene-head">
+      <b>现场③ 上方是<code>非队列</code>的别的 dock（中性假邻居 <code>&lt;div data-other-dock&gt;</code>）· 关键对照</b>
+      假邻居照抄 attach 壳（顶圆角 + 底开口 + 负边距）但<b>不带</b> <code>[data-queue-dock]</code>，
+      代表 goal/todo 或第三方插件的 dock。这一格是整套改动的理由本身：
+      <b>左半（B2）判据不命中 → 顶边仍是圆角 → 双缘重影复发（错）</b>；
+      <b>右半（B3）判据命中 → 顶直角 + 无顶描边 → 与上段接成一根管子（对）</b>。
+      两半 DOM 相同、数据相同，所以像素差只能来自判据。
+    </div>
+    <div class="b3-duo">
+      <section class="scheme" data-scheme="B2" data-scene="3" data-impl="B2">
+        <div class="scheme-head">
+          <span class="scheme-badge">③·B2</span>
+          <span class="scheme-title">B2 判据（嗅探邻居身份）</span>
+          <span class="scheme-verdict">判据不命中 · <b>圆角顶＝错</b></span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="host-dock" data-other-dock><div class="host-panel" data-above-panel>
+                <div class="host-header"><span class="host-lead">◇</span><span class="host-count">一条别的 dock（非队列）</span></div>
+              </div></div>
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+      <section class="scheme" data-scheme="B3" data-scene="3" data-impl="B3">
+        <div class="scheme-head">
+          <span class="scheme-badge">③·B3</span>
+          <span class="scheme-title">B3 判据（读栈内位置）</span>
+          <span class="scheme-verdict"><b>这次修的就是这一格</b> · 方角顶＝对</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="host-dock" data-other-dock><div class="host-panel" data-above-panel>
+                <div class="host-header"><span class="host-lead">◇</span><span class="host-count">一条别的 dock（非队列）</span></div>
+              </div></div>
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="b3-scene" data-b3-scene="4">
+    <div class="b3-scene-head">
+      <b>现场④ 上方是崩溃留下的空锚点（<code>&lt;div data-slot-error&gt;</code>）· 已知降级，如实标出</b>
+      上方某条 dock 渲染抛错时，渲染器在同一父节点下留一个 <code>[data-slot-error]</code> 空锚点：
+      它是零盒（<code>display:contents</code> 且无子节点，所以不产生任何高度），但<b>照旧占一个兄弟位</b>，
+      于是 <code>:not(:first-child)</code> 成立而上方<b>没有任何可见内容</b> → 右半顶边画成方角、上方是空的。
+      这是设计文档 §4 明确承认的<b>降级</b>，不是本 demo 的 bug，也不是可以悄悄修掉的东西：
+      要收口得靠宿主给「上方兄弟是否有可见尺寸」的语义（#43 的 a 方案）。左半（B2）在这一格不命中、
+      仍是圆角顶 —— 两种观感都不理想，差别在于 B3 的错是<b>位置判据的固有边界</b>，可预期、已登记。
+    </div>
+    <div class="b3-duo">
+      <section class="scheme" data-scheme="B2" data-scene="4" data-impl="B2">
+        <div class="scheme-head">
+          <span class="scheme-badge">④·B2</span>
+          <span class="scheme-title">B2 判据（嗅探邻居身份）</span>
+          <span class="scheme-verdict">不命中 · 圆角顶（这一格它反而"对"）</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div data-slot-error class="b3-error-anchor" style="display:contents"></div>
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+      <section class="scheme" data-scheme="B3" data-scene="4" data-impl="B3" data-known-degradation="1">
+        <div class="scheme-head">
+          <span class="scheme-badge">④·B3</span>
+          <span class="scheme-title">B3 判据（读栈内位置）</span>
+          <span class="scheme-verdict"><b>已知降级</b> · 方角顶 + 上方空无一物（§4）</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div data-slot-error class="b3-error-anchor" style="display:contents"></div>
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="b3-scene" data-b3-scene="5">
+    <div class="b3-scene-head">
+      <b>现场⑤ 我们不在栈底（下面还有一条 order 更大的 dock）· B3 三条里 A 规则唯一的可见覆盖</b>
+      <code>-9px</code> 负边距的含义是「我的下边邻居就是 composer，所以我要压进去 3px 消缝」。
+      下面还有一条 dock 时这个假设不成立：谁都不该占着贴 composer 的位置。<b>B2 没有这个概念</b>
+      （它只问上面是谁），于是我们仍占着负边距、压进下段 3px（左半）；<b>B3 的 A 规则命中</b>，
+      把 <code>margin-bottom</code> 收回 0、让出栈底位（右半，读数见各半的 <code>margin-bottom</code>）。
+      这一档是 §1 第 3 条「规模不对」的现场版：宿主自己三条 dock 各抄一遍 attach 壳，
+      第三方再插一条就把「谁是栈底」的隐含前提打乱。
+    </div>
+    <div class="b3-duo">
+      <section class="scheme" data-scheme="B2" data-scene="5" data-impl="B2">
+        <div class="scheme-head">
+          <span class="scheme-badge">⑤·B2</span>
+          <span class="scheme-title">B2 判据（无「栈底」概念）</span>
+          <span class="scheme-verdict">仍占 <code>-9px</code> · 压进下段</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+              <div class="host-dock" data-other-dock data-lower-dock><div class="host-panel" data-lower-panel>
+                <div class="host-header"><span class="host-lead">◇</span><span class="host-count">order 40 的 dock（在我们下面）</span></div>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+      <section class="scheme" data-scheme="B3" data-scene="5" data-impl="B3">
+        <div class="scheme-head">
+          <span class="scheme-badge">⑤·B3</span>
+          <span class="scheme-title">B3 判据（读栈内位置）</span>
+          <span class="scheme-verdict"><b>A 规则命中</b> · margin-bottom 收回 0</span>
+        </div>
+        <div class="scheme-stage">
+          <div class="wSkVaW_composerStack" data-stack>
+            <div data-slot="conversation.input.dock" style="display:contents">
+              <div class="ss-dock-root" data-ss-dock><div class="ss-dock-body" data-ss-body>
+                <ul class="ss-dock-list" data-ss-list></ul>
+              </div></div>
+              <div class="host-dock" data-other-dock data-lower-dock><div class="host-panel" data-lower-panel>
+                <div class="host-header"><span class="host-lead">◇</span><span class="host-count">order 40 的 dock（在我们下面）</span></div>
+              </div></div>
+            </div>
+            <div class="host-composer">输入消息…<span class="host-composer-send">↑</span></div>
+          </div>
+        </div>
+        <div class="b3-verdict" data-verdict></div>
+        <div class="scheme-meta" data-meta></div>
+      </section>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -906,6 +1267,7 @@ function measure() {
   document.querySelectorAll('.scheme').forEach((scheme) => {
     const meta = scheme.querySelector('[data-meta]');
     const hostPanel = scheme.querySelector('[data-host-panel]');
+    const abovePanel = hostPanel || scheme.querySelector('[data-above-panel]');
     const ssBody = scheme.querySelector('[data-ss-body]');
     const stack = scheme.querySelector('[data-stack]');
     const composer = scheme.querySelector('.host-composer');
@@ -915,18 +1277,26 @@ function measure() {
     const ssTop = ssBody.getBoundingClientRect().top;
     const parts = [`<span>stack-gap <b>${gap}</b></span>`];
 
-    if (hostPanel) {
-      const overlap = +(hostPanel.getBoundingClientRect().bottom - ssTop).toFixed(1);
-      /* B2 的 3px 重叠是**段间消缝手法**（宿主接 composer 同款），不是缺陷；
-         0/C 档的重叠才是圆角相撞。判据：面板顶边是否已放弃圆角+顶描边。 */
-      const tube = scheme.dataset.scheme === 'B2';
-      const cls = overlap > 0 ? (tube ? 'overlap-ok' : 'overlap-bad') : 'overlap-ok';
+    if (abovePanel) {
+      const overlap = +(abovePanel.getBoundingClientRect().bottom - ssTop).toFixed(1);
+      /* 「重叠 3px」什么时候是好事：本段面板已经放弃顶圆角，那 3px 就是宿主接 composer 同款的
+         **段间消缝手法**（上段底边开口、被本段不透明底盖住），接缝处不存在线。
+         还留着圆角的话，那 3px 就是两张面板互相压着 —— scheme 0 的原始缺陷形态。
+         所以这里改按**几何**分类（顶圆角是否为 0），不再按方案名硬编码：历史各档的读数与原来
+         逐字相同（0/C 仍判坏、B2 仍判好、B/A/A2/D 无重叠走另一支），而 B3 段的每一半都能
+         各自得到正确的读数（B2 判据没命中的现场仍然是"压着"，不许被洗成"消缝"）。 */
+      const radiusTop = Number.parseFloat(getComputedStyle(ssBody).borderTopLeftRadius) || 0;
+      const cls = overlap > 0 ? (radiusTop === 0 ? 'overlap-ok' : 'overlap-bad') : 'overlap-ok';
       const label = overlap > 0
-        ? (tube ? `重叠 ${overlap}px（消缝，有意）` : `重叠 ${overlap}px`)
+        ? (radiusTop === 0 ? `重叠 ${overlap}px（消缝，有意）` : `重叠 ${overlap}px`)
         : `无重叠（净空 ${Math.abs(overlap)}px）`;
       parts.push(`<span class="overlap-readout ${cls}">${label}</span>`);
-      const hp = getComputedStyle(hostPanel);
-      parts.push(`<span>队列面板圆角 <b>${hp.borderRadius}</b></span>`);
+      const hp = getComputedStyle(abovePanel);
+      parts.push(`<span>${hostPanel ? '队列' : '上邻'}面板圆角 <b>${hp.borderRadius}</b></span>`);
+    } else if (scheme.querySelector('[data-lower-dock]')) {
+      parts.push(`<span class="overlap-readout overlap-ok">我们是栈顶，下面还有一条 dock</span>`);
+    } else if (scheme.querySelector('[data-slot-error]')) {
+      parts.push(`<span class="overlap-readout overlap-ok">上方是 [data-slot-error] 空锚点（零盒，只占兄弟位）</span>`);
     } else {
       parts.push(`<span class="overlap-readout overlap-ok">仅一条 dock（对照）</span>`);
     }
@@ -934,15 +1304,23 @@ function measure() {
     parts.push(`<span>提醒面板圆角 <b>${sb.borderRadius}</b></span>`);
     const ssRoot = scheme.querySelector('[data-ss-dock]');
     if (ssRoot) parts.push(`<span>提醒条 margin-bottom <b>${getComputedStyle(ssRoot).marginBottom}</b></span>`);
-    if (composer) {
+    if (composer && !scheme.querySelector('[data-lower-panel]')) {
       const cs = composer.getBoundingClientRect();
       const sb2 = ssBody.getBoundingClientRect();
       const seam = +(cs.top - sb2.bottom).toFixed(1);
       parts.push(`<span>与 composer 的缝 <b>${seam}px</b></span>`);
+    } else if (scheme.querySelector('[data-lower-panel]')) {
+      /* 现场 5：composer 不在我们下面了 —— 读数改成「与下段 dock 的缝」，
+         负边距是否让位（§2 A）就看这条与本段的 margin-bottom。 */
+      const below = scheme.querySelector('[data-lower-panel]').getBoundingClientRect();
+      const seam = +(below.top - ssBody.getBoundingClientRect().bottom).toFixed(1);
+      parts.push(`<span>与下段 dock 的缝 <b>${seam}px</b></span>`);
     }
 
     meta.innerHTML = parts.join('');
   });
+
+  b3Verdicts();
 
   // 顶部汇总：突出"现状"这一档
   const zero = document.querySelector('.scheme[data-scheme="0"] [data-meta] .overlap-readout');
@@ -951,6 +1329,93 @@ function measure() {
     out.className = 'overlap-readout ' + (zero.classList.contains('overlap-bad') ? 'overlap-bad' : 'overlap-ok');
     out.textContent = '现状：' + zero.textContent;
   }
+}
+
+/*
+ * B3 段每个现场的读数：把「判据真值」和「本段观感」并排打出来。
+ *
+ * 为什么要两个真值：这一段存在的意义就是证明**两者会分道扬镳**。
+ *  - 嗅探真值（B2/#41）：上面紧邻那条是不是宿主队列条（`[data-queue-dock]`，宿主私有属性）；
+ *  - 契约真值（B3/#42）：我自己在这个 [data-slot] 锚点里排第几（`:first-child` / `:last-child`）。
+ * 观感一律取**计算值**（顶圆角 / ::after 顶描边 / margin-bottom），不取方案名，
+ * 于是「本段有没有兑现它该兑现的判据」是可核对的，而不是图上看着像。
+ *
+ * ⚠ `getComputedStyle(el,'::after')` 在节点刚插入后的若干帧里会返回**未生成的假值**
+ *   （content:"normal"、border-top-style:none），所以这里只在 `::after` 真的生成后
+ *   才把描边读数当真，否则显式打 `未就绪` 并再排一轮（见 b3AfterReady）。
+ */
+const B3_CONTRACT = {
+  a: '[data-slot="conversation.input.dock"] > .ss-dock-root:not(:last-child)',
+  b: '[data-slot="conversation.input.dock"] > .ss-dock-root:not(:first-child) .ss-dock-body',
+};
+
+function b3AfterReady(body) {
+  const after = getComputedStyle(body, '::after');
+  return after.content !== 'normal' && after.content !== 'none';
+}
+
+/** 描边读数等「样式稳定」的重试预算：约 5 秒（rAF 60fps）。超了就如实留着 `未就绪`，不自欺。 */
+let b3Tries = 0;
+
+function b3Verdicts() {
+  const panes = document.querySelectorAll('.b3-duo > .scheme');
+  if (!panes.length) return;
+  let retry = false;
+  panes.forEach((pane) => {
+    const el = pane.querySelector('[data-verdict]');
+    if (!el) return;
+    const root = pane.querySelector('[data-ss-dock]');
+    const body = pane.querySelector('[data-ss-body]');
+    if (!root || !body) return;
+
+    const snifHit = root.previousElementSibling
+      ? root.previousElementSibling.hasAttribute('data-queue-dock')
+      : false;
+    const contractB = body.matches(B3_CONTRACT.b);
+    const contractA = root.matches(B3_CONTRACT.a);
+    // 读数取**计算值**：源里写的是 `border: .5px`，DPR=1 下浏览器把它取整成 1px 描边
+    // （接缝判据量的就是这条 1 设备像素的线）。别因为"这里显示 1px"去改 CSS —— 那是浏览器的
+    // 取整行为，不是 demo 抄错了宿主值。判据只关心「0 与非 0」。
+    const radius = Number.parseFloat(getComputedStyle(body).borderTopLeftRadius) || 0;
+    const marginBottom = getComputedStyle(root).marginBottom;
+    const ready = b3AfterReady(body);
+    if (!ready) retry = true;
+    const strokePx = ready ? getComputedStyle(body, '::after').borderTopWidth : null;
+    const stroke = ready ? (Number.parseFloat(strokePx) || 0) : null;
+
+    // 本段按它自己那套判据**应当**得到什么观感：左半（B2）看邻居身份，右半（B3）看栈内位置。
+    const own = pane.dataset.impl === 'B3' ? contractB : snifHit;
+    const wantSquare = own === true;
+    const isSquare = radius === 0;
+    const honoured = isSquare === wantSquare;
+
+    const chips = [
+      `<span>顶圆角 <b>${radius}px</b></span>`,
+      `<span>顶描边 <b>${ready ? `${stroke}px` : '未就绪'}</b></span>`,
+      `<span>margin-bottom <b>${marginBottom}</b></span>`,
+      `<span>嗅探真值 <b>${snifHit ? '命中' : '不命中'}</b></span>`,
+      `<span>契约真值 <b>${contractB ? '命中' : '不命中'}</b>${contractA ? ' · A 让位' : ''}</span>`,
+    ];
+    if (pane.dataset.knownDegradation === '1') {
+      chips.push('<span class="call-warn">已知降级（§4）：方角顶 + 上方无内容</span>');
+    } else if (honoured) {
+      chips.push(`<span class="call-ok">${pane.dataset.impl} 兑现判据（${wantSquare ? '方角顶' : '圆角顶'}）</span>`);
+    } else {
+      chips.push(`<span class="call-bad">${pane.dataset.impl} 未兑现判据（应 ${wantSquare ? '方角' : '圆角'}，实 ${isSquare ? '方角' : '圆角'}）</span>`);
+    }
+    el.innerHTML = chips.join('');
+
+    // 描边读数与观感必须自洽：方角顶段若还留着顶描边，就是初稿 B 的亮线形态。
+    if (ready && isSquare && stroke > 0 && pane.dataset.impl === 'B3') {
+      el.innerHTML += '<span class="call-bad">直角却留着顶描边（初稿 B 的亮线）</span>';
+    }
+  });
+  if (retry && b3Tries < 300) {
+    b3Tries += 1;
+    requestAnimationFrame(() => measure());
+  }
+  // 采集脚本读这个，而不是各自猜一套等待条件（两边必须同一把尺）。
+  window.__b3State = { stable: !retry, tries: b3Tries, at: new Date().toISOString() };
 }
 
 function bindSeg(id, key, cast) {
