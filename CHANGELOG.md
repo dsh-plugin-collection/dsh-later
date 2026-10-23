@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 1.7.0 — 2026-10-23
+
 - **feat** 「在分组徽标中显示定时任务」搬进本插件的设置卡（`showInGroupBadge`，默认开）—— 关闭 issue #83。
   - 上游：dsh-group-status 的 PR #37 删掉了它 `Config` 里的 `showScheduledInBadge`，并把 facet 协议 v1 的
     `settingKey` 标为**废弃**（v1 仍接受、不报错，但对端**不再读取**）。理由站得住：那两个字段把别人家的
