@@ -137,6 +137,17 @@ export declare class UserScheduleRuntime {
      * 关闭确认时直接返回 true（fire-and-forget，保持旧语义）。
      */
     private verifyDelivery;
+    /**
+     * 投递未确认时，把「插件当时凭什么决定这个 source kind」写进宿主日志（issue #75 建议 3）。
+     *
+     * 为什么只能记这个、记不了「真实错误」：`confirmDelivery` 的全部观测面是会话日志里
+     * 有没有那条 message id，它回答不了「为什么没有」。rc.1 那类代次的真因是消息被
+     * **宿主写入路径的 v4 准入**拒绝（`format v4 message requires a producer-owned source kind`），
+     * 实测那句只出现在宿主 stdout，插件侧 `deliver()` 不抛、会话日志里既无 dispatch 也无校验行
+     * ——所以插件唯一能补上的信息就是自己的判定依据。把 `kind=` 与内核版本留在线上，
+     * 下次这类事不用再跑一遍跨代次实测才能定位。
+     */
+    private noteUnconfirmed;
     /** 执行一次用户提醒决策与派发。 */
     private driveOnce;
     /**
