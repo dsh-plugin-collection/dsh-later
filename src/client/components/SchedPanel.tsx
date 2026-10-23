@@ -17,7 +17,7 @@ import { createPortal } from 'react-dom';
 import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import { epochFromLocal, localFieldsOf, nextSmartAt, DEFAULT_SMART_WINDOW, type SmartWindowConfig } from '../../smart-window.js';
 import type { TextLocale } from '../../time-utils.js';
-import { formatAbsolute, formatRelative } from '../../time-utils.js';
+import { canonicalLocalClock, formatAbsolute, formatRelative } from '../../time-utils.js';
 import { TaskList } from './TaskList.js';
 import { format, CLIENT_ERR, type SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
@@ -78,13 +78,16 @@ type QuickOption =
 
 /** 今天/明天某时刻的 at 对象。 */
 function atOnDay(dayOffset: number, hhmm: string, timeZone: string, now: number): { at: ClientAtInput; epoch: number } | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(hhmm);
-  if (match === null) return null;
+  // 补秒与形状判定都交给 `canonicalLocalClock`（issue #76）：面板自己拼 `${hhmm}:00` 是
+  // 第三份「恰好能用」的正则——它今天对，但没人规定它明天还对。共享文法以后 `9:00`
+  // 这类手动输入也进得来。
+  const time = canonicalLocalClock(hhmm);
+  if (time === undefined) return null;
   const fields = localFieldsOf(now + dayOffset * 24 * 3600 * 1000, timeZone);
   const date = `${String(fields.year).padStart(4, '0')}-${String(fields.month).padStart(2, '0')}-${String(fields.day).padStart(2, '0')}`;
-  const epoch = epochFromLocal(date, `${hhmm}:00`, timeZone);
+  const epoch = epochFromLocal(date, time, timeZone);
   if (epoch === undefined || Number.isNaN(epoch)) return null;
-  return { at: { date, time: `${hhmm}:00`, time_zone: timeZone }, epoch };
+  return { at: { date, time, time_zone: timeZone }, epoch };
 }
 
 /** 面板主体（受控渲染：父组件负责 open 与定位）。 */
@@ -207,11 +210,13 @@ export function SchedPanel({
   // 当前选中的目标（custom 分支单独计算）。
   const target = useMemo<{ at?: ClientAtInput; after_seconds?: number; epoch: number } | null>(() => {
     if (selected === 'custom') {
-      const match = /^(\d{2}):(\d{2})$/.exec(customTime);
-      if (match === null) return null;
-      const epoch = epochFromLocal(customDate, `${customTime}:00`, timeZone);
+      // 同一个 `canonicalLocalClock`：面板输入框给 `09:00` 时补成 `09:00:00`，
+      // 手动输入 `9:00` 也认——形状判定不再有两套。
+      const time = canonicalLocalClock(customTime);
+      if (time === undefined) return null;
+      const epoch = epochFromLocal(customDate, time, timeZone);
       if (epoch === undefined || Number.isNaN(epoch) || epoch <= now) return null;
-      return { at: { date: customDate, time: `${customTime}:00`, time_zone: timeZone }, epoch };
+      return { at: { date: customDate, time, time_zone: timeZone }, epoch };
     }
     const option = quickOptions.find((item) => keyOf(item) === selected);
     if (option === undefined || option.kind === 'custom') return null;
