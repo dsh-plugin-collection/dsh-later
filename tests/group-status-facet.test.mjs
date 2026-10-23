@@ -19,16 +19,18 @@
  *     再按 dsh-group-status 的**同一条调用序列**（getSnapshot → fold → label → renderIcon）
  *     读出徽标会显示的东西，与 oracle 比。三条容错分支（对方缺席 / 无登记面 / 版本不符）
  *     也在这一层——「整插件不能因此不激活」只有跑真实 apply 才算验证过。
+ *  3. 显隐开关（issue #83）：同一套 bundle + 假设置 scope，验「关掉就是不登记」与
+ *     「保存即生效」——这两条都长在 apply 的接线上，纯逻辑测试覆盖不到。
  * @module tests/group-status-facet.test
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  GROUP_BADGE_SETTING_KEY,
   LATER_SCHEDULE_FACET_ID,
   LATER_SCHEDULE_FACET_ORDER,
   LATER_SCHEDULE_FACET_PROTOCOL,
-  LATER_SCHEDULE_FACET_SETTING_KEY,
   facetIconColor,
   foldLaterSchedule,
   laterScheduleFacetLabel,
@@ -191,11 +193,17 @@ test('取色与过渡适配器逐档一致，未知色档回落 info', () => {
   assert.equal(facetIconColor(undefined), LEGACY_TONE_COLOR.info);
 });
 
-test('协议常量：id / settingKey / order / protocol 与过渡适配器同名同值', () => {
+test('协议常量：id / protocol / order 与过渡适配器同名同值', () => {
   assert.equal(LATER_SCHEDULE_FACET_ID, 'dsh-later.schedule', '换名就顶不掉代管的适配器，同一条事实会被数两遍');
   assert.equal(LATER_SCHEDULE_FACET_PROTOCOL, 1);
-  assert.equal(LATER_SCHEDULE_FACET_SETTING_KEY, 'showScheduledInBadge', '挂到既有开关上：用户关掉的还是同一个开关');
   assert.equal(LATER_SCHEDULE_FACET_ORDER, 10, '图标在徽标排格里的位置不随迁移改变');
+});
+
+test('issue #83：常量换边了——它是本插件 Config 的字段名，不再是对端的开关', () => {
+  // group-status #37 把协议成员 `settingKey` 废弃（不再读取），显隐规则收敛成「登记即显示，
+  // 不注册即不显示」。这个名字从此只在本仓内部出现，指向的是**我们自己的**配置字段。
+  assert.equal(GROUP_BADGE_SETTING_KEY, 'showInGroupBadge');
+  assert.notEqual(GROUP_BADGE_SETTING_KEY, 'showScheduledInBadge', '不得复用对端已删除的字段名：那是另一个人的配置面');
 });
 
 // ── 2. 注册面：驱动真实 bundle ──────────────────────────────────────────────────────
@@ -205,8 +213,10 @@ test('协议常量：id / settingKey / order / protocol 与过渡适配器同名
  * @param options.groupStatus - 假对端；`null` = 未安装 / 未启用（require 抛错）。
  * @param options.localeActive - 宿主当前语言（可变闭包，用来验语言切换）。
  * @param options.registry - 假登记面（可预置内容模拟过渡适配器已代管）。
+ * @param options.settings - 假设置 scope（issue #83：验显隐开关）。不给就是「宿主没有
+ *   设置服务」，本插件按默认值（显示）走——这条路径本身就是回归项。
  */
-async function loadClientBundle({ groupStatus = 'default', localeActive = () => 'zh', registry } = {}) {
+async function loadClientBundle({ groupStatus = 'default', localeActive = () => 'zh', registry, settings } = {}) {
   const fakeRegistry = registry ?? makeFakeRegistry();
   const src = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8');
   let captured;
@@ -271,7 +281,7 @@ async function loadClientBundle({ groupStatus = 'default', localeActive = () => 
     };
     const mod = captured.factory(require);
     // icons 交出去：图标断言要比**组件身份**，光看名字证明不了「用的是宿主那一份」。
-    return { mod, ctx: makeCtx(localeActive), registry: fakeRegistry, icons: iconCache };
+    return { mod, ctx: makeCtx(localeActive, settings), registry: fakeRegistry, icons: iconCache };
   } finally {
     if (savedWindow === undefined) delete globalThis.window;
     else globalThis.window = savedWindow;
@@ -329,8 +339,12 @@ function makeSessions(byId) {
   };
 }
 
-/** 驱动 apply 的 ctx 桩（与 tests/client-summary-api.test.mjs 同形）。 */
-function makeCtx(localeActive) {
+/**
+ * 驱动 apply 的 ctx 桩（与 tests/client-summary-api.test.mjs 同形）。
+ * @param settings - 假设置 scope（issue #83）；给了就冒充旧 harness 的 `settingsScope`
+ *   服务，本插件的显隐开关那条轨道会绑上它。
+ */
+function makeCtx(localeActive, settings) {
   const slots = {
     register: () => () => {},
     inject: (hole, fn) => {
@@ -348,6 +362,9 @@ function makeCtx(localeActive) {
     get: (name) => {
       if (name === 'slots') return slots;
       if (name === 'sessions') return ctx.sessions;
+      // issue #83 的显隐开关走设置轨道。这里只喂旧 harness 的形状（`settingsScope`）：
+      // 真实宿主两条轨道只会命中一条，而 gate 的实现与轨道无关（两代的 scope 同形状）。
+      if (name === 'settingsScope' && settings !== undefined) return { bind: () => settings };
       if (name === 'locale') {
         return {
           getSnapshot: () => ({ active: localeActive(), revision: 1 }),
@@ -398,8 +415,11 @@ test('注册面：apply 登记 provider facet，并顶掉过渡适配器', async
     const facet = held.facet;
     assert.equal(facet.protocol, LATER_SCHEDULE_FACET_PROTOCOL);
     assert.equal(facet.id, LATER_SCHEDULE_FACET_ID);
-    assert.equal(facet.settingKey, LATER_SCHEDULE_FACET_SETTING_KEY);
     assert.equal(facet.order, LATER_SCHEDULE_FACET_ORDER);
+    // 协议 v1 仍接受 `settingKey`（对端 #37 之后不再读取），但我们**不交出**它：
+    // 留着等于向一个已经不执行它的机制做承诺，还会让后来者以为显隐归对端。
+    assert.equal(facet.settingKey, undefined, '废弃的 settingKey 不得再交给对端');
+    assert.ok(!('settingKey' in facet), '字段本身不该出现在交出的对象上');
     for (const name of ['subscribe', 'getSnapshot', 'fold']) {
       assert.equal(typeof facet[name], 'function', `协议必填成员 ${name} 必须在`);
     }
@@ -622,4 +642,151 @@ test('不变式：对端读取走容错 require，登记排在 locale 字典与 
   assert.ok(localeAt >= 0, 'locale 注册段还在');
   assert.ok(facetAt > localeAt, 'facet 登记必须排在 locale 字典注册之后：否则 aria-label 会念出裸键名');
   assert.ok(facetAt > src.indexOf('createScheduleSummaryStore('), 'facet 必须绑已创建的 store');
+});
+
+// ── 4. 显隐开关（issue #83）：登记与否由**本插件**的 showInGroupBadge 决定 ──────────
+
+/**
+ * 假设置 scope：两代 harness 的读取面同形状（`getSnapshot` / `subscribe`），
+ * 所以一份桩够用于旧 `settingsScope` 与新 `configForms` 两条轨道。
+ *
+ * `save()` 就是「用户在设置页点了保存」——宿主写完值通知订阅者，本插件的 gate
+ * 应当在**同一次**通知里把 facet 登记上或摘掉，不需要刷新页面。
+ */
+function makeSettingsScope(initial = {}) {
+  let value = { ...initial };
+  let status = 'ready';
+  const listeners = new Set();
+  const notify = () => {
+    for (const listener of [...listeners]) listener();
+  };
+  return {
+    getSnapshot: () => ({ status, value, base: undefined, user: undefined, writable: true }),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    set: async (field, next) => {
+      value = { ...value, [field]: next };
+      notify();
+    },
+    unset: async (field) => {
+      const { [field]: _omitted, ...rest } = value;
+      value = rest;
+      notify();
+    },
+    /** 测试用：等价于「保存」。 */
+    save(patch) {
+      value = { ...value, ...patch };
+      notify();
+    },
+    /** 测试用：宿主快照回到未就绪。 */
+    markLoading() {
+      status = 'loading';
+      notify();
+    },
+  };
+}
+
+/** 一个 apply 跑完后，登记面上有没有我们那一份。 */
+const hasOurFacet = (registry) => registry.entries.has(LATER_SCHEDULE_FACET_ID);
+
+test('开关：宿主没有设置服务时照旧登记（读不到设置 ≠ 用户不要）', async () => {
+  const registry = makeFakeRegistry();
+  const { ctx, mod } = await loadClientBundle({ registry });
+  ctx.sessions = makeSessions({ a: ROW_FUTURE });
+  mod.apply(ctx);
+  try {
+    assert.ok(hasOurFacet(registry), '没有设置轨道就登记不上，等于把徽标抵押给设置服务');
+  } finally {
+    for (const dispose of ctx.disposers) dispose();
+  }
+});
+
+test('开关：显式 false 时不登记，且本插件其余功能照常（徽标少一格是唯一后果）', async () => {
+  const noise = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => noise.push(args.join(' '));
+  try {
+    const registry = makeFakeRegistry();
+    const settings = makeSettingsScope({ [GROUP_BADGE_SETTING_KEY]: false });
+    const { ctx, mod } = await loadClientBundle({ registry, settings });
+    ctx.sessions = makeSessions({ a: ROW_FUTURE });
+    mod.apply(ctx);
+    try {
+      assert.equal(hasOurFacet(registry), false, '关掉后登记面上不该有我们那一份');
+      assert.equal(noise.length, 0, `不该有 console 噪音：${JSON.stringify(noise)}`);
+      assert.equal(mod.getScheduleSummaryStore().getSnapshot().size, 1, '定时摘要与提醒本身不受影响');
+    } finally {
+      for (const dispose of ctx.disposers) dispose();
+    }
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('开关：保存即生效（false → true 登记、true → false 注销），不必刷新页面', async () => {
+  const registry = makeFakeRegistry();
+  const settings = makeSettingsScope({ [GROUP_BADGE_SETTING_KEY]: true });
+  const { ctx, mod } = await loadClientBundle({ registry, settings });
+  ctx.sessions = makeSessions({ a: ROW_FUTURE });
+  mod.apply(ctx);
+  try {
+    assert.ok(hasOurFacet(registry), '默认开：应登记');
+    const facetWhileOn = registry.entries.get(LATER_SCHEDULE_FACET_ID).facet;
+
+    settings.save({ [GROUP_BADGE_SETTING_KEY]: false });
+    assert.equal(hasOurFacet(registry), false, '关掉后必须立刻注销：徽标少一格是唯一后果');
+
+    settings.save({ [GROUP_BADGE_SETTING_KEY]: true });
+    assert.ok(hasOurFacet(registry), '重新打开必须立刻登记');
+    assert.notEqual(
+      registry.entries.get(LATER_SCHEDULE_FACET_ID).facet,
+      facetWhileOn,
+      '重新登记交出的是一份新的 facet（不是残存的旧引用）',
+    );
+  } finally {
+    for (const dispose of ctx.disposers) dispose();
+  }
+});
+
+test('开关：反复通知不会登记出两份（refresh 幂等）', async () => {
+  const registry = makeFakeRegistry();
+  let registrations = 0;
+  const inner = registry.registerGroupStatusFacet.bind(registry);
+  registry.registerGroupStatusFacet = (facet) => {
+    registrations += 1;
+    return inner(facet);
+  };
+  const settings = makeSettingsScope();
+  const { ctx, mod } = await loadClientBundle({ registry, settings });
+  ctx.sessions = makeSessions({ a: ROW_FUTURE });
+  mod.apply(ctx);
+  try {
+    assert.equal(registrations, 1, `apply 应当恰好登记一次，实际 ${registrations} 次`);
+    settings.save({ [GROUP_BADGE_SETTING_KEY]: true });
+    settings.markLoading();
+    settings.save({ [GROUP_BADGE_SETTING_KEY]: true });
+    assert.equal(registrations, 1, `同一状态位下重复通知不该再登记：${registrations} 次`);
+  } finally {
+    for (const dispose of ctx.disposers) dispose();
+  }
+});
+
+test('开关：注销只摘自己那一份，卸载后不留登记', async () => {
+  const registry = makeFakeRegistry();
+  const settings = makeSettingsScope({ [GROUP_BADGE_SETTING_KEY]: true });
+  const { ctx, mod } = await loadClientBundle({ registry, settings });
+  ctx.sessions = makeSessions({ a: ROW_FUTURE });
+  mod.apply(ctx);
+  try {
+    assert.ok(hasOurFacet(registry));
+    settings.save({ [GROUP_BADGE_SETTING_KEY]: false });
+    assert.equal(hasOurFacet(registry), false, '关掉即注销');
+    // 关着的状态下卸载：dispose 必须只是空操作，不能把别人的登记摘掉。
+    registry.entries.set('other.facet', { facet: { id: 'other.facet' }, origin: 'provider' });
+  } finally {
+    for (const dispose of ctx.disposers) dispose();
+  }
+  assert.ok(registry.entries.has('other.facet'), '卸载不得伤及别的来源');
 });

@@ -37,7 +37,8 @@ import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from '
 import { name } from '../domain.js';
 import { dictFor, schedDicts } from './strings.js';
 import { injectStyles } from './styles.js';
-import { registerLaterScheduleFacet } from './group-status-facet.js';
+import { isGroupBadgeVisible } from '../schedule-facet.js';
+import { mountLaterScheduleFacet } from './group-status-facet.js';
 import { SchedButton } from './components/SchedButton.js';
 import { ScheduleDock } from './components/ScheduleDock.js';
 import { SchedulerSettingsCard } from './components/SchedulerSettingsCard.js';
@@ -110,6 +111,14 @@ function apply(ctx: Context): void {
   // 检测方式：有 configForms 服务 = 0.2.0+，否则 = 0.1.x
   let detectedVersion: 'modern' | 'classic' = 'classic';
   let getClockIconStyle: () => 'auto' | 'modern' | 'classic' = () => 'auto';
+  /**
+   * 「在分组徽标中显示定时任务」当前取值（issue #83）。
+   *
+   * 默认 `true`，与 host `Config.showInGroupBadge` 的默认同源：两条设置轨道都还没绑上时
+   * （宿主没有 settings 服务、或快照还在 loading），徽标照旧出现——一个还没读到的设置
+   * 不该有「把用户的东西变没」这种权力。绑上轨道后由 {@link attachBadgeVisibility} 重指。
+   */
+  let getShowInGroupBadge: () => boolean = () => true;
 
   // 定时摘要 store（issue #17）：全插件唯一的定时任务数据权威。本插件的侧栏
   // badge 与外部插件（dsh-group-status 等，经 `require('dsh-later/client')`）
@@ -183,6 +192,10 @@ function apply(ctx: Context): void {
             + '可单独取消或编辑；单次最多 10 条。标记为实验性：展开后的观感与条数上限仍需观察。',
         showButtonLabel: '显示定时按钮',
         showButtonHint: '关闭后输入框右侧不再显示时钟按钮；已创建的提醒仍会照常触发，并在输入框下方的待发送列表中显示。',
+        showInGroupBadgeLabel: '在分组徽标中显示定时任务',
+        showInGroupBadgeHint:
+            '关闭后不再向 dsh-group-status 的折叠分组徽标登记「定时任务」这一格，徽标上不再出现定时任务计数。'
+            + '提醒本身照常触发，输入框下方的待发送列表与侧栏状态不受影响；未安装 dsh-group-status 时这一项没有可见效果。',
         maxSchedulesLabel: '单会话任务上限',
         maxSchedulesHint: '单个会话内允许创建的最大定时任务数量。',
         allowLongPromptsLabel: '允许长文本提醒',
@@ -257,6 +270,11 @@ function apply(ctx: Context): void {
             + 'the 10-task cap still need real-world observation.',
         showButtonLabel: 'Show schedule button',
         showButtonHint: 'Hide the clock button on the input bar. Existing reminders keep firing and stay visible in the dock below the composer.',
+        showInGroupBadgeLabel: 'Show scheduled in group badge',
+        showInGroupBadgeHint:
+            'Stop registering the "Scheduled" cell on dsh-group-status\'s folded-group badge, so its count disappears. '
+            + 'Reminders keep firing and stay visible in the dock below the composer and in the sidebar; '
+            + 'this row has no visible effect when dsh-group-status is not installed.',
         maxSchedulesLabel: 'Max schedules per session',
         maxSchedulesHint: 'Maximum number of scheduled reminders allowed per session.',
         allowLongPromptsLabel: 'Allow long reminder prompts',
@@ -329,14 +347,43 @@ function apply(ctx: Context): void {
    *
    * 卸载时注销。对端 `remove(id, facet)` 只摘「当前登记的还是它」的那一份，所以热重载里
    * 新注册先于旧 dispose 也不会把新的摘掉。
+   *
+   * 显隐由本插件的 `showInGroupBadge` 决定（issue #83）：开 = 登记，关 = 注销。对端 #37
+   * 废弃协议里的 `settingKey` 之后，「登记即显示，不注册即不显示」是唯一规则，消费方
+   * 不再替任何来源保管开关，所以这个开关只能长在我们自己的卡片上、只能由我们执行。
    */
+  const facetMount = mountLaterScheduleFacet({
+    store: summary,
+    scheduledWord: () => dictFor(locale?.getSnapshot().active).facetScheduled,
+    enabled: () => getShowInGroupBadge(),
+  });
+
   ctx.effect(
-    () => registerLaterScheduleFacet({
-      store: summary,
-      scheduledWord: () => dictFor(locale?.getSnapshot().active).facetScheduled,
-    }),
+    () => {
+      facetMount.refresh();
+      return () => facetMount.dispose();
+    },
     'dsh-later: group status facet',
   );
+
+  /**
+   * 把一条设置轨道接到徽标显隐上（issue #83）。
+   *
+   * 两代 harness 的 scope 形状一致（`getSnapshot` / `subscribe`），所以两条轨道都调这同一个
+   * 函数；谁先到接谁，后到的只是换一个更近的读数来源。`refresh()` 以「登记着没有」这一个
+   * 状态位判幂等，接两次也登记不出两份。
+   *
+   * 必须**订阅**而不能只在绑定时读一次：设置页保存后不刷新页面就要生效，而 apply 只跑一次。
+   */
+  const attachBadgeVisibility = (scope: ClientSettingsScope | ClientConfigForm): void => {
+    getShowInGroupBadge = () => isGroupBadgeVisible(scope.getSnapshot());
+    ctx.effect(
+      () => scope.subscribe(() => facetMount.refresh()),
+      'dsh-later: facet visibility setting',
+    );
+    // 绑定这一刻的快照可能还是 loading（→ 按默认显示）；订阅会在它变 ready 时再刷一次。
+    facetMount.refresh();
+  };
 
   /**
    * 执行一条 slash 命令（解析会话 face → command()）。
@@ -525,6 +572,8 @@ function apply(ctx: Context): void {
       const style = value['clockIconStyle'];
       return style === 'modern' || style === 'classic' ? style : 'auto';
     };
+    // 徽标显隐开关接到这条设置轨道上（issue #83）：保存即生效，不依赖刷新页面。
+    attachBadgeVisibility(scope);
     mountComposer(scope);
     if (cardT === undefined) return;
     // 设置对话框中的设置页：默认不显示，由插件详情页的开关控制。
@@ -565,6 +614,8 @@ function apply(ctx: Context): void {
       const style = value['clockIconStyle'];
       return style === 'modern' || style === 'classic' ? style : 'auto';
     };
+    // 徽标显隐开关接到这条设置轨道上（issue #83）：保存即生效，不依赖刷新页面。
+    attachBadgeVisibility(scope);
     mountComposer(scope);
     if (cardT === undefined) return;
     ctx.effect(

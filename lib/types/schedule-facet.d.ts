@@ -25,8 +25,37 @@ import { type GroupScheduleSummary, type ScheduleSummaryMap } from './schedule-s
 export declare const LATER_SCHEDULE_FACET_ID = "dsh-later.schedule";
 /** 本文件实现的协议版本（provider 必须原样填进 `protocol`；对不上对方会拒绝登记）。 */
 export declare const LATER_SCHEDULE_FACET_PROTOCOL = 1;
-/** 挂到 group-status 已有的布尔开关上：用户关掉的还是同一个开关，设置不丢。 */
-export declare const LATER_SCHEDULE_FACET_SETTING_KEY = "showScheduledInBadge";
+/**
+ * 本插件自己的「在分组徽标中显示定时任务」开关，在 `Config` 里的字段名（issue #83）。
+ *
+ * 这个位置原来站的是 group-status 的 `showScheduledInBadge`——协议 v1 的 `settingKey`，
+ * 语义是「我受**消费方**哪个开关管」。它 #37 把那个字段废弃了：那等于把别人家的域名、
+ * 来源名和图标形状写死在消费方的配置面里，与它「不认识任何具体来源」直接矛盾。
+ * 现在协议只有一条规则：**登记即显示，不注册即不显示**，开关归状态所有者自己。
+ *
+ * 所以本常量的语义换了边：它不再交给对端，而是**本插件设置卡的字段名**，关掉时本插件
+ * 不去登记 facet。三处字面量（host `Config`、设置卡 SECTIONS、下面的读取处）由
+ * `tests/group-badge-visibility.test.mjs` 锁成同一份——写错不会报错，只会让开关失灵。
+ */
+export declare const GROUP_BADGE_SETTING_KEY = "showInGroupBadge";
+/** 读开关所需的最小快照视图（两代 harness 的 scope 快照都落在这个形状里）。 */
+export interface GroupBadgeSettingSnapshot {
+    readonly status: string;
+    readonly value?: unknown;
+}
+/**
+ * 「在分组徽标中显示定时任务」当前是否生效。
+ *
+ * 只有**显式 false** 才算关。`status !== 'ready'`（还在加载、或该 namespace 不可用）、
+ * 字段缺失、值不是布尔，一律按 schema 默认「显示」处理——理由与 `showButton` 同源：
+ * 读不到设置面就把用户本来看得见的东西关掉，是拿「我看不见」冒充「用户不要」。
+ * 反过来的代价是「用户以为关了但还显示」，那是刷新一下就自愈的显示问题；而这条写反
+ * 是徽标凭空少一格、且没有任何地方解释为什么少。
+ *
+ * @param snapshot - 本插件设置 scope 的原始快照。
+ * @returns 是否应当登记 facet。
+ */
+export declare function isGroupBadgeVisible(snapshot: GroupBadgeSettingSnapshot): boolean;
 /** 图标排列顺序：沿用过渡适配器的 10，注册前后时钟在徽标排格里的位置不动。 */
 export declare const LATER_SCHEDULE_FACET_ORDER = 10;
 /** 徽标可用的三档语义色（对方色板；本插件只选档，不选具体颜色）。 */
