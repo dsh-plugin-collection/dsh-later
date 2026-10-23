@@ -23,7 +23,10 @@ const zh = {
   paramPromptDesc: '提醒内容（trim 后非空，≤{maxChars} 字符；超过会返回 invalid_prompt）。',
   paramAfterSecondsDesc: '正整数延时秒数。',
   paramEverySecondsDesc: '固定间隔秒数，至少 300；无结束条件（有次数上限请改为逐条创建 at）。',
-  paramAtDesc: '绝对目标：显式偏移的 RFC 3339 字符串，或 {date, time, time_zone} 本地日历对象。',
+  paramAtDesc:
+    '绝对目标：带显式时区的 RFC 3339 字符串（以 Z 或 ±HH:mm 结尾），或 {date, time, time_zone} 本地日历对象。'
+    + '本地 time 接受 HH:mm 与 HH:mm:ss（可带 1–3 位毫秒），本插件会补齐成上游要求的 HH:mm:ss；'
+    + '不带任何时区信息的字符串会被拒绝——不替用户猜时区。',
   paramTimeZoneDesc: 'IANA 时区（如 Asia/Shanghai）；可选，缺省用会话检测时区。',
   paramIdDesc: '精确会话内 schedule id。',
 
@@ -77,7 +80,10 @@ const en: { [K in keyof typeof zh]: string } = {
   paramPromptDesc: 'Reminder content (non-empty after trim, ≤{maxChars} characters; exceeds returns invalid_prompt).',
   paramAfterSecondsDesc: 'Positive integer delay in seconds.',
   paramEverySecondsDesc: 'Fixed interval in seconds, at least 300; non-terminating (for count limits, create multiple items with at instead).',
-  paramAtDesc: 'Absolute target: explicit offset RFC 3339 string, or {date, time, time_zone} local calendar object.',
+  paramAtDesc:
+    'Absolute target: an RFC 3339 string with an explicit zone (ending in Z or ±HH:mm), or a {date, time, time_zone} local calendar object. '
+    + 'Local time accepts HH:mm and HH:mm:ss (1-3 digit ms allowed); the plugin pads it to the HH:mm:ss the upstream requires. '
+    + 'A string without any zone is rejected rather than guessed at.',
   paramTimeZoneDesc: 'IANA timezone (e.g., Asia/Shanghai); optional, defaults to session-detected timezone.',
   paramIdDesc: 'Exact session-internal schedule id.',
 

@@ -46,3 +46,41 @@ export declare function atObjectOf(epoch: number, timeZone: string): {
     time: string;
     time_zone: string;
 };
+/** 解析出来的一段本地墙钟。 */
+export interface LocalClockParts {
+    readonly hour: number;
+    readonly minute: number;
+    readonly second: number;
+    readonly millisecond: number;
+}
+/**
+ * 解析本地墙钟；形状或范围不对（`24:00`、`09:60`、`9:0`）时 `undefined`。
+ *
+ * 范围检查放这里而不是留给上游：上游那句 `The local at value must be a real ISO calendar
+ * date and time...` 对用户是不可读的，守门人应当在边界就给中文结论。
+ */
+export declare function parseLocalClock(raw: unknown): LocalClockParts | undefined;
+/**
+ * 把本地墙钟改写成上游必收的形式：`HH:mm:ss`，仅当原文真的写了毫秒才带 `.mmm`。
+ *
+ * 为什么只在有毫秒时输出 `.mmm`：`09:00:00` 与 `09:00:00.000` 是同一时刻，但把没写毫秒的
+ * 输入补成 `.000` 会让「用户/模型到底写没写」这件事在日志里消失。省秒则必须补——上游不收。
+ */
+export declare function canonicalLocalClock(raw: unknown): string | undefined;
+/** 解析本地日历日期，并校验它是**真实存在**的一天（拒 `2026-02-30`）。 */
+export declare function parseLocalDate(raw: unknown): {
+    year: number;
+    month: number;
+    day: number;
+} | undefined;
+/** 把本地日历日期补零成 `YYYY-MM-DD`（上游要求两位月/日）。 */
+export declare function canonicalLocalDate(raw: unknown): string | undefined;
+/**
+ * 把绝对时刻字符串改写成上游必收的形式（`T` 分隔 + 大写 `Z`/带冒号偏移 + 必带秒）。
+ *
+ * **只做不改变所指时刻的改写**：补秒（`:00`）、`T`/`t`/空格统一、`+0800` → `+08:00`、
+ * 毫秒补零。反过来，**没有偏移也没有 `Z` 的串一律拒绝**——`2026-10-26 09:00` 该按哪个时区
+ * 解释，插件猜不出来；替用户猜一个时区得到的是「静默错值」，比一次可读的拒绝坏得多
+ * （issue #76 的评论里同一条判断）。缺的时区信息必须由调用方给，出路写在报错文案里。
+ */
+export declare function canonicalInstantString(raw: unknown): string | undefined;

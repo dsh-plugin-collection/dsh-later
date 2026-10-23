@@ -16,7 +16,7 @@ declare const zh: {
     readonly paramPromptDesc: "提醒内容（trim 后非空，≤{maxChars} 字符；超过会返回 invalid_prompt）。";
     readonly paramAfterSecondsDesc: "正整数延时秒数。";
     readonly paramEverySecondsDesc: "固定间隔秒数，至少 300；无结束条件（有次数上限请改为逐条创建 at）。";
-    readonly paramAtDesc: "绝对目标：显式偏移的 RFC 3339 字符串，或 {date, time, time_zone} 本地日历对象。";
+    readonly paramAtDesc: string;
     readonly paramTimeZoneDesc: "IANA 时区（如 Asia/Shanghai）；可选，缺省用会话检测时区。";
     readonly paramIdDesc: "精确会话内 schedule id。";
     readonly presentCreate: "创建定时提醒";

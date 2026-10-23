@@ -1,17 +1,3 @@
-/**
- * 智能时段计算（纯函数，host 与 client 共享）。
- *
- * 默认时段（v1 硬编码，可经 cordis config 覆盖）：
- *   工作时间 09:00–18:00
- *   午休时间 12:00–14:00
- *   晚间时间 18:00–22:00
- *   夜间静默 22:00–次日 09:00（不发送）
- *
- * 计算在**用户显式选定的 IANA 时区**内进行（不自动推断，确定性优先）。
- * 墙钟→epoch 的解析采用 dsh-schedule `resolveLocalInstant` 同款偏移校正法，
- * 避免依赖进程时区。
- * @module dsh-later/smart-window
- */
 /** 智能时段配置（HH:mm 格式，可配置）。 */
 export interface SmartWindowConfig {
     /** 工作时间开始。 */
