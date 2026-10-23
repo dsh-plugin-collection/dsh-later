@@ -51,7 +51,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node --test \"tests/*.test.mjs\"",
     "prepublishOnly": "npm run build",
-    "watch": "node watch.mjs"
+    "watch": "node watch.mjs",
+    "verify:kernels": "node scripts/verify-across-kernels.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
