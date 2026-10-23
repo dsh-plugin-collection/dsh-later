@@ -350,6 +350,7 @@ test('0.2.0：Config 标了 volatile 且字段齐全（否则设置页不生成�
     'allowLongPrompts',
     'maxPromptChars',
     'showButton',
+    'showInGroupBadge',
     'steerDelivery',
     'confirmDelivery',
     'onUnconfirmed',

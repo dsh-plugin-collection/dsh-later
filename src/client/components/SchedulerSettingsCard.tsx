@@ -41,6 +41,11 @@ interface SettingsScope<T> {
 /** 设置面存储形态（与 SchedulerSettingsSchema 一致，缺省字段表示回退默认）。 */
 export interface SchedulerSettings {
   showButton?: boolean;
+  /**
+   * 是否在 dsh-group-status 的折叠分组徽标里显示「定时任务」这一格（issue #83）。
+   * 关闭的实现是**不登记 facet**——对端 #37 废弃 `settingKey` 后，那是唯一的显隐机制。
+   */
+  showInGroupBadge?: boolean;
   maxSchedules?: number;
   workStart?: string;
   workEnd?: string;
@@ -63,7 +68,7 @@ export interface SchedulerSettings {
 type FieldDef =
   | {
       readonly kind: 'boolean';
-      readonly key: 'showButton' | 'confirmDelivery' | 'advancedSyntax' | 'allowLongPrompts';
+      readonly key: 'showButton' | 'showInGroupBadge' | 'confirmDelivery' | 'advancedSyntax' | 'allowLongPrompts';
       readonly labelKey: string;
       readonly hintKey?: string;
       readonly defaultValue: boolean;
@@ -105,6 +110,15 @@ const SECTIONS: readonly SectionDef[] = [
         key: 'showButton',
         labelKey: 'showButtonLabel',
         hintKey: 'showButtonHint',
+        defaultValue: true,
+      },
+      {
+        // 与 showButton 同为「纯显隐」：关掉只是不再向 dsh-group-status 登记 facet，
+        // 提醒本身照触发。默认开（与 host Config 同源），且**只有显式 false 才关**。
+        kind: 'boolean',
+        key: 'showInGroupBadge',
+        labelKey: 'showInGroupBadgeLabel',
+        hintKey: 'showInGroupBadgeHint',
         defaultValue: true,
       },
       {

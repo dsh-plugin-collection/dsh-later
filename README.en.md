@@ -232,6 +232,7 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | Field | Description | Default |
 |---|---|---|
 | Show schedule button | Whether the timer button shows on the input bar (hiding it never affects existing reminders or the dock) | Shown |
+| Show scheduled in group badge | Whether the "Scheduled" cell appears on the folded-group badge of dsh-group-status; off = **we do not register the facet**, reminders still fire | Shown |
 | Max schedules per session | Max reminders allowed in one conversation | 100 |
 | Allow long prompts | Lift the 1000-character default cap | Off |
 | Custom cap | Character cap when `allowLongPrompts` is on | 1000 |
@@ -311,6 +312,12 @@ blink), the wording (`N 定时任务` / `N Scheduled`) and the glyph (the offici
   whenever the partner is absent (the issue #34 P0).
 - A protocol-version mismatch is skipped **visibly** (one `console.warn`): "I registered it, why is
   nothing showing" has to be diagnosable.
+- **The visibility switch lives here** (issue #83): `showInGroupBadge`, on by default. Partner PR #37
+  deprecated `settingKey` in the protocol (v1 still accepts it but no longer reads it), leaving exactly
+  one rule: **registered means shown, unregistered means hidden**. So "turn scheduled reminders off"
+  can only be executed by us — off means we do not register. Saving in settings applies immediately (the
+  registration follows the subscription), no page refresh; with dsh-group-status absent the row has no
+  visible effect.
 - Every field matches the consumer's former stopgap adapter, and
   `tests/group-status-facet.test.mjs` keeps a copy of that adapter's algorithm as the oracle.
   Changing the display semantics now has to clear that baseline instead of drifting silently.

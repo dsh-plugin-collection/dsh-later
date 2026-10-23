@@ -66,6 +66,15 @@ export const Config: z = s.object({
   /** 是否显示输入框右侧的定时按钮（仅 GUI 显隐；提醒触发与 dock 不受影响）。 */
   showButton: s.boolean().default(true),
   /**
+   * 是否在 dsh-group-status 的折叠分组徽标里显示「定时任务」这一格（issue #83）。
+   *
+   * 关闭的实现是**不向对端登记 facet**：对端 #37 把协议里的 `settingKey` 废弃之后，
+   * 「登记即显示，不注册即不显示」是唯一规则，显隐只能由状态所有者自己执行。
+   * 与 `showButton` 同为纯显隐：提醒照常触发，dock 与侧栏状态不受影响；对端未安装时
+   * 这一项没有可见效果（那本来就没有徽标可关）。
+   */
+  showInGroupBadge: s.boolean().default(true),
+  /**
    * 插话投递方式（「插话发送」把提醒内容推给 agent 时进哪个队列）。
    *
    * - `followup`：入 `next-turn`，**独立成一轮**（等价于「正常发送」）。`next-turn`
