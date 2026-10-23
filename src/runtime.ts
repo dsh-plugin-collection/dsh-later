@@ -26,6 +26,7 @@ import {
 } from '@deepseek-ai/dsh-schedule';
 import {
   renderRecurringBatchFraming as renderEveryReminderBatchFraming,
+  messageSourceDecision,
   scheduleMessageSource,
 } from './schedule-compat.js';
 import type { ScheduleRecord, OneShotScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
@@ -372,6 +373,7 @@ export class UserScheduleRuntime {
     if (!confirmed && this.getSettings().onUnconfirmed === 'keep') {
       // 不写 dispatch：条目留在 active，用户可重试。这正是「提醒消失但消息没到」
       // 的根治点 —— 旧实现在 steer() 后**无条件**写 dispatch，投递失败即永久丢失。
+      this.noteUnconfirmed();
       return { ok: false, code: 'delivery_unconfirmed', message: '投递未确认，提醒已保留，可重试。' };
     }
 
@@ -410,6 +412,23 @@ export class UserScheduleRuntime {
     const messageId = messageIdOf(message);
     if (messageId.length === 0) return false;
     return confirmDelivery(this.agent.session, messageId);
+  }
+
+  /**
+   * 投递未确认时，把「插件当时凭什么决定这个 source kind」写进宿主日志（issue #75 建议 3）。
+   *
+   * 为什么只能记这个、记不了「真实错误」：`confirmDelivery` 的全部观测面是会话日志里
+   * 有没有那条 message id，它回答不了「为什么没有」。rc.1 那类代次的真因是消息被
+   * **宿主写入路径的 v4 准入**拒绝（`format v4 message requires a producer-owned source kind`），
+   * 实测那句只出现在宿主 stdout，插件侧 `deliver()` 不抛、会话日志里既无 dispatch 也无校验行
+   * ——所以插件唯一能补上的信息就是自己的判定依据。把 `kind=` 与内核版本留在线上，
+   * 下次这类事不用再跑一遍跨代次实测才能定位。
+   */
+  private noteUnconfirmed(): void {
+    const decision = messageSourceDecision();
+    this.ctx.logger.warn(
+      `later: 投递未确认（消息 source kind=${decision.kind}；判定依据：${decision.detail}）`,
+    );
   }
 
   /** 执行一次用户提醒决策与派发。 */
@@ -563,6 +582,7 @@ export class UserScheduleRuntime {
     // 清掉等于让提醒消失而消息没到，与日志路径同样的丢失。
     const confirmed = await this.verifyDelivery(message);
     if (!confirmed && this.getSettings().onUnconfirmed === 'keep') {
+      this.noteUnconfirmed();
       return { ok: false, code: 'delivery_unconfirmed', message: '投递未确认，提醒已保留，可重试。' };
     }
     try {

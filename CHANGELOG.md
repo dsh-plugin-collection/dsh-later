@@ -50,6 +50,45 @@
   - 一条如实的限制：这里读的是对端的**构建产物** `lib/client.js`。那份产物比它的源码旧时，本文件测到的是旧行为，
     **不等于**真话；文件头写明，跑之前兄弟仓应当 build 过。
 
+- **fix** `0.1.7-rc.1` 上定时提醒 **100% 不投递**：代次判定从「符号存在性」换成「内核版本号」（issue #75）。
+  - 现象：宿主升到 0.1.7-rc.1 后，提醒到点全部报「发送失败 / 超时未确认」。而且**插件侧读不出原因**——
+    会话日志里既没有 `schedule/change operation:dispatch`，也没有那句准入报错（它只出现在宿主 stdout），
+    `fold` 从 active 1 → 0 是**窗口过期**而不是消费。用户看到的「失败」全是 `confirmDelivery` 的推断。
+  - 根因：`schedule-compat.ts` 拿 `renderRecurringReminderBatchFraming` 是否存在推断「是不是 0.1.7」。
+    但上游两个破坏性变更**不在同一个 rc 落地**——`0.1.7-rc.1` 已经删了消息 `source.kind:'plugin'`
+    （v3→v4 准入在写入时刻对 `kind === 'plugin'` 直接 throw），而 render 的改名要到 `rc.2`。
+    于是 rc.1 是一代「旧符号还在、旧 kind 已死」的组合代，按符号探测必然把它判成 0.1.5，
+    交出 `{ kind:'plugin', … }` 被拒。
+  - 为什么**不能**像原报告建议那样换个符号（`allocateScheduleId`）继续探：实测 `0.1.5-rc.1` 与
+    `0.1.7-rc.1` 的 `dsh-schedule` 导出面**逐符号相同**（两版都在 registry；两边都有
+    `renderEveryReminderBatchFraming` 与 `allocateScheduleId`、都没有新名）。任何单符号推断都会在这里
+    踩空，能区分的只有版本号。
+  - 改法：`PLUGIN_KIND_RETIRED_SINCE = '0.1.7-rc.1'` 做显式阈值；`readKernelVersion()` 依次尝试
+    `@deepseek-ai/dsh` → `dsh-schedule` → `dsh-llm` → `dsh-session`（单押宿主包在 pnpm 隔离布局下必然
+    读不到，而 `dsh-schedule` 是本插件静态 import 的，一定解析得到），解析到入口后**向上走目录**读
+    `package.json`——不能直接 `require('<pkg>/package.json>')`：实测 0.1.5 的 `exports` 里没有
+    `./package.json` 这一条，0.1.7 起才有。比较器自带（semver §11 的预发布序）：阈值两侧都是 `rc.N`，
+    按字符串比会得出 `rc.10 < rc.2`；也不为此引一个 semver 依赖。
+  - 版本读不到时才退回符号探测，并且**每进程警告一次**——静默的错判正是本次事故的成因；兜底结论同样
+    按进程缓存，不给每次投递重复做四次模块解析。
+  - 代次登记：`KERNEL_GENERATIONS` 显式加入 `0.1.7-rc.1`，`scripts/sync-peer-matrix.mjs` 把
+    `^0.1.7-rc.1` 并进 8 个 kernel-scoped 包的 peer。`engines.dsh` 早就把 rc.1 圈在支持范围内
+    （`>=0.1.1-rc.2 <0.2.0-0`），而 peer 强制拦截要到 0.2.0 才开始生效——这条坑路一直对外可达，
+    只是没人验过；本次是把这个既存宣称变成真的。
+  - 诊断（原建议 3 里能做的部分）：投递未确认时，把自己的判定依据（`source kind=` + 内核版本 + 出处）
+    记进宿主日志。真实那句 throw 发生在宿主写入路径，插件侧 `followup()` 不抛也拿不到（实测），所以
+    透出不了「真实错误」；能把「当时凭什么这么选」留在线上，下次同类事故就不必重跑跨代次实测。
+    `DELIVERY_CONFIRM_TIMEOUT_MS` 仍是 2000ms，本次未调。
+  - 验收：`node devkit/func-later.mjs --case drive-gates --dsh ~/dsh-versions/<版本> --hold 8`，判据是
+    **事件形状**（带正文的 `agent/inbox/spliced` + 随后的 `dispatch`），不是「日志里能不能搜到文本」——
+    创建事件与命令回执也含同样文本。修复前 0.1.7-rc.1 为 RED（同机基线已复现），修复后
+    `0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-rc.2` **四代全 GREEN**。
+  - 测试：新增 `tests/kernel-version-source-kind.test.mjs` 15 条（`npm test` 511 → **526**）：rc.1 必须选
+    schedule、更早代次仍选 plugin、阈值边界与预发布序（含 `rc.10 > rc.2`、`0.1.7 > 0.1.7-rc.2`）、
+    specifier 依次尝试与 pnpm 深链、兜底「一周期一警告」、结构性护栏（`scheduleMessageSource` 不再自己做
+    符号探测、`isV17` 那种写法不许回来），外加一组按本机真版本树对账的用例（没有树则 skip 并说明原因）。
+  - 对用户的影响：0.1.5 一线行为不变；0.1.7-rc.1 从「提醒必然不投递」变可用；无新增配置项。
+
 ## 1.6.0 — 2026-10-22
 
 - **change**（提案）中文界面里的 "Beta" 统一改成「实验性」，英文侧保留 "Beta"。

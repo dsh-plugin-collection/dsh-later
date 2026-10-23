@@ -1,6 +1,9 @@
 node_modules/
 *.tsbuildinfo
 
+# devkit/matrix.mjs 的跨代次 scratch（<repo>/.matrix/<版本>）：每次跑都会重建，不进版本库
+.matrix/
+
 # 设计探索的中间态：编号页（docs/ui/09 起）是正式交付，候选草案留在本地
 docs/design/icon-demos/
 docs/ui/clock-icon-preview*.png
