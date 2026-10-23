@@ -15,3 +15,6 @@ docs/clock-progress-*.png
 # 被替换/被否的采集帧：进判据的是 demo-scheme0-seam、demo-schemeB2-seam、tube-live-seam-4x
 docs/media/seam-matrix/seam-compare.png
 docs/media/tube-live-seam-3x.png
+
+# 跨内核回归的产物（JSON 明细），不入库
+.verify/
