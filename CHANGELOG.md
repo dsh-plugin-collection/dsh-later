@@ -32,6 +32,24 @@
     gate、README 两份语言各列这一行。`tests/upstream-compat.test.mjs` 的 `Config` 字段清单同步加一项。
   - 文档：README 中/英配置表各加一行；facet 一节补上「显隐归本插件」这条规则与它的由来。
 
+- **test** 分组状态 facet 从此也用**真对端**验一遍：新增 `tests/peer-facet-integration.test.mjs`（issue #83 的补强）。
+  - 动机：`group-status-facet.test.mjs` 里的登记面是本仓按协议复刻的**假货**。它验得了「我们有没有按规则办事」，
+    验不了「规则对不对得上」——对端哪天改了接受条件、或 `list()` 的条目形状变了，假货照样绿。那正是 #36
+    一路在消灭的「静默不工作」。
+  - 做法：装载兄弟仓 `../dsh-group-status/lib/client.js` 这个**真模块**当对端，让我们自己 `lib/client.js` 的
+    `apply` 往它的 `registerGroupStatusFacet` 里登记，断言四件事：收下（协议版本由对端亲口认账）、它的消费口径
+    读出 `1 定时任务`、`showInGroupBadge: false` 时真登记面**摘掉**了那一份**并且再次通知了订阅者**
+    （没有这一次 bump，徽标上会挂着一个不再更新的幽灵格——这是关掉开关唯一的用户可见后果）、卸载后不留登记。
+    另钉一条：交出的成员清单恰好是协议那九个，多一个 `settingKey` 就算往旧协议上漂。
+  - **skip-if-absent**：对端是可选搭档、不是 npm 依赖（写进依赖会让本插件在对方缺席时永不激活，issue #34 那次 P0），
+    CI 里根本没有这份 checkout。跳过时打印原因与查找路径，不静默通过——一条从不跑的测试必须看得出来它没跑。
+    兄弟仓按**逐级向上搜索**定位，不写死层数：worktree 比主检出深两层，按层数算会让本地明明有两个仓却天天 skip。
+    可用 `DSH_GROUP_STATUS_HOME` 覆盖。
+  - 变异自检（证明这些断言不是永真）：把 `enabled: () => getShowInGroupBadge()` 改成恒 `true` → 「摘掉且再 bump」那条红；
+    把 `settingKey` 塞回交出的对象 → 成员清单那条红；改回全绿。
+  - 一条如实的限制：这里读的是对端的**构建产物** `lib/client.js`。那份产物比它的源码旧时，本文件测到的是旧行为，
+    **不等于**真话；文件头写明，跑之前兄弟仓应当 build 过。
+
 ## 1.6.0 — 2026-10-22
 
 - **change**（提案）中文界面里的 "Beta" 统一改成「实验性」，英文侧保留 "Beta"。
