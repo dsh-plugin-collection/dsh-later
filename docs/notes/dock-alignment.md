@@ -46,7 +46,7 @@
 | S7 | 动作按钮交互态 | `.action`：28×28、`radius 999px`、`--dsw-alias-label-tertiary`、`:hover` → `--dsw-alias-interactive-bg-hover`、`:focus-visible` focus ring、`:disabled{cursor:default;opacity:.45}` | `.ss-dock-action` 全套同值（含 `.45`） | ✅ |
 | S8 | 空态 | 条目为 0 不渲染 | 同 | ✅ |
 | S9 | 单条直出 | `listVisible = rowCount === 1 \|\| expanded` | `expanded = schedules.length === 1 \|\| !collapsed` | ✅ 语义等价 |
-| S10 | 管子接缝 | attach 壳隐含"自己是最后一条 dock"（宿主 todo/goal 浮卡式、queue attach 式垫底） | 插件 order 30 排在 queue 之下 → 借 `[data-queue-dock]` 相邻检测把自身顶边管子化 | ✅ #41 |
+| S10 | 管子接缝 | attach 壳隐含"自己是最后一条 dock"（宿主 todo/goal 浮卡式、queue attach 式垫底，见 design-decisions §8.6） | 插件 order 30 排在 queue 之下 → 读**自己在栈里的位置**：`:not(:first-child)` 管子化顶边、`:not(:last-child)` 让出末位负边距，不再嗅探邻居身份（规则文本唯一事实来源 `dock-stack-contract.md` §2） | ⚠️ 判据文本已定稿并落进 `styles.ts`（design-decisions §8.7）；**未新增抄宿主的几何值**，只换了判据来源 —— §2 S1 那套 calc 与 `-9px` 原样；命中前提「`.ss-dock-root` 是 `[data-slot]` 的直接子元素」静态测不到 → 真机项见 §5 G3 |
 
 ## §3 #32 ①② 的死状态与空类名（含归属变更说明）
 
@@ -79,7 +79,7 @@
 |---|---|---|---|---|
 | G1 | tooltip **遮挡表现** | 值层面已核对（§4：portal 档 1100），但 fixed 元素是否真压在 composer 卡片／面板浮层之上取决于运行时 stacking context（dock 侧 `isolation: isolate`、面板 `z-index: 1099/1100`）；窄视口下翻转与不裁切 | Lead（真机 + `scripts/capture/`） | ❌ 表现层验证不了；✅ 数值可从 `Tooltip.module.css` 读到 |
 | G2 | 按钮列宽与行宽预算 | 去掉 `.ss-dock-tip-anchor` 后，图标列在 pending／done／禁用态之间不抖动；三个 28px 按钮下正文仍不被挤成纯省略号（#3） | Lead | ❌ |
-| G3 | 两条 dock 同屏 | 真队列条与提醒条同时出现时，两块面板负 margin 叠加、两个顶圆角相接处无重影／双描边；`.5px` 描边在 DPR=1 与暗色主题下肉眼可见（P1） | Lead | ✅ 已解决：#41 B2 管子接缝，styles.ts 两条 `[data-queue-dock]` 相邻规则；demo 实测重叠 3px 为有意消缝、接缝无水平线 |
+| G3 | 两条 dock 同屏 | 真队列条与提醒条同时出现时，两块面板负 margin 叠加、两个顶圆角相接处无重影／双描边；`.5px` 描边在 DPR=1 与暗色主题下肉眼可见（P1）。判据换成栈内位置后，这一条的覆盖面**变大**：上方是 goal／todo／第三方 dock 时同样必须成管（旧判据只认队列条），外加「上方那条渲染崩了、留一个 `[data-slot-error]` 空锚点」的已知降级（顶边方角而上方无内容，design-decisions §8.7 边界二） | Lead（`scripts/seam-check/capture.mjs` 取帧 + `criteria.mjs` 判定） | ❌ **必须进真实 GUI 重测**：命中的前提是「`.ss-dock-root` 是 `[data-slot="conversation.input.dock"]` 的直接子元素」，而 conversation / renderer 两个包**不在插件依赖树里** → 静态 grep 只能读到渲染器源码、测不到现场 DOM；隔离实例结论与截图按 `dock-stack-contract.md` §3 判据 5/6 落进它的 §6。历史（仍成立，但测的是旧判据的现场）：#41 B2 的两条 `[data-queue-dock]` 相邻规则曾在真机验证过重叠 3px 为有意消缝、接缝无水平线 —— `docs/media/seam-matrix/` 那 8 帧（manifest 全部 `"dpr": 1`）要用新判据重采；DPR>1 的复测仍是遗留项 #62 |
 | G4 | textarea 自适应高度 | 编辑多行提醒随行高增长、超上限内部滚动，收起后不留残余；dock `max-height: 180px` 滚动不跳 | dock-editor 作者，Lead 复验 | ⚠️ 宿主算法可读（`scrollHeight + offsetHeight - clientHeight`） |
 | G5 | Enter／IME 与 composer 抢键 | dock 内聚焦时 Enter 只保存，不触发宿主提交；`busyEnter=queue` 与 `=steer` 两档一致；输入法组合态 Enter 不提交 | dock-editor | ⚠️ 现有 `event.stopPropagation()` 是宿主没有的一行，动机未证（见 C3） |
 | G6 | 进度条动画相位 | 切走会话再切回、折叠→展开重挂载后条长不归零、无每秒跳变；`prefers-reduced-motion` 下走静态宽度不塌缩 | dock-i18n／Lead | ⚠️ 逻辑可读，观感需实测 |
@@ -123,18 +123,25 @@
 6. **源码级正则断言：匹配前先剥注释。** 本仓大量断言是对源文件文本跑正则，而注释里的三行 `//` 说明会**切断跨行匹配**——实测踩过：`#39` 的字段漂移锁因为 serializer 里一段注释被打断，把**已经输出**的 `delivery_mode` 误报成漂移，看起来像实现有 bug，其实是断言写错。新写这类断言时先剥 `//` 与 `/* */`，并在注释里说明为什么剥。
 7. **变异验证必须双向断言。** 只断言"变异后变红"不成立——变异脚本自身有 bug（例如 `before`/`after` 用了同一组下标，等于没变异）时，那一排 ✅ 全是绿的，看起来像做过完整验证，实际一次有效变异都没发生。正确形态是同时要求**变异前该绿的绿**（`holdsBefore === true`）与**变异后该红的红**，任一不满足即判该次验证无效。这条比任何单条锁都贵，因为它决定"绿"这个数字能不能信。
 8. **`data-*` 探针分两类，只有第二类必须锁。** 样式钩子（`.ss-*` 类名）改名后果是视觉变化、肉眼可查，不强制断言；**验证接口**（被测试或真机定位使用的 `data-ss-dock`、`data-ss-dock-row`、`data-ss-dock-attachments`、`data-ss-attach` 取值集合）视同公共接口，改名必须与断言同一次提交变更——它的失败形态是"查不到元素"，极易被误判成"dock 没渲染 / 这条没附件"，而不是"探针没了"。现状核实（`216f93d`）：4 个探针中 3 个曾无锁，已由 #39 第 11 项补齐。
-10. **宿主 rc 升级必查两项（管子耦合的唯一护栏）**。#41 的 B2 方案借宿主 QueueDock 根上的 `[data-queue-dock]` 做相邻兄弟检测 —— 那是宿主**私有属性**，改名不违反任何契约。`docs/design-decisions.md` §8 曾写"已追加进 rc 升级 checklist"，但当时**无处可查**（本条即补那个"处"，别再让声明悬空）。两项检查与判据：
+9. **`every` 跨轮是否丢附件：已查证，不需要行为级测试。** `advanceEvery`（`src/projection.ts`）返回 `{ ...record, scheduledAt: 新时刻 }`——**只换 `scheduledAt`，`record.id` 跨轮保持不变**；而投递侧 `attachmentsOf(record.id)` 按 id 取，故每轮取到同一批附件。结论：`#39` 第 5 项的源码级锁已经足够，补 FakeAgent/FakeSession 那套重假件只是在锁一个不会变的东西。**若将来出现"换轮换新 id"的路径，这条结论作废**，届时第 5 项必须升级为行为级。
+
+10. **宿主 rc 升级必查两项（管子判据的唯一护栏）**。接缝判据现在读的是**自己在 dock 栈里的位置**（`:not(:first-child)` 管子化顶边、`:not(:last-child)` 让出末位；规则文本唯一事实来源 [`dock-stack-contract.md`](dock-stack-contract.md) §2），不再嗅探宿主 QueueDock 根上的私有属性 `[data-queue-dock]`。**本轮没有新增抄宿主的几何值，只换了判据来源** —— §2 S1 那套 `--dsh-composer-*` calc 与 `-9px` 负下边距原样，所以复查项跟着换轨（旧 A 检查的来历见 `docs/design-decisions.md` §8.6 → §8.7；那条声明当初"无处可查"、就是本条补的那个"处"，别再让它悬空）：
 
    ```sh
-   H=~/.npm/_npx/*/node_modules/@deepseek-ai   # 安装态宿主
-   # A. 借的那个 hook 还在不在 dock 根上
-   grep -o 'data-queue-dock' $H/dsh-client-ui-conversation/lib/client.js
-   # B. queue 面板是否仍是 attach 式：顶圆角 + 底直角（0 0）
-   grep -o '_panel{[^}]*border-radius:[^;]*' $H/dsh-client-ui-conversation/lib/client.js
+   H=~/.npm/_npx/*/node_modules/@deepseek-ai   # 安装态宿主（通配可能展开成多份：本机有 0.2.1-rc.2 与 0.1.5-rc.3）
+   # A. 插槽出口结构是否仍是「[data-slot] 锚点 > 各 dock 根」（位置判据的地基）
+   grep -o 'const ANCHOR_STYLE = [^;]*' $H/dsh-client-ui-renderer/lib/client.js   # 期望 { display: "contents" }
+   grep -o '"data-slot": slotKey' $H/dsh-client-ui-renderer/lib/client.js         # 期望每份安装各命中 1 处（出口锚点属性）
+   # B. 位置选择器是否仍命中 —— 静态测不到，必须真机 DOM
+   #    document.querySelector('[data-slot="conversation.input.dock"] > .ss-dock-root') 非空，
+   #    且它与同一锚点下的其它 dock 根互为兄弟（../devkit/instance.mjs boot 起隔离实例 —— devkit 在本工作区
+   #    兄弟目录、不随插件发布，没有它的人这一条只能交给维护者采集；取帧走 scripts/seam-check/capture.mjs）
    ```
 
-   A 空 / B 不再是 `var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0` → **管子静默退化为修复前观感**（圆角相撞、双描边），不会报错、不会变红，只有肉眼看得到。此时要么改选择器适配，要么回到 #43 推宿主提供 dock 栈契约。哈希前缀（`_panel` 前的 `_xxxx_` 段）随构建变化，**用后缀匹配，别锁整串**。
+   A 变（锚点不再 `display:contents`，或条目外面多包了一层 DOM）→ 直接子代组合器失配；B 不命中同理。失配方向是 **fail-open**：**管子静默退化为 §8.6 修复前的观感**（圆角相撞、双描边），不会报错、不会变红，只有肉眼看得到 —— 所以基础态才刻意保留末位 attach、只有明确不是末位时才让位，常见路径不依赖「选择器必须命中」（论证见 design-decisions §8.7 的 fail-open 段）。此时要么改选择器适配，要么回到 #43 推宿主提供 dock 栈契约。**这条地基为什么只能真机**：conversation / renderer 两个包不在插件依赖树里，worktree 内静态 grep 到的是渲染器源码、不是现场 DOM —— 所以本表 §5 G3 标 ❌，结论只能由 devkit 隔离实例出（判据 5/6，落 `dock-stack-contract.md` §6）。
 
-   真机复核不要靠肉眼：`scripts/seam-check/capture.mjs` 负责实机取帧（带安全闸：拒绝默认端口 3080、必须显式 `--allow-state-write`），`scripts/seam-check/criteria.mjs` 负责判据 1–4。用例与"矩阵齐备 8 帧"的断言在 `tests/seam-pixel-criteria.test.mjs`，采样帧在 `docs/media/seam-matrix/`。
+   另有一项**同属升级复查、但换了罪名**的检查：抄来的几何值仍是宿主 queue attach 壳的，`grep -o '_panel{[^}]*border-radius:[^;]*' $H/dsh-client-ui-conversation/lib/client.js` 期望 `var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0`。这条期望值沿用 design-decisions §8.6 记的 `0.2.0-rc.2` 基线（本轮在 `0.2.1-rc.2` 复读到同值；`0.2.0-rc.2` 那份本机已没有、未再验），而本机另一份 `0.1.5-rc.3` 用同一条 grep 命中的 `_panel` **不是**这个值 —— 所以复查必须认 GUI 实际加载的那份安装。它变了属**几何漂移**（归 §1 那张表追平），不再等于判据失效：判据已经不关心邻居是谁，`[data-queue-dock]` 如今只剩「同屏截图比对时用它定位宿主队列条」这一个用途（design-decisions §8.5 的护栏）。哈希前缀（`_panel` 前的 `_xxxx_` 段）随构建变化，**用后缀匹配，别锁整串**。
 
-9. **`every` 跨轮是否丢附件：已查证，不需要行为级测试。** `advanceEvery`（`src/projection.ts`）返回 `{ ...record, scheduledAt: 新时刻 }`——**只换 `scheduledAt`，`record.id` 跨轮保持不变**；而投递侧 `attachmentsOf(record.id)` 按 id 取，故每轮取到同一批附件。结论：`#39` 第 5 项的源码级锁已经足够，补 FakeAgent/FakeSession 那套重假件只是在锁一个不会变的东西。**若将来出现"换轮换新 id"的路径，这条结论作废**，届时第 5 项必须升级为行为级。
+   还有一把**跟着判据一起改的尺**（本轮的教训，别当成别人的事）：#42 的反向守卫原来写的是「任何声明 margin 的 `.ss-dock-root` 规则都必须带 `-9px`」，它与新方案的规则 A（`:not(:last-child) { margin-bottom: 0 }`）天然冲突 —— 不收窄就把新方案永久判红。`tests/dock-tube-seam.test.mjs`（现 9 条）里这件事现在是四块：**「反向守卫 1」** 数 `data-queue-dock` 在 `styles.ts` 出现 **0 次**；**「反向守卫 2」** 用 `deepEqual(所有把 .ss-dock-root 下边距归零的规则, [§2 A 那一条逐字文本])` —— 豁免精确到**逐字选择器 + 逐字声明**，所以无前缀写法、`:last-child` 反向形态、改成 `margin` 简写三种都照样报红；**「反向自证」** 在内存里把嗅探规则或别的 margin 覆盖塞回 `styles.ts`，两条守卫必须立刻变红（防永真）；**「恰好三条」**（判据 1 那条用例的后半）把所有挂在 `[data-slot]` 锚点上的 `.ss-dock-root` 规则与 §2 三条做 `deepEqual` —— 多一条就是绕过设计文档私自改观感。另外两条**这次改掉或删掉的**：原「源序」断言（管子规则必须排在基础规则之后）已**删**，理由在它的前提是错的 —— B 是 (0,4,0)、基础只有 (0,1,0)，盖过靠特指度，挪顺序观感一个字都不变，留着就是一条假装在守护什么的永真断言；原「demo 与 `styles.ts` 同源」比的是 demo ↔ 测试常量 `TUBE`（两边同时写着旧选择器所以绿，真实产物根本不在比较链上），现在**以 `styles.ts` 为唯一基准**反查 demo。理由与来历见 design-decisions §8.7。升级复查时若这几条变红，先分清是判据改了（要同批改本表 §2 S10 与本条）还是几何漂了（归 §1）。
+
+   真机复核不要靠肉眼：`scripts/seam-check/capture.mjs` 负责实机取帧（带安全闸：拒绝默认端口 3080、必须显式 `--allow-state-write`），`scripts/seam-check/criteria.mjs` 负责判据 1–4。用例与"矩阵齐备 8 帧"的断言在 `tests/seam-pixel-criteria.test.mjs`，采样帧在 `docs/media/seam-matrix/`（manifest 8 条 = 14 张 PNG，`"dpr": 1` 全一致；这 14 张本轮**逐字节未动**，`git status docs/media` 为空 —— 它们是 #41/#42 时期 B2 的基线，新判据的对照不往里加，见下）。demo 侧的同源与形状由 `tests/dock-tube-seam.test.mjs` 两条用例守着：「demo 与 `styles.ts` 同源：**以产物为基准**」（先从 `styles.ts` 读出契约三条，再剥掉 `.scheme[data-scheme="B3"] ` 前缀去 demo 里逐字比对）与「demo 复刻了渲染器形状：`[data-slot]` 锚点包住各兄弟条目」。**像素 AE 不进 CI**（CI 的 node:22 容器没有浏览器，CI 内只守结构判据：同源 + 形状 + 五现场存在），AE 手工跑 `scripts/seam-check/capture-b3-scenes.mjs --out /tmp/seam-b3-shots`，产物**不落仓**；五档现场的实测数字与那条判据校正都写在 [`dock-stack-contract.md`](dock-stack-contract.md) §6 的 demo 对照节。仍未覆盖的是 DPR>1，那是遗留项 #62。

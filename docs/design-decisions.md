@@ -177,6 +177,39 @@ Gitea #32 原是一条混合 issue，按区域归属拆开执行：
 
 **耦合与退出**：规则借的 `[data-queue-dock]` 是宿主私有属性（其唯一稳定 hook，§8.1 结论一），属**有记录的耦合**——宿主 rc 升级 checklist 因此追加一项：确认 queue 仍是 attach 式且该属性仍在 dock 根上，**具体两条可执行检查与判据见 [`docs/notes/dock-alignment.md` §8 第 10 项](notes/dock-alignment.md#8-怎么复核)**（此前这里只写了"已追加"却没给落点，等于声明悬空；现已补实）。失配的后果是静默退化为修复前观感（圆角相撞），不会更糟。长期解法不是插件侧继续猜，而是宿主提供 dock 栈契约（谁是段、如何收口），见 #43。
 
+### 8.7 接缝判据换成「我在 dock 栈里排第几」：能自己表达的那一半先做掉
+
+**决定**：§8.6 的接缝规则不再问「上面紧邻的那条是不是宿主队列条」，改问「我在 dock 栈里排第几」—— 选择器只依赖渲染器给每个插槽出口的公开标记 `[data-slot="conversation.input.dock"]` 与我们自己的 `.ss-dock-root`（`:not(:first-child)` 管子化顶边，`:not(:last-child)` 让出末位）。**本次没有新增抄宿主的几何值**：§8.2 那套 `--dsh-composer-*` 变量与 `-9px` 负下边距原样留着，换的只是判据来源。三条规则的文本与特指度算账以 [notes/dock-stack-contract.md](notes/dock-stack-contract.md) §2 为唯一事实来源，本节不复述选择器全文；下面只留「次序是不是载荷」这一句，因为它决定后人改规则时该看什么。**本节 supersede §8.6 的「耦合与退出」段**（那段的垫底假设、3px 消缝手法、为什么不拉平，仍然成立）。
+
+**机制（别记错，错了会把后人带偏）**：两条规则盖过基础规则靠的是**特指度** —— 基础 `.ss-dock-root` / `.ss-dock-body` 只有 (0,1,0)、`.ss-dock-body::after` 是 (0,1,1)，而 A 是 (0,3,0)、B 是 (0,4,0)（`::after` 那一支 (0,4,1)）。A 改的是 `.ss-dock-root` 的 `margin-bottom`、B 改的是 `.ss-dock-body` 的顶边，**两者命中不同元素的不同声明、互不争优先级**；源码次序 A→B 只是阅读因果，不承载正确性。
+
+> 下列三条理由里的宿主值复查于本机安装态 `0.2.1-rc.2`（2026-10-23）。`$H = ~/.npm/_npx/*/node_modules/@deepseek-ai`，与 [notes/dock-alignment.md](notes/dock-alignment.md) §8 同一个变量；它是**通配**，本机展开成两份安装（`0.2.1-rc.2` 与 `0.1.5-rc.3`），所以下面每条取法的命中数一律**按每份安装**计，别把两份相加当结论，判期望值时也要认 GUI 实际加载的那一份。宿主 bundle 的哈希前缀随构建漂移，**一律用后缀匹配**。
+
+**为什么换（三条理由，每条给取法）**：
+
+1. **旧判据耦合邻居身份**。`[data-queue-dock]` 是宿主 QueueDock 根上的**私有属性**（§8.1 结论一：类名构建期哈希，它是唯一稳定 hook），宿主改名不违反任何契约 —— 于是每次 rc 升级都要人工复查它还在不在（那次复查就记在 dock-alignment.md §8 第 10 项）。取法：`grep -o 'data-queue-dock' $H/dsh-client-ui-conversation/lib/client.js` → 每份安装各 1 处（`0.2.1-rc.2` 仍在；"仍在"不是好消息，代价就是每次升级都得再问一遍）。
+2. **邻居身份对了，位置也可能错**。紧邻在我们上方的有四种可能：todo / goal / queue / 比我们先注册的第三方。取法：`grep -h -A3 'slots.inject("conversation.input.dock"' $H/dsh-client-ui-{conversation,goal}/lib/client.js | grep -E '"(todo|queue|goal)"|order:'` → todo 0、goal 10、queue 20；本仓 `src/client/index.tsx:499-500` 是 `id: 'later-dock'` / `order: 30`。旧判据只认 queue 那一家的属性名，上方换成 goal / todo / 第三方 dock 时该画方角仍是圆角。
+3. **规模上不止我们一家**。「谁是栈底」是四个 occupants 共用、却**没有任何 API 声明**的隐含前提：宿主自家 todo/goal/queue 各自实现一份壳（§8.1 结论三），而把壳写成 attach 式的有两家 —— 宿主的 queue 与我们的 `order: 30`，我们一插，宿主自己的 queue 就不再垫底。实测（取法：`grep -o '_dock{[^}]*margin:[^;]*' $H/dsh-client-ui-{conversation,goal}/lib/client.js` 给出 queue 的 `margin:0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px)` 与 goal 的 `margin:0 auto`；todo 在 conversation 包里那个类叫 `_root`，`grep -o '_root{[^}]*box-shadow:var(--dsw-elevation-panel)[^}]*}' …conversation/lib/client.js` 恰好 1 处，同为 `margin:0 auto` + 全圆角 `var(--dsw-radius-lg)`）：**attach 式目前只有 queue 与我们两家**，浮卡那两家不参与收口这件事，但"垫底"这个前提从 #41 起就再没有被第二条 attach 壳考验过（§8.6 事实链末句），现在正是被考验的那一次。宿主三家的上下位置是**注册时定死的**（order 0/10/20 互不重叠），所以壳能画死；插件这一家的邻居取决于别人装了什么、order 多少，画不死 —— 只能读自己的位置。
+
+**边界（设计里明确保留的两条，不是待办）**：
+
+- **仍然耦合 `[data-slot]` 这一手出口结构**。它比私有属性公开得多（渲染器给**所有**插槽的通用锚点，不是某一家 dock 的身份牌），但判据成立的前提是 `.ss-dock-root` 直接挂在 `[data-slot="conversation.input.dock"]` 下面。取法（`$H/dsh-client-ui-renderer/lib/client.js`）：`grep -o 'const ANCHOR_STYLE = [^;]*'` → `{ display: "contents" }`（出口自己不进布局），出口渲染为 `<div data-slot={slotKey} style={ANCHOR_STYLE}>`；list 分支把每条条目 `guarded()` 之后放进一个 Fragment 当锚点的 children，而 `guarded` 的边界组件在成功路径 `return this.props.children`（不多包一层 DOM）→ 条目根互为兄弟、且都是锚点的直接子元素。**这条直接子代关系在 worktree 里静态 grep 不到**（conversation / renderer 两个包不在插件依赖树里，读到的是渲染器源码不是现场 DOM），只能靠隔离实例真机测 —— 它是 dock-stack-contract §3 的判据 5，测完之前本节的状态是**按源码推定**，不是实测。
+- **崩溃的空锚点会占一个兄弟位**。上方某条 dock 抛错时，渲染器在同一父节点下留一个带 `data-slot-error` 的空 div，两条路径都会出这个形态：条目错误边界的失败分支（`SlotErrorBoundary` / `StrictSessionEntry` 渲染锚点 + `data-slot-error`），以及 list 分支里条目已退场的那一格（`guarded` 之外直接渲染锚点）。取法：`grep -o '"data-slot-error": [^)]*' $H/dsh-client-ui-renderer/lib/client.js` → 每份安装 4 处（其中两条带条目 key，正是 list 出口里的那一格）。于是我们 `:not(:first-child)` 成立而上方并无可见内容 → 顶边画成方角。这是「已经在降级」场景里的次级观感问题，本方案不为此引入 `:nth-child(… of …)` 那类脆弱写法。
+
+**fail-open 方向（刻意如此）**：任何一条新选择器若在真实宿主里永不命中（出口结构与我们理解的不一致就属于这一类），观感退回 §8.6 修复前（接缝多一条描边），**不会更糟**。基础态因此**敢**保留末位 attach（顶圆角 + 底开口 + `-9px`）：只有明确「不是末位」时才让位。最常见的 solo 现场（这条 dock 自己占满栈）里新旧规则同样一条都不命中，注入的 CSS 在那个状态下与 §8.6 逐字相同 —— 所以「单条 dock 观感不变」是**代码级可推**的；但把它当成实测结论要靠像素比对，那是 dock-stack-contract §3 的判据 6，尚未做（[notes/dock-alignment.md](notes/dock-alignment.md) §5 的 G3 因此标 ❌）。
+
+**换判据咬到的地方（本轮真实代价，别省）**：#42 留下的反向守卫「任何声明 margin 的 `.ss-dock-root` 规则都必须带 `-9px`」与新方案**天然冲突** —— 规则 A 恰恰是把下边距收回 0，不收窄就把它永久判红。尺子最终在 `tests/dock-tube-seam.test.mjs`（现 9 条）里拆成三块：**「反向守卫 1」** 数 `styles.ts` 里 `data-queue-dock` 出现 **0 次**（守"本仓不再以任何形式引用那个私有属性"）；**「反向守卫 2」** 用 `deepEqual(所有把 .ss-dock-root 下边距归零的规则, [§2 A 那一条逐字文本])` —— 豁免不是"含 `:not(:last-child)` 就放行"，而是逐字比对，所以无前缀的 `.ss-dock-root { margin-bottom: 0 }`、写成 `:last-child` 的反向形态、把落点换成 `margin` 简写，三种都照样报红，守的还是 attach 态（栈底）那 3px 消缝重叠不许丢；**「反向自证」** 在内存里把嗅探规则或别的 margin 覆盖塞回 `styles.ts`，两条守卫必须立刻变红（防永真，手法同 `client-class-guard.test.mjs`）。
+
+这一轮现学的三条，比"改了几条 CSS"值钱：
+
+1. **改判据要连守护判据的那把尺一起改**，且收窄时别顺手放宽 —— 豁免只给那一条规则，不给那一类写法。
+2. **说不出防什么的断言就删掉，别留成永真**。原「源序」断言（管子规则必须排在 `.ss-dock-body` / `::after` 基础规则**之后**）的前提本身就是错的：新 B 是 (0,4,0)、基础只有 (0,1,0)，盖过靠**特指度**，把管子规则挪到基础规则前面观感一个字都不变 —— 它在任何真实改动下恒为真，是一条假装在守护什么的断言，删（文件头「删掉的一条：原第 4 条『源序』」记的就是这个）。上面「机制（别记错）」那段是它的替身；真正要防"后写的规则反过来盖掉契约"的，是「基线仍在」与「反向守卫」两条，它们都还在。
+3. **同源判据的基准必须是产物，不是测试常量**。原「demo 与 `styles.ts` 同源」比的是 demo ↔ 测试里的 `TUBE` 常量，两边当时**同时**写着旧选择器，所以绿，真实产物根本不在比较链上；现在**以 `styles.ts` 为唯一基准**反查 demo 的 B3 段。判据 1 那条用例还顺带加了「**恰好三条**」：把挂在 `[data-slot]` 锚点上的 `.ss-dock-root` 规则收成集合与 §2 三条做 `deepEqual` —— 少一条是契约被动过，**多一条是有人绕过 §2 私自补规则改观感**（§2 明写不要再加，尤其别给"非末位"发明闭合底边），而第四条的破绽只在两条 dock 同屏时才暴露，单人回归根本抓不到。
+
+**上游那一半与退出路径**：真正的收口靠 #43 的两个方案 —— a：宿主给每个 dock 根标 `data-dock-attach="first|mid|last"`；b：共享壳公共导出。**a 单独落地不解决壳复用**：几何仍是四家各抄一遍（理由 3 的实测就是四份实现），§8.1 结论三那条「宿主壳一改就得人工追平」的代价不会消失。所以本仓把 a 视为**止血**（判据不用再猜位置）、b 视为**收口**（连抄都省掉）。宿主若落地 a，本节两条 `:first-child` / `:last-child` 换成 `[data-dock-attach]`，rc 升级复查项从「那个私有属性还在不在」变成「attach 标记值与 order 是否一致」（落点仍是 dock-alignment.md §8 第 10 项）；若长期不做，本节方案就是**终态** —— 它已不依赖任何邻居身份。
+
+**关联**：#41 是现状修法（本节替换它的判据来源，机制不变）、#42 把接缝像素判据从散文变成可执行（`scripts/seam-check/`、`tests/seam-pixel-criteria.test.mjs`、采样帧 `docs/media/seam-matrix/`）、#43 是上游 dock 栈契约、#62 是遗留复测（那批像素判据目前只在 DPR=1 采过：`docs/media/seam-matrix/manifest.json` 8 帧全部 `"dpr": 1`；本节不动任何几何，对 #62 既不利也不弊）。规则文本与验收判据的唯一事实来源：[notes/dock-stack-contract.md](notes/dock-stack-contract.md)。
+
 ## 9. 分组徽标的「定时任务」：由本插件注册 facet，而不是让对方继续适配（issue #36）
 
 折叠分组的徽标由 dsh-group-status 画。此前它 `require('dsh-later/client')` 读我们的摘要 store，
