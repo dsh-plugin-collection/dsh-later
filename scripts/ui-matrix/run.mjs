@@ -5,6 +5,7 @@
  *     npm run verify:ui                                   # 跑 KERNEL_GENERATIONS 全部代次
  *     npm run verify:ui -- --versions 0.1.2-rc.1,0.2.1-rc.2
  *     PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui
+ *     npm run verify:ui -- --evidence docs/media/ui-matrix   # 同时落一份**进仓**的证据
  *
  * 产物（默认 `.verify/ui-matrix/`，已在 .gitignore）：
  *   - `<version>-{1-composer,2-dock,3-panel}.png`
@@ -23,12 +24,14 @@
  * 控制台零错误），截图作为人眼复核材料 —— 不给像素阈值，避免把字体渲染差异当成回归。
  * @module scripts/ui-matrix/run
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KERNEL_GENERATIONS } from '../../lib/upstream-compat.js';
-import { captureUi } from './capture.mjs';
+import { captureUi, loadPlaywright } from './capture.mjs';
 import { createInstance, listVersionTrees, seedWorkspaceStore, startWeb, stopInstance } from './instance.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -40,6 +43,7 @@ const opt = (name, dflt) => {
 const VERSIONS_ROOT = resolve(opt('versions-root', join(homedir(), 'dsh-versions')));
 const OUT = resolve(opt('out', join(ROOT, '.verify', 'ui-matrix')));
 const PORT_BASE = Number(opt('port-base', 3500));
+const EVIDENCE = opt('evidence', '');
 const given = (opt('versions', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
 const VERSIONS = given.length ? given : KERNEL_GENERATIONS.map((g) => g.id ?? g);
 
@@ -99,6 +103,93 @@ export function renderMatrixHtml(rows, meta = {}) {
 </body></html>`;
 }
 
+/**
+ * 生成"进仓证据"的清单（纯函数，便于测试）。
+ *
+ * 为什么还要这份清单：截图原件在 `.verify/`（26M、含实例目录、随时可重跑），进仓只放
+ * ① 一页拼图 ② 每代的 dock 缩略图 ③ 本清单。清单把"哪次运行、什么结论、对应哪个文件、
+ * 文件的 sha256"钉在一起 —— 只留图不留口径，过两周就没人说得清那张图跑的是哪一版。
+ * @param {Array<object>} rows - runMatrix 的行。
+ * @param {{pluginVersion: string, commit: string, capturedAt?: string, files?: Record<string, {bytes: number, sha256: string}>}} meta
+ * @returns {object} 清单对象。
+ */
+export function buildEvidenceManifest(rows, meta) {
+  const frames = rows.map((row) => {
+    const evidence = `${row.version}-dock.png`;
+    const file = meta.files?.[evidence];
+    return {
+      version: row.version,
+      verdict: row.ok ? 'CAPTURED' : 'FAILED',
+      button: row.buttonFound ?? null,
+      dockRows: row.dockRows ?? 0,
+      panelOpened: row.panelOpened ?? false,
+      consoleErrors: (row.strictErrors ?? []).length,
+      error: row.error ?? null,
+      evidence: file === undefined ? null : { file: evidence, bytes: file.bytes, sha256: file.sha256 },
+      sources: row.shots ?? {},
+    };
+  });
+  return {
+    pluginVersion: meta.pluginVersion,
+    commit: meta.commit,
+    capturedAt: meta.capturedAt ?? new Date().toISOString(),
+    deviceScaleFactor: 2,
+    howToRegenerate: 'npm run verify:ui -- --evidence docs/media/ui-matrix（需要 playwright 与本地版本树）',
+    frames,
+  };
+}
+
+/** 跑 `convert` 等比缩放到目标宽度（进仓的缩略图，别把 26M 原件搬进仓库）。 */
+function downscale(src, dst, width) {
+  spawnSync('convert', [src, '-resize', `${width}x`, '-strip', dst], { encoding: 'utf8' });
+}
+
+/**
+ * 落一份**进仓证据**：拼图 + 每代 dock 缩略图 + 清单。
+ * @param {Array<object>} rows
+ * @param {string} dir - 证据目录（如 docs/media/ui-matrix）。
+ * @returns {Promise<string>} 清单路径。
+ */
+async function writeEvidence(rows, dir) {
+  mkdirSync(dir, { recursive: true });
+  const files = {};
+  const record = (name, path) => {
+    if (!existsSync(path)) return;
+    files[name] = { bytes: statSync(path).size, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') };
+  };
+  // ① 一页拼图（直接对 matrix.html 截图：结论与图同源，不会各写一套）
+  const sheet = join(dir, 'matrix.png');
+  const { chromium } = await loadPlaywright();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1500, height: 1000 }, deviceScaleFactor: 1 });
+    await page.goto(`file://${join(OUT, 'matrix.html')}`, { waitUntil: 'load' });
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: sheet, fullPage: true });
+  } finally {
+    await browser.close();
+  }
+  record('matrix.png', sheet);
+  // ② 每代 dock 缩略图（900px 宽，~40KB）
+  for (const row of rows) {
+    const src = row.shots?.dock;
+    if (src === undefined) continue;
+    const name = `${row.version}-dock.png`;
+    const dst = join(dir, name);
+    downscale(src, dst, 900);
+    record(name, dst);
+  }
+  // ③ 清单
+  const manifest = buildEvidenceManifest(rows, {
+    pluginVersion: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version,
+    commit: spawnSync('git', ['-C', ROOT, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim(),
+    files,
+  });
+  const manifestPath = join(dir, 'manifest.json');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifestPath;
+}
+
 /** 逐代次跑一遍（导出便于测试时替换实现）。 */
 export async function runMatrix(versions = VERSIONS) {
   const pluginVersion = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
@@ -134,6 +225,10 @@ export async function runMatrix(versions = VERSIONS) {
   writeFileSync(join(OUT, 'matrix.html'), renderMatrixHtml(rows, { pluginVersion }));
   const failed = rows.filter((r) => !r.ok).length;
   console.log(`\n汇总：成功 ${rows.length - failed} / 失败 ${failed}；矩阵 ${join(OUT, 'matrix.html')}`);
+  if (EVIDENCE.length > 0) {
+    const manifest = await writeEvidence(rows, resolve(EVIDENCE));
+    console.log(`证据：${manifest}（拼图 + 每代 dock 缩略图 + 清单）`);
+  }
   return rows;
 }
 

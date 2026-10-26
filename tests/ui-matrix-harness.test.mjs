@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { classifyLauncher, ensureModuleFallbackManifest, instanceSummary } from '../scripts/ui-matrix/instance.mjs';
-import { renderMatrixHtml } from '../scripts/ui-matrix/run.mjs';
+import { buildEvidenceManifest, renderMatrixHtml } from '../scripts/ui-matrix/run.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -99,4 +99,43 @@ test('instanceSummary：能给诊断用的结构摘要（不启动实例）', ()
   const summary = instanceSummary(home);
   assert.equal(summary.hasProfile, true);
   assert.deepEqual(summary.bundles, ['@deepseek-ai/dsh-base']);
+});
+
+test('buildEvidenceManifest：清单钉住「哪次运行 / 什么结论 / 哪个文件 / 文件 sha256」', () => {
+  const manifest = buildEvidenceManifest([
+    { version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, strictErrors: [], shots: { dock: '/x/0.2.1-rc.2-2-dock.png' } },
+    { version: '0.0.1-rc.1', ok: false, error: '版本树不存在' },
+  ], {
+    pluginVersion: '1.7.0',
+    commit: 'abc1234',
+    capturedAt: '2026-10-26T17:00:00.000Z',
+    files: { '0.2.1-rc.2-dock.png': { bytes: 41234, sha256: 'deadbeef' } },
+  });
+  assert.equal(manifest.commit, 'abc1234');
+  assert.equal(manifest.frames.length, 2);
+  const ok = manifest.frames[0];
+  assert.equal(ok.verdict, 'CAPTURED');
+  assert.deepEqual(ok.evidence, { file: '0.2.1-rc.2-dock.png', bytes: 41234, sha256: 'deadbeef' });
+  const bad = manifest.frames[1];
+  assert.equal(bad.verdict, 'FAILED');
+  assert.equal(bad.evidence, null, '没有图就不许编一个文件名');
+  assert.match(bad.error, /版本树不存在/);
+  assert.match(manifest.howToRegenerate, /--evidence/);
+});
+
+test('结构：证据落盘必须缩图（26M 原件不进仓）且与 matrix.html 同源', () => {
+  const run = readFileSync(join(root, 'scripts', 'ui-matrix', 'run.mjs'), 'utf8');
+  assert.match(run, /downscale\(/, '进仓的是缩略图，不是 DPR=2 原始截图');
+  assert.match(run, /900/, '缩略图宽度写在代码里');
+  assert.match(run, /matrix\.html/, '拼图对 matrix.html 截图 —— 图与结论同源');
+  assert.match(run, /createHash\('sha256'\)/, '清单要给 sha256');
+});
+
+test('结构：记录文档在 docs 里，且第 5 节是可追加的结论表', () => {
+  const doc = readFileSync(join(root, 'docs', 'notes', 'ui-matrix.md'), 'utf8');
+  assert.match(doc, /## 1\. 一条命令复跑/);
+  assert.match(doc, /## 2\. 每代拍什么、判什么/);
+  assert.match(doc, /## 5\. 历次结论（append-only）/);
+  assert.match(doc, /6\/6 通过/);
+  assert.match(doc, /PLAYWRIGHT_MODULE/, '要写清 playwright 怎么来（CI 里没有）');
 });

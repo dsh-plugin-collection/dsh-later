@@ -18,6 +18,11 @@
 产物 `.verify/ui-matrix/{matrix.json,matrix.html,*.png}`（gitignore）。不设像素阈值 —— 跨代次的
 字体渲染差异不该被当回归；截图是给人复核的。
 
+**方法与历次结论**记在 [`notes/ui-matrix.md`](notes/ui-matrix.md)（含"每代拍什么/判什么"、
+三处跨代次差异、以及 append-only 的结论表）；**进仓证据**在
+[`media/ui-matrix/`](media/ui-matrix/)：一页拼图 `matrix.png` + 每代 `-dock.png` 缩略图 + `manifest.json`
+（把"哪次运行、什么结论、哪个文件、文件 sha256"钉在一起）。
+
 实例引导自包含在 `scripts/ui-matrix/instance.mjs`，处理了三处实测出来的跨代次差异：
 `.bin/dsh` 可能是软链（npm 树）或 shell 脚本（pnpm 树，混用会 `SyntaxError`）；
 模块回退层要的 `<dsh 包>/node_modules/package.json` 占位；`cordis.patch.yml` 里 **hmr 必须开启**

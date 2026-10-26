@@ -6,7 +6,8 @@
 
 - **test** 跨内核代次 **UI 面**矩阵进仓：`npm run verify:ui` 一条命令把每一代 GUI 拉起来、拍三张证据、拼成一页矩阵（issue #95 补齐的第三个面）。
   - 每个代次三张：作曲行 + 定时按钮（client bundle 在该代次加载成功）／待发送 dock 行（发一条
-    `/later +30m …` 经真实命令通道造出来，不烧模型）／面板展开。判据是结构性的（按钮在、dock 有行、
+    `/later +30m 截图矩阵 <代次> …` 经真实命令通道造出来，不烧模型；**正文带代次**，所以截图
+    自己能证明跑的是哪一代）／面板展开。判据是结构性的（按钮在、dock 有行、
     面板开了、控制台零真实错误），截图作人眼复核材料 —— 不设像素阈值，避免把字体渲染差异当回归。
   - 产物落在 `.verify/ui-matrix/`（gitignore）：`<version>-{1-composer,2-dock,3-panel}.png`、
     `matrix.json`、`matrix.html`。
@@ -22,11 +23,16 @@
     `PLAYWRIGHT_MODULE` 指认，或本机已装裸 `playwright`。凭据只**软链**（实例没有自己的 secret
     时页面壳能开、API 全 401 → 插件按钮根本不渲染）；工作区清单从 `~/.dsh/storages/workspace.json`
     **只读复制**一份（缺了 composer 是禁用态，同样测不到插件）。
-  - 新增 `tests/ui-matrix-harness.test.mjs` 7 条：启动器形态判定、占位清单补写、矩阵页渲染、
-    以及三条结构约束（playwright 不许静态依赖、两处跨代次差异必须在代码里、`verify:ui` 入口存在）。
+  - **方法与结果都留档**：方法（拍什么/判什么/三处跨代次差异/加新代次的步骤）写在
+    `docs/notes/ui-matrix.md`，结论是 append-only 的表；进仓证据在 `docs/media/ui-matrix/`
+    —— 一页拼图 + 每代 dock 缩略图（900px，别把 26M 原件搬进仓库）+ `manifest.json`
+    （钉住"哪次运行、什么结论、哪个文件、文件 sha256"）。一条命令刷新：
+    `npm run verify:ui -- --evidence docs/media/ui-matrix`。
+  - 新增 `tests/ui-matrix-harness.test.mjs` 10 条：启动器形态判定、占位清单补写、矩阵页渲染、
+    证据清单形状，以及三条结构约束（playwright 不许静态依赖、跨代次差异必须在代码里、
+    `verify:ui` 入口存在）。
 
 ## 1.8.0 — 2026-10-26
-
 - **breaking**（支持面调整）内核下界从 `>=0.1.1-rc.2` 收到 **`>=0.1.2-rc.1`**，并把 `0.1.2 / 0.1.5` 的
   **类型面兼容补回来** —— 关闭 issue #95。
   - 判据不是"旧代次坏了"，而是**类型面从来没被证明过**：把整条 `@deepseek-ai/dsh*` 依赖线换成目标

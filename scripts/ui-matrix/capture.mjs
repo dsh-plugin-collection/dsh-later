@@ -63,7 +63,9 @@ export function mintCookie(port) {
  *   errors: string[],
  * }>}
  */
-export async function captureUi({ port, outDir, version, prompt = '截图矩阵：这条会出现在 dock 里' }) {
+export async function captureUi({ port, outDir, version, prompt }) {
+  // 正文里带代次：两张截图长得一模一样时（同分钟 + 同倒计时 + 同字体），只有正文能自证是哪一代。
+  const text = prompt ?? `截图矩阵 ${version}：这条会出现在 dock 里`;
   const { chromium } = await loadPlaywright();
   mkdirSync(outDir, { recursive: true });
   const cookie = mintCookie(port);
@@ -112,12 +114,15 @@ export async function captureUi({ port, outDir, version, prompt = '截图矩阵�
     await editor.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
     const draft = async () => {
       await editor.click({ timeout: 10_000 }).catch(() => {});
-      await page.keyboard.type(`/later +30m ${prompt}`, { delay: 8 });
+      await page.keyboard.type(`/later +30m ${text}`, { delay: 8 });
       await page.keyboard.press('Enter');
       // 等 dock 里真的出现待发送行（老代次渲染更慢，固定 sleep 会假红）
       for (let i = 0; i < 20; i += 1) {
-        // 只数 dock 行：`ss-sched-row` 是作曲行旁的芯片，先出现会把"还没建出来"误判成"已经有了"。
-        const rows = await page.evaluate(() => document.querySelectorAll('[class*="ss-dock-row"]').length);
+        // 数**精确类名** `ss-dock-row` 的元素（一行一个）。用子串选择器会把
+        // `ss-dock-row-line` / `-time` / `-countdown` / `-prompt` 也算进去 —— 一行数成 5。
+        // 另外 `ss-sched-row` 是作曲行旁的芯片，先出现，不能当 dock 行。
+        const rows = await page.evaluate(() => [...document.querySelectorAll('[class*="ss-dock-row"]')]
+          .filter((el) => String(el.className).split(/\s+/).includes('ss-dock-row')).length);
         if (rows > 0) return rows;
         await page.waitForTimeout(500);
       }
@@ -126,8 +131,11 @@ export async function captureUi({ port, outDir, version, prompt = '截图矩阵�
     let rows = await draft();
     if (rows === 0) rows = await draft(); // 老编辑器偶发吞第一次回车：重试一次，别把抖动当缺陷
     result.dockRows = rows;
-    result.dockRows = await page.evaluate(() => document.querySelectorAll('[class*="ss-dock-row"]').length
-      || document.querySelectorAll('[class*="ss-sched-row"]').length);
+    result.dockRows = await page.evaluate(() => {
+      const exact = [...document.querySelectorAll('[class*="ss-dock-row"]')]
+        .filter((el) => String(el.className).split(/\s+/).includes('ss-dock-row')).length;
+      return exact;
+    });
     result.shots.dock = join(outDir, `${version}-2-dock.png`);
     await page.screenshot({ path: result.shots.dock });
 
