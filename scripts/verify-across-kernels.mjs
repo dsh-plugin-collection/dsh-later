@@ -10,21 +10,39 @@
  * 只同步 peer 范围，也不执行任何行为。
  *
  * 本脚本对每一个代次：拉起那一代**真内核**（不是 mock），经**注册命令的真实派发路径**
- * 执行两个判据，然后打印表格 + 落 JSON，退出码 0/1/2 可直接当门禁。
+ * 执行判据，然后打印表格 + 落 JSON，退出码 0/1/2 可直接当门禁。
  *
  * ## 用法
  *
  *     npm run build
- *     node scripts/verify-across-kernels.mjs                       # 跑 KERNEL_GENERATIONS 全部代次
+ *     node scripts/verify-across-kernels.mjs                       # 默认 mount,function
+ *     node scripts/verify-across-kernels.mjs --steps mount,function,type,gate
  *     node scripts/verify-across-kernels.mjs --versions 0.1.7-rc.1,0.2.1-rc.2
  *     node scripts/verify-across-kernels.mjs --kernel-root ~/dsh-versions --hold 12
  *     node scripts/verify-across-kernels.mjs --no-install      # 只用已铺好的树，缺的报「未判定」
  *
- * 退出码：0 全绿；1 有红（真回归失败）；2 有未判定（代次装不出来，需要人看一眼）。
+ * 退出码：0 全绿；1 有红（真回归失败）；2 有未判定（代次装不出来 / 组合漂移，需要人看一眼）。
  *
- * 代次清单**取自 `lib/upstream-compat.js` 的 `KERNEL_GENERATIONS`**：声明支持哪一代，
- * 就回归哪一代；不再另写一份列表（写第二份就会漂）。内核树缺失时脚本会 `npm i` 到
- * `--kernel-root/<版本>`（约 600MB / 代次，一次性），装不动就报「未判定」而不是假绿。
+ * ### 四个面（issue #97 补齐后两个）
+ *
+ * | step | 面 | 判据 |
+ * |---|---|---|
+ * | `mount` | 装配 | 真内核冷启动、插件 `activated`、AgentRegistry 可用 |
+ * | `function` | 功能 | `at` 五种文法经真实命令派发 + 到点投递的事件形状 |
+ * | `type` | 类型 | 把仓库 `@deepseek-ai/dsh*` 依赖线换成该代次后跑**两个** tsconfig（不短路） |
+ * | `gate` | 门禁 | 用**该代次自己的** `evaluatePluginCompatibility` 判一遍，再用最新语义判一遍 |
+ *
+ * 后两个是 #97 补的：本轮实测的三条真红（0.1.5 跨代 tsc 19 条、0.1.2 的 `attachments`/`FileBlock`、
+ * ≤0.1.5 的 app-boot 不导出 `evaluatePluginCompatibility`）**全部落在当时没覆盖的面上**，
+ * 只能靠工作区外部工具手工补测 —— 那正是"结论寄存在某台机器上"，本脚本注释里写要避免的事。
+ *
+ * ## 口径：代次必须按 rc 粒度判，且"装出来的"未必是"请求的"（issue #97 #1）
+ *
+ * `@deepseek-ai/dsh@0.1.5-rc.1` 的依赖写的是 `dsh-app-boot: ^0.1.5-rc.1`，装出来实际是
+ * `dsh-app-boot 0.1.5-rc.3` —— 于是"0.1.5-rc.1 已通过"这句话悄悄变成了"rc.1 启动器 + rc.3 组件"。
+ * 而 #75 的教训恰恰是**代次按 rc 判**（0.1.7-rc.1 与 rc.2 的破坏性变更不在同一代落地）。
+ * 所以这里：**装的时候 pin exact**（启动器 + 关键包逐包 pin），**报的时候记 requested/resolved 两列**，
+ * 只要关键包解析到的版本与请求的不一致，结论直接降级为「未判定（组合漂移）」——不许假绿。
  *
  * ## 注意（三条判据纪律，都是踩过的坑）
  *
@@ -37,16 +55,29 @@
  *    那份宿主包（版本矩阵当场失真）。所以是把插件实体副本放进 `<临时HOME>/profiles/…/node_modules`，
  *    再把该代版本树软链铺成同一层的 `node_modules`。
  *
+ * ## 隔离与它的边界（别把自检当通用防线）
+ *
+ * 目录级隔离：临时 `DSH_HOME` + 版本树软链 + 插件实体副本。**没有** unshare / 容器，而
+ * `function` 面会真的执行插件业务代码。对只写 `DSH_HOME` 内 `sessions/`、`storages/`、
+ * `plugin-state/` 的插件（dsh-later 已实测确认）结论可信；换到有外发副作用的插件，先加遮蔽。
+ * 越界自检覆盖这三类目录与 `~/.dsh` 根级文件（issue #97 #3：此前只扫 `sessions/`，
+ * 于是 `~/.dsh/plugin-state/later/` 里的残留被漏掉，还对外说过"已清理"）。
+ *
  * 与 devkit 的关系：devkit 是本机工作区里的工具集，CI 与别人的 checkout 都没有它；
- * 本脚本自包含（只依赖本仓 + 被测内核树），所以它是这份回归**长期该待的地方**。
+ * 本脚本自包含（只依赖本仓 + 被测内核树 + pnpm/git），所以它是这份回归**长期该待的地方**。
+ * @module scripts/verify-across-kernels
  */
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
+  rmSync, statSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { zstdDecompressSync } from 'node:zlib';
 import { KERNEL_GENERATIONS } from '../lib/upstream-compat.js';
+import { runTypecheck } from './typecheck-all.mjs';
 
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -61,22 +92,160 @@ const HOLD = Number(opt('hold', 12));
 const OUT_DIR = resolve(opt('out', join(ROOT, '.verify')));
 const given = (opt('versions', '') || '').split(',').map((x) => x.trim()).filter(Boolean);
 const VERSIONS = given.length ? given : KERNEL_GENERATIONS.map((g) => g.id ?? g);
+/** 本脚本只认这四个面；写错一个字母就当场报错，别静默当成默认值跑。 */
+const KNOWN_STEPS = ['mount', 'function', 'type', 'gate'];
 
-/** 取该代次的内核安装树；没有就装一次（一次性成本，之后复用）。 */
+const STEPS = parseSteps(opt('steps', 'mount,function'));
+
+/**
+ * 参与"代次一致性"的关键包：启动器 + 插件真正依赖的内核包。
+ *
+ * 不把 cordis / schemastery / cosmokit 算进来：它们跟的不是同一个版本线（实测把
+ * `@deepseek-ai/schemastery` 一起改成内核版本会 `ERR_PNPM_NO_MATCHING_VERSION`）。
+ */
+export const KEY_PACKAGES = [
+  'dsh',
+  'dsh-app-boot',
+  'dsh-base',
+  'dsh-schedule',
+  'dsh-session',
+  'dsh-agent',
+  'dsh-commands',
+  'dsh-llm',
+  'dsh-settings',
+  'dsh-tools',
+  'dsh-session-projection',
+];
+
+/**
+ * 解析 `--steps`。
+ * @param {string} text - 逗号分隔，如 `mount,function,type`。
+ * @returns {string[]} 去重后的步骤名。
+ * @throws {Error} 含未知步骤时抛错（拼错的 `--steps typ` 会比"没跑"更糟：它看起来像跑过了）。
+ */
+export function parseSteps(text) {
+  const steps = String(text ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const unknown = steps.filter((s) => !KNOWN_STEPS.includes(s));
+  if (unknown.length) throw new Error(`未知 steps：${unknown.join(', ')}（只认 ${KNOWN_STEPS.join(' / ')}）`);
+  return [...new Set(steps)];
+}
+
+/**
+ * 读出一棵树里关键包**实际**解析到的版本。
+ * @param {string} treeRoot - 含 `node_modules/@deepseek-ai/*` 的目录。
+ * @param {readonly string[]} [packages] - 关键包名（不带 scope）。
+ * @returns {Record<string, string | null>} 包名 → 版本；没装为 null。
+ */
+export function resolvedVersions(treeRoot, packages = KEY_PACKAGES) {
+  const out = {};
+  for (const name of packages) {
+    const man = join(treeRoot, 'node_modules', '@deepseek-ai', name, 'package.json');
+    out[name] = existsSync(man) ? JSON.parse(readFileSync(man, 'utf8')).version : null;
+  }
+  return out;
+}
+
+/**
+ * 组合漂移报告：请求的代次 vs 每个关键包实际解析到的版本。
+ *
+ * `null`（没装）不算漂移 —— 那是"该代次没有这个包"，由装配失败或缺失清单负责报，
+ * 混进来会让"少了包"和"版本错了"两种问题长得一样。
+ * @param {string} treeRoot - 内核树。
+ * @param {string} requested - 请求的代次，如 `0.1.5-rc.1`。
+ * @param {readonly string[]} [packages]
+ * @returns {{ packages: Record<string, { requested: string, resolved: string | null }>, drifted: string[] }}
+ */
+export function driftReport(treeRoot, requested, packages = KEY_PACKAGES) {
+  const resolved = resolvedVersions(treeRoot, packages);
+  const out = {};
+  const drifted = [];
+  for (const [name, actual] of Object.entries(resolved)) {
+    out[name] = { requested, resolved: actual };
+    if (actual !== null && actual !== requested) drifted.push(`${name} ${requested}→${actual}`);
+  }
+  return { packages: out, drifted };
+}
+
+/**
+ * 在 `~/.dsh` 下找本次测试的越界残留。
+ *
+ * 扫 `sessions/`、`storages/`、`plugin-state/` **与根级文件**——只扫 sessions 会漏掉
+ * `plugin-state/later/xk-*.json` 这类（#97 #3 就是按残留现场发现的）。
+ * @param {string} dshRoot - 真实 DSH_HOME，如 `~/.dsh`。
+ * @param {string} [prefix] - 本次测试的 id 前缀，默认 `xk-`（与 `sessionId` 一致）。
+ * @returns {string[]} 命中路径（文件或目录）。
+ */
+export function scanLeaks(dshRoot, prefix = 'xk-') {
+  const found = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.name.startsWith(prefix)) { found.push(p); continue; }
+      if (e.isDirectory() && e.name !== 'node_modules') walk(p);
+    }
+  };
+  for (const sub of ['sessions', 'storages', 'plugin-state']) walk(join(dshRoot, sub));
+  try {
+    for (const e of readdirSync(dshRoot, { withFileTypes: true })) {
+      if (e.isFile() && e.name.startsWith(prefix)) found.push(join(dshRoot, e.name));
+    }
+  } catch { /* 根目录不存在就是没泄漏 */ }
+  return found;
+}
+
+/** 该包在该代次有没有发布（决定"pin 清单"里要不要带它）。 */
+function published(name, version) {
+  const r = spawnSync('npm', ['view', `@deepseek-ai/${name}@${version}`, 'version', '--json'],
+    { encoding: 'utf8', timeout: 60_000 });
+  return r.status === 0 && String(r.stdout).includes(version);
+}
+
+/**
+ * 取该代次的内核树；没有就现装一次。
+ *
+ * **pin exact**（#97 #1）：只装 `dsh@<v>` 会让它 package.json 里的 `^<v>` 把兄弟包带到
+ * 同 minor 的**更晚 rc**（0.1.5-rc.1 装出 rc.3 的 app-boot/base/schedule），"代次结论"当场失真。
+ * 所以启动器装完后，把每个在该代次**有发布**的关键包再 `@<v>` 精确装一遍。
+ * @param {string} version - 目标代次。
+ * @returns {{ root: string | null, note: string | null, pinned: boolean }}
+ */
 function kernelTree(version) {
-  if (version.startsWith('/')) return { root: version, note: null };
+  if (version.startsWith('/')) return { root: version, note: null, pinned: false };
   const root = join(KERNEL_ROOT, version);
-  if (existsSync(join(root, 'node_modules', '@deepseek-ai', 'dsh-app-boot'))) return { root, note: null };
-  if (argv.includes('--no-install')) return { root: null, note: `本地树不完整（缺 @deepseek-ai/dsh-app-boot）且 --no-install：${root}` };
+  const marker = join(root, '.xk-pinned');
+  const hasBoot = () => existsSync(join(root, 'node_modules', '@deepseek-ai', 'dsh-app-boot'));
+  if (existsSync(marker) && hasBoot()) return { root, note: '复用本地（已按代次 pin）', pinned: true };
+  if (argv.includes('--no-install')) {
+    return hasBoot()
+      ? { root, note: '复用本地（该树未 pin，可能组合漂移）', pinned: false }
+      : { root: null, note: `本地树不完整（缺 @deepseek-ai/dsh-app-boot）且 --no-install：${root}`, pinned: false };
+  }
   mkdirSync(root, { recursive: true });
   if (!existsSync(join(root, 'package.json'))) writeFileSync(join(root, 'package.json'), '{"private":true}\n');
-  // 安装上限 7 分钟：CI 里一次意外卡死不该拖垮整条回归，未判定比假绿/假红都有用。
-  const r = spawnSync('npm', ['i', '--no-audit', '--no-fund', `@deepseek-ai/dsh@${version}`], { cwd: root, encoding: 'utf8', timeout: 420_000 });
-  if (!existsSync(join(root, 'node_modules', '@deepseek-ai', 'dsh-app-boot'))) {
-    const miss = String(`${r.stdout}${r.stderr}`).match(/No matching version found for (\S+)/);
-    return { root: null, note: miss ? `该代次没有可安装的启动器：${miss[1]}` : `npm i 失败或未装出 app-boot：${String(r.stderr ?? '').split('\n').slice(-1)[0].slice(0, 120)}` };
+  const pins = KEY_PACKAGES.filter((n) => published(n, version));
+  const specs = pins.map((n) => `@deepseek-ai/${n}@${version}`);
+  // **一条命令装齐**（启动器 + 关键包都 pin 到同一代次）。分两条装过一次，结果 npm 按"树里
+  // package.json 的依赖"把前一条带来的传递依赖重算一遍，顺手把 `cordis-plugin-group` 当多余删了，
+  // 于是装配报 `Cannot find package` —— 装依赖这种图问题只能一口气交给 npm，别自己分步。
+  // `--save-exact` 是必须的：默认 `npm i pkg@0.1.5-rc.1` 会把 `^0.1.5-rc.1` 写进 package.json，
+  // 于是**下一次**解析（重试 / 重跑）按 caret 取到同 minor 的更晚 rc —— pin 当场失效。
+  const install = (extra = []) => spawnSync('npm', ['i', '--no-audit', '--no-fund', '--save-exact', ...extra, ...specs],
+    { cwd: root, encoding: 'utf8', timeout: 900_000 });
+  // 安装上限：CI 里一次意外卡死不该拖垮整条回归，未判定比假绿/假红都有用。
+  let r = install();
+  if (r.status !== 0 && /ERESOLVE|peer dep/i.test(`${r.stdout}${r.stderr}`)) {
+    // 上游几代的 peer 范围自相矛盾（0.1.5 的 dsh-schedule 对 dsh-agent 的范围与它自己装的版本不一致）。
+    // 我们只是**按版本 pin**，不是在挑特性，所以松 peer 不改变"这一代是什么版本"。
+    r = install(['--legacy-peer-deps']);
   }
-  return { root, note: '现场安装' };
+  if (!hasBoot()) {
+    return { root: null, note: `npm i 后仍没有 @deepseek-ai/dsh-app-boot（该代次可能没有可安装的启动器）`, pinned: false };
+  }
+  writeFileSync(marker, `${version}\n${pins.join('\n')}\n`);
+  const drift = driftReport(root, version).drifted;
+  return { root, note: drift.length ? `现场安装（pin 后仍漂移：${drift.join(', ')}）` : `现场安装（pin ${pins.length} 个关键包）`, pinned: pins.length > 0 };
 }
 
 /** 按 zstd 帧 magic 切分逐帧解（多帧拼接的日志只解第一帧会漏掉后半）。 */
@@ -141,14 +310,19 @@ function atShapes() {
   ];
 }
 
+/** 装配 + 功能两面（mount / function）：与 #93 版本行为一致，只是记录更完整。 */
 async function runOne(version) {
   const { root, note } = kernelTree(version);
-  if (!root) return { version, verdict: 'UNDETERMINED', notes: [note ?? '无内核树'] };
+  if (!root) return { version, verdict: 'UNDETERMINED', notes: [note ?? '无内核树'], at: [], delivery: null };
   const runtime = JSON.parse(readFileSync(join(root, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8')).version;
+  // `--versions /abs/path` 时"请求的代次"就是那棵树自己的 dsh 版本；否则比较对象会变成一个路径串，
+  // 于是每个包都被判成漂移 —— 一条看起来很吓人、其实毫无意义的红。
+  const requested = version.startsWith('/') ? runtime : version;
+  const drift = driftReport(root, requested);
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-xkernel-')));
   const profile = join(home, 'profiles', 'x');
   const nm = join(profile, 'node_modules');
-  const record = { version, runtime, notes: [], at: [], delivery: null };
+  const record = { version, runtime, packages: drift.packages, notes: [], at: [], delivery: null };
   try {
     mkdirSync(nm, { recursive: true });
     for (const entry of readdirSync(join(root, 'node_modules'))) {
@@ -224,52 +398,246 @@ async function runOne(version) {
     record.notes.unshift(note ? `内核树：${note}` : '内核树：复用本地');
     try { await ctx.fiber?.dispose?.(); } catch { /* 释放失败不改写结论 */ }
     try { await handle.dispose?.(); } catch { /* 同上 */ }
-    // 越界自检：任何一条本次会话 id 出现在真实 ~/.dsh 里，就说明隔离没生效 —— 大声失败并清干净，
-    // 而不是留一堆测试会话在你的机器上等别人发现。
-    const leaked = [];
-    const realSessions = join(homedir(), '.dsh', 'sessions');
-    try {
-      for (const top of readdirSync(realSessions, { withFileTypes: true })) {
-        if (!top.isDirectory()) continue;
-        const dir = join(realSessions, top.name);
-        for (const kid of readdirSync(dir)) if (kid.startsWith('xk-')) leaked.push(join(dir, kid));
-      }
-    } catch { /* 目录不存在就是没泄漏 */ }
-    if (leaked.length) {
-      record.verdict = 'RED';
-      record.notes.push(`隔离失效：本次会话写进了真实 DSH_HOME（${leaked.length} 个），已删除：${leaked.join(', ').slice(0, 160)}`);
-      for (const p of leaked) rmSync(p, { recursive: true, force: true });
-      const tops = new Set(leaked.map((p) => dirname(p)));
-      for (const t of tops) { try { if (readdirSync(t).length === 0) rmSync(t, { recursive: true, force: true }); } catch { /* 忽略 */ } }
-    }
   } catch (error) {
     record.verdict = 'RED';
     record.notes.push(`装配失败：${String(error?.message ?? error).slice(0, 220)}`);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
-  const red = (record.delivery?.spliced ?? 0) === 0 || !!record.delivery?.admissionError || record.at.some((a) => !a.pass) || record.notes.some((n) => n.startsWith('装配失败') || n.startsWith('未投递'));
-  record.verdict = red ? 'RED' : 'GREEN';
+  if (drift.drifted.length) {
+    record.verdict = 'UNDETERMINED';
+    record.notes.push(`组合漂移（结论降级）：${drift.drifted.join(', ')}`);
+  }
+  const red = record.verdict === 'RED'
+    || (record.delivery?.spliced ?? 0) === 0
+    || !!record.delivery?.admissionError
+    || record.at.some((a) => !a.pass)
+    || record.notes.some((n) => n.startsWith('装配失败') || n.startsWith('未投递'));
+  if (!record.verdict) record.verdict = red ? 'RED' : 'GREEN';
   return record;
 }
 
-console.log(`${NAME}@${PKG.version} · 跨内核回归 · 代次取自 KERNEL_GENERATIONS（${VERSIONS.length} 个）`);
-const results = [];
-for (const v of VERSIONS) {
-  process.stdout.write(`\n### ${v} … `);
-  const r = await runOne(v);
-  results.push(r);
-  if (r.verdict === 'UNDETERMINED') { console.log(`未判定\n    ${r.notes.join(' / ').slice(0, 160)}`); continue; }
-  console.log(r.verdict === 'GREEN' ? 'GREEN' : 'RED');
-  console.log(`    内核=${r.runtime} · 投递 spliced=${r.delivery?.spliced} dispatch=${r.delivery?.dispatched ? 'Y' : 'N'} · at 形状 ${r.at.filter((a) => a.pass).length}/${r.at.length}`);
-  for (const a of r.at) if (!a.pass) console.log(`      ✗ ${a.label}：${a.echo}`);
-  for (const n of r.notes) console.log(`      · ${n}`);
+/**
+ * 类型面（issue #97 #2）：把仓库的 `@deepseek-ai/dsh*` 依赖线整体换成目标代次，跑两个 tsconfig。
+ *
+ * 为什么要临时 worktree + `pnpm install`：TypeScript 解析的是**插件自己 node_modules 里**那份
+ * 宿主类型。只换启动器而不换依赖线，"typecheck 通过"证明的是它兼容当前 devDependency 那一版。
+ * 复用 `scripts/typecheck-all.mjs` 的 `runTypecheck`：两个项目都跑完再汇总（`&&` 短路是 #96 的洞）。
+ * @param {string} version
+ */
+function typeFace(version) {
+  const swap = mkdtempSync(join(tmpdir(), `xk-type-${version}-`));
+  const cleanup = () => {
+    spawnSync('git', ['-C', ROOT, 'worktree', 'remove', '--force', swap], { encoding: 'utf8', timeout: 120_000 });
+    spawnSync('git', ['-C', ROOT, 'worktree', 'prune'], { encoding: 'utf8', timeout: 120_000 });
+    rmSync(swap, { recursive: true, force: true });
+  };
+  try {
+    const add = spawnSync('git', ['-C', ROOT, 'worktree', 'add', '--force', '--detach', swap, 'HEAD'], { encoding: 'utf8', timeout: 180_000 });
+    if (add.status !== 0) return { ok: false, note: `git worktree add 失败：${String(add.stderr ?? add.stdout).slice(0, 160)}`, projects: [] };
+    const manPath = join(swap, 'package.json');
+    const man = JSON.parse(readFileSync(manPath, 'utf8'));
+    let changed = 0;
+    for (const field of ['dependencies', 'peerDependencies', 'devDependencies']) {
+      for (const name of Object.keys(man[field] ?? {})) {
+        // scope 不是一条版本线：cordis / schemastery / cosmokit 各自跟不同次版本，只有 dsh* 与内核同步
+        if (!/^@deepseek-ai\/dsh(-|$)/.test(name)) continue;
+        man[field][name] = version;
+        changed += 1;
+      }
+    }
+    writeFileSync(manPath, `${JSON.stringify(man, null, 2)}\n`);
+    const inst = spawnSync('pnpm', ['install', '--no-frozen-lockfile', '--prefer-offline', '--ignore-scripts'],
+      { cwd: swap, encoding: 'utf8', timeout: 900_000 });
+    if (inst.status !== 0) {
+      const lines = String(`${inst.stdout}${inst.stderr}`).split('\n').filter((l) => /ERR_|404|No matching/i.test(l)).slice(0, 2);
+      return { ok: false, note: `pnpm install 失败（换线 ${changed} 处）：${lines.join(' / ').slice(0, 200)}`, projects: [] };
+    }
+    const result = runTypecheck({ cwd: swap });
+    return {
+      ok: result.ok,
+      projects: result.projects.map(({ project, errors, status }) => ({ project, errors, status })),
+      note: result.ok ? `换线 ${changed} 处，两个 tsconfig 通过` : `换线 ${changed} 处`,
+    };
+  } finally {
+    cleanup();
+  }
 }
-mkdirSync(OUT_DIR, { recursive: true });
-const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const file = join(OUT_DIR, `across-kernels-${stamp}.json`);
-writeFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), versions: VERSIONS, results }, null, 2)}\n`);
-const red = results.filter((r) => r.verdict === 'RED').length;
-const und = results.filter((r) => r.verdict === 'UNDETERMINED').length;
-console.log(`\n汇总：绿 ${results.length - red - und} / 红 ${red} / 未判定 ${und}；明细 ${file}`);
-process.exit(red > 0 ? 1 : und > 0 ? 2 : 0);
+
+/**
+ * 用指定 app-boot 的 `evaluatePluginCompatibility` 判本仓声明。
+ *
+ * 走临时子进程 `require`：在同一个进程里 import 另一代的内核会留下模块副本与副作用
+ * （这份代码里最贵的一次教训就是"两份内核模块实例"）。
+ * @param {string} bootPath - 该代 `dsh-app-boot/lib/index.js`。
+ * @param {string} version - 传给判定的代次串。
+ * @returns {{ status: 'pass'|'reject'|'absent'|'error', detail?: string }}
+ */
+function evaluateGate(bootPath, version) {
+  if (!existsSync(bootPath)) return { status: 'absent' };
+  const script = `
+const m = require(${JSON.stringify(bootPath)});
+if (typeof m.evaluatePluginCompatibility !== 'function') { console.log(JSON.stringify({ status: 'absent' })); process.exit(0); }
+try {
+  const r = m.evaluatePluginCompatibility(${JSON.stringify(PKG)}, {}, ${JSON.stringify(version)});
+  console.log(JSON.stringify(r ? { status: 'reject', detail: JSON.stringify(r.requirements ?? r).slice(0, 180) } : { status: 'pass' }));
+} catch (e) { console.log(JSON.stringify({ status: 'error', detail: String(e.message).slice(0, 160) })); }
+`;
+  const tmp = join(tmpdir(), `xk-gate-${Math.random().toString(36).slice(2)}.cjs`);
+  writeFileSync(tmp, script);
+  try {
+    const r = spawnSync(process.execPath, [tmp], { encoding: 'utf8', timeout: 120_000 });
+    const line = String(r.stdout ?? '').trim().split('\n').pop();
+    try { return JSON.parse(line); } catch { return { status: 'error', detail: String(r.stdout ?? r.stderr).slice(0, 160) }; }
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+/**
+ * 门禁面：被测代次自己的判定 + 最新语义的判定，两值都进产物。
+ *
+ * 为什么双判：≤0.2.0 的内核**不读** `engines.dsh`（只按 `dsh-*` peer 判），0.2.1 起反过来。
+ * 只看其中一个会把"声明形同虚设"或"声明过严"当成结论。
+ * @param {string} version
+ * @param {string | null} treeRoot
+ */
+function gateFace(version, treeRoot) {
+  const own = treeRoot
+    ? evaluateGate(join(treeRoot, 'node_modules', '@deepseek-ai', 'dsh-app-boot', 'lib', 'index.js'), version)
+    : { status: 'absent' };
+  // 最新语义：取最新一代版本树里的 app-boot；没有就用本仓 node_modules 里那份（若有）。
+  const newest = KERNEL_GENERATIONS[KERNEL_GENERATIONS.length - 1];
+  const newestId = newest?.id ?? version;
+  const candidates = [
+    join(KERNEL_ROOT, newestId, 'node_modules', '@deepseek-ai', 'dsh-app-boot', 'lib', 'index.js'),
+    join(ROOT, 'node_modules', '@deepseek-ai', 'dsh-app-boot', 'lib', 'index.js'),
+  ];
+  const refPath = candidates.find((p) => existsSync(p));
+  const latest = refPath ? evaluateGate(refPath, version) : { status: 'absent' };
+  return { own, latest, refFrom: refPath ? basename(dirname(dirname(dirname(refPath)))) : null };
+}
+
+/**
+ * 跑一个代次。
+ * @param {string} version
+ */
+async function runVersion(version) {
+  const record = { version, steps: STEPS };
+  let treeRoot = null;
+  if (STEPS.includes('mount') || STEPS.includes('function')) {
+    const core = await runOne(version);
+    Object.assign(record, core);
+    treeRoot = existsSync(join(KERNEL_ROOT, version)) ? join(KERNEL_ROOT, version) : null;
+    if (record.verdict === 'UNDETERMINED' && !record.packages) {
+      // 装配都起不来时仍然把树信息带进去，方便判断是"没有树"还是"树漂移"
+      record.treeNote = record.notes?.[0] ?? null;
+    }
+  } else {
+    // 只跑 type / gate 时也要先把树准备好（pin 清单与漂移判定都依赖它），但不 boot。
+    const tree = kernelTree(version);
+    treeRoot = tree.root;
+    record.runtime = tree.root
+      ? JSON.parse(readFileSync(join(tree.root, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8')).version
+      : null;
+    record.notes = [tree.note ?? (tree.root ? '复用本地' : '无内核树')];
+    if (tree.root) {
+      // 与 runOne 同一口径：绝对路径模式下"请求的代次"就是那棵树自己的 dsh 版本。
+      const requested = version.startsWith('/') ? record.runtime : version;
+      const drift = driftReport(tree.root, requested);
+      record.packages = drift.packages;
+      if (drift.drifted.length) {
+        record.verdict = 'UNDETERMINED';
+        record.notes.push(`组合漂移（结论降级）：${drift.drifted.join(', ')}`);
+      }
+    } else if (!STEPS.includes('type')) {
+      record.verdict = 'UNDETERMINED';
+    }
+  }
+
+  if (STEPS.includes('gate')) {
+    record.gate = gateFace(version, treeRoot);
+    if (record.gate.own.status === 'reject') {
+      record.verdict = 'RED';
+      record.notes.push(`门禁拒绝（该代次自己的判定）：${record.gate.own.detail ?? ''}`);
+    }
+    if (record.gate.own.status === 'absent') record.notes.push('该代次的 app-boot 不导出 evaluatePluginCompatibility（无法验证声明是否被执行）');
+  }
+
+  if (STEPS.includes('type')) {
+    const t = typeFace(version);
+    record.type = t;
+    if (!t.ok) {
+      record.verdict = 'RED';
+      record.notes.push(`类型面红：${t.projects.map((p) => `${p.project} ${p.errors} 条`).join(' / ') || t.note || ''}`);
+    } else {
+      record.notes.push(`类型面绿：${t.note ?? '两个 tsconfig 通过'}`);
+    }
+  }
+
+  applyLeakCheck(record);
+  if (!record.verdict) record.verdict = 'GREEN';
+  return record;
+}
+
+/**
+ * 越界自检（三类目录 + 根级文件）：任何一条本次前缀出现在真实 `~/.dsh` 里，就说明隔离没生效。
+ *
+ * 从 `runOne` 里搬出来、对每个代次都跑：它验的是"这次运行有没有在你机器上留东西"，
+ * 与跑了哪几步无关 —— 当初只扫 `sessions/` 且只在装配流程里跑，于是 `plugin-state/` 的残留
+ * 既没被扫到、`--steps` 精简时更不会查（issue #97 #3）。
+ * @param {object} record - 该代次的记录（就地改写 verdict/notes）。
+ */
+function applyLeakCheck(record) {
+  const leaked = scanLeaks(join(homedir(), '.dsh'));
+  if (!leaked.length) return;
+  record.verdict = 'RED';
+  record.notes = record.notes ?? [];
+  record.notes.push(`隔离失效：本次运行写进了真实 DSH_HOME（${leaked.length} 个），已删除：${leaked.join(', ').slice(0, 160)}`);
+  for (const p of leaked) {
+    try {
+      rmSync(p, { recursive: true, force: true });
+      const parent = dirname(p);
+      if (readdirSync(parent).length === 0) rmSync(parent, { recursive: true, force: true });
+    } catch { /* 删不掉就留在报告里 */ }
+  }
+}
+
+/** 打印一个代次的结论。 */
+function report(record) {
+  const v = record.version;
+  if (record.verdict === 'UNDETERMINED') {
+    console.log(`\n### ${v} … 未判定`);
+    for (const n of record.notes ?? []) console.log(`    ${n}`.slice(0, 220));
+    return;
+  }
+  console.log(`\n### ${v} … ${record.verdict}`);
+  const bits = [`内核=${record.runtime ?? '?'}`];
+  if (record.delivery) bits.push(`投递 spliced=${record.delivery.spliced} dispatch=${record.delivery.dispatched ? 'Y' : 'N'}`);
+  if (record.at?.length) bits.push(`at 形状 ${record.at.filter((a) => a.pass).length}/${record.at.length}`);
+  if (record.type) bits.push(`type ${record.type.ok ? '绿' : record.type.projects.map((p) => `${p.project}:${p.errors}`).join(',')}`);
+  if (record.gate) bits.push(`gate 本代=${record.gate.own.status} 最新=${record.gate.latest.status}`);
+  console.log(`    ${bits.join(' · ')}`);
+  for (const a of record.at ?? []) if (!a.pass) console.log(`      ✗ ${a.label}：${a.echo}`);
+  for (const n of record.notes ?? []) console.log(`      · ${n}`);
+}
+
+// 只在被当作脚本运行时执行；import 时保持纯函数（测试要 import 上面的导出）。
+const invoked = process.argv[1] === undefined ? undefined : pathToFileURL(resolve(process.argv[1])).href;
+if (invoked !== undefined && import.meta.url === invoked) {
+  console.log(`${NAME}@${PKG.version} · 跨内核回归 · 代次取自 KERNEL_GENERATIONS（${VERSIONS.length} 个）· steps=${STEPS.join(',')}`);
+  const results = [];
+  for (const v of VERSIONS) {
+    const r = await runVersion(v);
+    results.push(r);
+    report(r);
+  }
+  mkdirSync(OUT_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = join(OUT_DIR, `across-kernels-${stamp}.json`);
+  writeFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), versions: VERSIONS, steps: STEPS, results }, null, 2)}\n`);
+  const red = results.filter((r) => r.verdict === 'RED').length;
+  const und = results.filter((r) => r.verdict === 'UNDETERMINED').length;
+  console.log(`\n汇总：绿 ${results.length - red - und} / 红 ${red} / 未判定 ${und}；明细 ${file}`);
+  process.exit(red > 0 ? 1 : und > 0 ? 2 : 0);
+}
