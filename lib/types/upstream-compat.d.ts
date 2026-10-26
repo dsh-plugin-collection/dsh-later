@@ -2,28 +2,17 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 /**
  * 已验证的内核代次（peer 枚举的唯一事实来源）。
  *
+ * 入表的标准是**两面都过**：装配/功能（`verify-across-kernels.mjs`）与**跨代类型编译**
+ * （把整条 `dsh-*` 依赖线换成该代次后 tsc 双项目零错）。只有后者才拦得住「旧内核没有这个
+ * 能力 / 这个符号改了名」——issue #95 就是这么把 0.1.1 / 0.1.2 / 0.1.5 三代请出表的。
+ *
  * - `id`：semver 精确版本（发布 tag）
  * - `peerRange`：写入 package.json 的范围（node-semver 预发布需显式枚举）
- * - `sessionApi`：Session 读日志的形状（见 readOwnEvents / readInheritedEventCount）
+ * - `sessionApi`：Session 读日志的形状（见 readOwnEvents / readInheritedEventCount）。
+ *   现在表里**没有任何一代用 `legacy-events`**（0.1.1 已出表）；该取值与 read* 的兜底分支
+ *   保留为防御——第三方伪造 Session、或未来某代悄悄改形状时，失败要可诊断而不是抛 undefined。
  */
 export declare const KERNEL_GENERATIONS: readonly [{
-    readonly id: "0.1.1-rc.2";
-    readonly peerRange: "^0.1.1-rc.2";
-    readonly sessionApi: "legacy-events";
-}, {
-    readonly id: "0.1.2-rc.1";
-    readonly peerRange: "^0.1.2-rc.1";
-    readonly sessionApi: "own-events";
-}, {
-    /**
-     * `0.1.5` 代次：Session 形状未变（仍 `ownEvents()` + `inheritedEventCount`），
-     * 且插件依赖的 `dsh-schedule` 导出面完整 —— 实测 `rc.1/rc.2/rc.3` 逐个
-     * `import()` 全部 15 个 host 模块均通过（见 docs/verification.md）。
-     */
-    readonly id: "0.1.5-rc.1";
-    readonly peerRange: "^0.1.5-rc.1";
-    readonly sessionApi: "own-events";
-}, {
     /**
      * `0.1.7-rc.1`：**必须单列的组合代**（issue #75）。
      *
