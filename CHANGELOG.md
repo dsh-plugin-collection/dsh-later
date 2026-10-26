@@ -4,6 +4,26 @@
 
 ## 未发布
 
+- **test** 跨代回归脚本（`scripts/verify-across-kernels.mjs`）三处"说得比事实更肯定"的口径缺陷（issue #97）。
+  - **① 代次按 rc 判，装出来的未必是请求的**：`@deepseek-ai/dsh@0.1.5-rc.1` 的内部依赖是
+    `dsh-app-boot: ^0.1.5-rc.1`，现装出来是 `rc.3` —— 于是"0.1.5-rc.1 已通过"其实说的是
+    "rc.1 启动器 + rc.3 组件"，而 #75 的教训恰恰是代次必须按 rc 粒度判。现在：装的时候把
+    启动器 + 10 个关键包**逐包 pin 到请求的代次**（一条命令装齐，分两步会被 npm 重算依赖图、
+    把传递依赖当多余删掉），产物里每个关键包都记 `requested`/`resolved`；只要关键包解析到的
+    版本与请求不一致，结论直接降级为**「未判定（组合漂移）」**，不再假绿。
+  - **② 补齐 `type` 与 `gate` 两面**：`--steps mount,function,type,gate`（默认仍是 `mount,function`）。
+    `type` = 把仓库 `@deepseek-ai/dsh*` 依赖线整体换成该代次后跑**两个** tsconfig（复用
+    `scripts/typecheck-all.mjs` 的汇总逻辑，不再有 `&&` 短路）；`gate` = 用**该代次自己的**
+    `evaluatePluginCompatibility` 判一遍、再用最新语义判一遍，两值都进产物（≤0.2.0 的内核
+    不读 `engines.dsh`、0.2.1 起反过来，只看一个会把"声明形同虚设"当成结论）。
+    实测：`0.1.2-rc.1` 现在同时报出宿主 2 条与 client 21 条（此前 client 一条都没跑），
+    `0.1.5-rc.1` 报出 client 19 条。
+  - **③ 越界自检覆盖 `sessions`/`storages`/`plugin-state` 与根级文件**：此前只扫 `sessions/`，
+    于是 `~/.dsh/plugin-state/later/xk-*.json` 这类残留被漏掉（还据此对外说过"已清理"，那句不完整）。
+    自检也从"装配流程里"搬到"每个代次收尾"，与跑了哪几步无关。
+  - 顺带：脚本可被 import（`parseSteps`/`driftReport`/`resolvedVersions`/`scanLeaks` 导出），
+    口径由纯函数测试钉住 —— 门禁脚本自己的口径不该只有在"这台机器装齐了 N 代"时才可验证。
+    新增 `tests/verify-kernels-contract.test.mjs` 13 条。
 - **breaking**（支持面收缩）内核下界从 `>=0.1.1-rc.2` 收到 `>=0.1.7-rc.1` —— 关闭 issue #95。
   - 判据不是"旧代次坏了"，而是**类型面从来没被证明过**：把整条 `@deepseek-ai/dsh*` 依赖线换成目标
     代次后跑本仓 tsc —— `0.1.5-rc.1` 19 条红（`dsh-client-ui-primitives` 的图标改名
