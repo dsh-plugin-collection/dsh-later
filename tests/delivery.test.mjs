@@ -128,6 +128,8 @@ test('delivery：hasMessageInLog 能按 message id 命中日志', () => {
  * 若哪天有人直接读 `session.events`，0.1.2+ 上会读到空数组而**误判未确认**
  * —— 表现为插话永远提示「未确认」，是很隐蔽的退化。
  */
+// 0.1.1 已按 issue #95 移出支持矩阵，但 readOwnEvents 的 `.events` 兜底**保留**：
+// 第三方伪造 Session、或未来某代悄悄改形状时，失败要可诊断（误判「未确认」）而不是抛 TypeError。
 test('delivery：0.1.1 legacy 形状（.events，无 ownEvents）也能确认', () => {
   const legacy = {
     header: { id: 's-legacy', seedLength: 0 },

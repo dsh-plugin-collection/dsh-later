@@ -72,6 +72,8 @@ test('0.1.7-rc.1 必须选 schedule：这是提醒 100% 不投递的那一代', 
   assert.match(d.detail, /0\.1\.7-rc\.1/);
 });
 
+// 注意：0.1.1 / 0.1.2 / 0.1.5 已按 issue #95 移出支持矩阵，但**判定函数仍须对它们给出正确结论**
+// —— 版本读到老值时不能因为"不支持"就随便选一个。这些断言测的是规则本身，不是支持声明。
 test('更早代次仍选 plugin：把 schedule 塞给 0.1.5 同样是准入拒绝', () => {
   for (const version of ['0.1.1-rc.2', '0.1.2-rc.1', '0.1.5-rc.1', '0.1.5-rc.3']) {
     assert.equal(decide({ version, modernRenderName: false }).kind, 'plugin', `${version} 应仍走 plugin`);

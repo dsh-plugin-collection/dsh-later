@@ -111,25 +111,26 @@ function caretCovers(range, version) {
   return v.pre >= lo.pre;
 }
 
-test('KERNEL_GENERATIONS 结构不变量（首代 legacy，其余 own-events，范围自洽）', () => {
-  assert.ok(KERNEL_GENERATIONS.length >= 2, '至少覆盖 0.1.1 与 0.1.2 两代');
+test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，范围自洽）', () => {
+  assert.ok(KERNEL_GENERATIONS.length >= 2, '至少覆盖两代');
+  // issue #95（2026-10-26）把下界从 0.1.1-rc.2 收缩到 0.1.7-rc.1：更早三代在**类型面**过不去
+  // （0.1.5 图标改名 + props 形状 19 条红 / 0.1.2 两条是「旧内核没有该能力」/ 0.1.1 的依赖在
+  // registry 未发布、无法自证）。入表标准因此写死为「装配功能 + 跨代 tsc 两面都过」，
+  // 而不是「跑现成 lib 产物能挂上」。
+  assert.equal(KERNEL_GENERATIONS[0].id, '0.1.7-rc.1', '下界是 0.1.7-rc.1；更早三代已按 #95 移出');
 
-  assert.equal(KERNEL_GENERATIONS[0].id, '0.1.1-rc.2');
-  assert.equal(KERNEL_GENERATIONS[0].sessionApi, 'legacy-events');
-
-  for (const [index, gen] of KERNEL_GENERATIONS.entries()) {
-    if (index > 0) {
-      assert.equal(gen.sessionApi, 'own-events', `${gen.id} 应为 own-events（0.1.2 起形状未变）`);
-    }
+  for (const gen of KERNEL_GENERATIONS) {
+    // 0.1.1 出表后表里不应再有 legacy-events 的一代；read* 的兜底分支保留为防御。
+    assert.equal(gen.sessionApi, 'own-events', `${gen.id} 应为 own-events（0.1.2 起形状未变，0.1.1 已出表）`);
     // 范围必须覆盖自身 id —— 否则等于声明了一个自己都不满足的区间
     assert.ok(
       caretCovers(gen.peerRange, gen.id),
       `${gen.id} 不满足自己的 peerRange ${gen.peerRange}`,
     );
     // peerRange 的下界必须**恰为**该代次本身，不能借更早的 range 蒙混。
-    // 例：给 `0.1.5-rc.1` 写 `^0.1.2-rc.1` 虽然 semver 上"覆盖"了它（同 minor），
-    // 但那等于声明插件从 0.1.2 起就支持这一代次 —— 而 0.1.5 是**单独验证**过的，
-    // 代次表的意义正是逐代留痕，故下界必须与 id 一致。
+    // 例：给 `0.1.7-rc.2` 写 `^0.1.7-rc.1` 虽然 semver 上"覆盖"了它（同 patch、预发布序更晚），
+    // 但那等于声明插件从 rc.1 起就支持这一代次 —— 两代是**分别验证**过的（rc.1 还是组合代，
+    // 见 issue #75），代次表的意义正是逐代留痕，故下界必须与 id 一致。
     assert.equal(
       gen.peerRange,
       `^${gen.id}`,
@@ -142,6 +143,12 @@ test('KERNEL_GENERATIONS 结构不变量（首代 legacy，其余 own-events，�
   for (let i = 1; i < ids.length; i += 1) {
     assert.ok(verGt(ids[i], ids[i - 1]), `代次表应递增：${ids[i - 1]} → ${ids[i]}`);
   }
+
+  // 下界一致性：engines.dsh 必须与表的下界同一句，别让两处各说一套（issue #95 的验收项之一）
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const lower = '>=0.1.7-rc.1';
+  assert.ok(String(pkg.engines?.dsh ?? '').includes(lower), `engines.dsh 应以 ${lower} 起：${pkg.engines?.dsh}`);
+  assert.ok(!String(pkg.engines?.dsh ?? '').includes('0.1.1'), 'engines.dsh 不得再声称 0.1.1 起');
 });
 
 test('verGt / caretCovers 自身行为正确（防护栏本身失效）', () => {

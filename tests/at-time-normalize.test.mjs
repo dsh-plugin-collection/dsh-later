@@ -37,6 +37,43 @@ import { validateCreateInput } from '../lib/user-tools.js';
 
 const TZ = 'Asia/Shanghai';
 
+/**
+ * 未来第 N 天的 `YYYY-MM-DD`（本地日历）。
+ *
+ * 为什么不用写死的日期：本文件里「真上游对账」那两条会**真的调** `createAtScheduleRecord`，
+ * 而它拒过去时刻（`not_future`）。第一版把日期写死在 2026-10-26，到了那天用例自己就红了
+ * —— 一个和被测代码毫无关系的红。凡是把日期交给上游的用例，日期必须现算。
+ */
+function inDays(days) {
+  const d = new Date(Date.now() + days * 86_400_000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** 同 {@link inDays}，但月/日**不补零**（用来验守门人的补零，如 `2026-12-5`）。 */
+function inDaysUnpadded(days) {
+  const d = new Date(Date.now() + days * 86_400_000);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/**
+ * 下一个「美东回拨日」：11 月第一个周日，当天 01:30 会出现两次（歧义墙钟）。
+ * 必须现算 —— 写死 2026-11-01 的话，11-01 之后这条又变成"过去时刻"被上游拒。
+ */
+function nextNyFallBack() {
+  const startYear = new Date().getUTCFullYear();
+  for (const year of [startYear, startYear + 1]) {
+    for (let day = 1; day <= 7; day += 1) {
+      const probe = new Date(Date.UTC(year, 10, day));
+      if (probe.getUTCDay() !== 0) continue; // 11 月第一个周日
+      const iso = `${year}-11-${String(day).padStart(2, '0')}`;
+      // 回拨后 EST=−05:00；取较晚的那一次候选作为"是否已过去"的判据。
+      if (new Date(`${iso}T01:30:00-05:00`).getTime() > Date.now()) return iso;
+    }
+  }
+  throw new Error('找不到下一个美东回拨日');
+}
+
 /** 剥注释（结构断言只看代码体，见 `long-prompt-settings.test.mjs` 同一条理由）。 */
 function codeOf(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -193,15 +230,19 @@ test('夏令时跳过的钟面：与预览同一口径拒，且是中文', () =>
 // ── 3. 对真上游对账（这一层才叫「能建」）─────────────────────────────────────────
 
 test('凡守门人放行的形状，真上游必收，且与预览算出同一个瞬点', async () => {
+  const soon = inDays(20);
+  const soonUtc = inDays(25);
+  const unpadded = inDaysUnpadded(40); // 用来验守门人补零：月/日不补零的形态
+  const fold = nextNyFallBack();       // 美东回拨日：01:30 当天出现两次
   const shapes = [
-    ['09:00', '2026-10-26', TZ],
-    ['9:00', '2026-10-26', TZ],
-    ['9:00:00', '2026-10-26', TZ],
-    ['09:00:00', '2026-10-26', TZ],
-    ['09:00:00.5', '2026-10-26', TZ],
-    ['18:00', '2026-12-6', TZ],
-    ['01:30', '2026-11-01', 'America/New_York'],
-    ['09:00', '2026-10-26', 'UTC'],
+    ['09:00', soon, TZ],
+    ['9:00', soon, TZ],
+    ['9:00:00', soon, TZ],
+    ['09:00:00', soon, TZ],
+    ['09:00:00.5', soon, TZ],
+    ['18:00', unpadded, TZ],
+    ['01:30', fold, 'America/New_York'],
+    ['09:00', soonUtc, 'UTC'],
   ];
   // 日期一律取未来：上游还会拒「过去时刻」（`not_future`），那是**正确**行为，
   // 但不是这条用例要验的文法——混进来只会让红绿说不出是谁的锅。
@@ -214,9 +255,12 @@ test('凡守门人放行的形状，真上游必收，且与预览算出同一�
 });
 
 test('字符串形态：补秒后真上游接受，且指向改写前那个时刻', async () => {
-  const before = new Date('2026-10-26T09:00+08:00').getTime();
-  const at = acceptedAt({ prompt: 'P str', at: '2026-10-26T09:00+08:00' }, '缺秒带偏移串');
-  assert.equal(at, '2026-10-26T09:00:00+08:00');
+  const date = inDays(20); // 现算：上游拒过去时刻
+  const input = `${date}T09:00+08:00`;       // 缺秒，但偏移显式
+  const expected = `${date}T09:00:00+08:00`;
+  const before = new Date(input).getTime();
+  const at = acceptedAt({ prompt: 'P str', at: input }, '缺秒带偏移串');
+  assert.equal(at, expected);
   const epoch = await upstreamEpoch(at);
   assert.equal(epoch, before, '补秒必须不改时刻——改了就是静默错值');
 });

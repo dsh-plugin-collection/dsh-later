@@ -4,6 +4,26 @@
 
 ## 未发布
 
+- **breaking**（支持面收缩）内核下界从 `>=0.1.1-rc.2` 收到 `>=0.1.7-rc.1` —— 关闭 issue #95。
+  - 判据不是"旧代次坏了"，而是**类型面从来没被证明过**：把整条 `@deepseek-ai/dsh*` 依赖线换成目标
+    代次后跑本仓 tsc —— `0.1.5-rc.1` 19 条红（`dsh-client-ui-primitives` 的图标改名
+    `IconClockOutline16…` → `…Regular` 共 9 条 + 5 条 props 形状，`ScheduleDock.tsx` 一家占 2/3）、
+    `0.1.2-rc.1` 2 条红（`CommandInputDescriptor` 无 `attachments`、`dsh-llm` 无 `FileBlock`，
+    属"旧内核没有该能力"）、`0.1.1-rc.2` **无法自证**（`dsh-util-workspace-path@0.1.1-rc.2`
+    在 registry 未发布，依赖装不出）。功能面七代全绿，所以这是取舍：为三代维护双轨 API 的成本
+    高于收缩声明的收益。
+  - 三条一起改，缺一条都不生效：`KERNEL_GENERATIONS`（7 → 4 代）、`scripts/sync-peer-matrix.mjs`
+    重生成的 19 个 `dsh-*` peer 枚举、`engines.dsh`（`>=0.1.7-rc.1 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`）。
+    ≤0.2.0 的内核不读 `engines.dsh`、只按 `dsh-*` peer 判；0.2.1 起反过来——两条不同时改就等于没改。
+  - **影响**：`0.1.1 / 0.1.2 / 0.1.5` 上**新装或升级到本版**会被版本门禁拒挂；**已安装的旧版本不受影响**
+    （它自己声明的范围没变）。要继续支持这三代，走 issue #95 的方案 B（图标名双轨 + props 形状 +
+    能力降级，约 5~8 个文件），本版不做。
+  - 验证口径（issue #95 的验收项）：表里**每一代**都要在
+    `scripts/verify-across-kernels.mjs`（装配 + 功能）与**跨代 tsc**（`devkit/matrix.mjs
+    --steps gate,peer,typecheck`）两面同时通过；「跑现成 lib 产物能挂上」不算。本次四代两面全过。
+  - 顺带修一条**与支持面无关的日期腐坏**：`tests/at-time-normalize.test.mjs` 的两条「真上游对账」
+    把日期写死成 `2026-10-26`，到了 10-26 当天上游就以 `not_future` 拒收——用例自己在日历上过期。
+    改成现算未来日期（含下一场美东回拨日），并留注释说明为什么这类用例不许写死日期。
 ## 1.7.0 — 2026-10-23
 
 - **feat** 「在分组徽标中显示定时任务」搬进本插件的设置卡（`showInGroupBadge`，默认开）—— 关闭 issue #83。
