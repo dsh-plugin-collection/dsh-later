@@ -171,7 +171,9 @@ export declare class UserScheduleRuntime {
      *    让 GUI 呈现为「我」发出的普通气泡（产品取舍：用户明确要求以本人身份）。
      *    跳过 framing 防护 —— 这是「代发」语义，不是注入。随命令提交的附件
      *    （图片/文件耐久引用，存于 sidecar）按记录顺序拼在文本块之后，
-     *    与用户自己发「文字+图」的消息形状一致。
+     *    与用户自己发「文字+图」的消息形状一致。拼接走 `appendAttachmentBlocks`：
+     *    0.1.2 那代 `ContentBlock` 没有 file 变体，file 块在那里降级成
+     *    `[附件] <name>` 文本块（图片块两代都原样透传）。
      *  - `context`（默认）：复用 dsh-schedule 的注入防护 framing + notice 表单，
      *    保持「上下文注入」的可信审计线；多条一次性到期合并为批次 framing（P1-5），
      *    形状与 dsh-schedule 的固定间隔批次一致。

@@ -14,6 +14,42 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
  */
 export declare const KERNEL_GENERATIONS: readonly [{
     /**
+     * `0.1.2-rc.1` 代次：Session 形状已是 `ownEvents()` + `inheritedEventCount`（0.1.1 的
+     * `.events` + `header.seedLength` 到这里已经改成新形状）。
+     *
+     * 与 0.1.7+ 的差异是**能力/命名**而不是 Session：UI 原语缺 `FileTypeIcon`/`fileSizeText`、
+     * 图标用尺寸后缀名、`Tooltip` 没有 `portal`、`CommandInputDescriptor` 没有 `attachments`、
+     * `dsh-llm` 没有 `FileBlock`、`ContentBlock` 没有 `file` 变体。这些全部收在
+     * `src/client/primitives-compat.ts`、`src/client/workspace-path-compat.ts` 与宿主侧
+     * 的兼容层里（见 issue #95 / #101），跨代 tsc 两个项目都是 0 条错误。
+     */
+    readonly id: "0.1.2-rc.1";
+    readonly peerRange: "^0.1.2-rc.1";
+    readonly sessionApi: "own-events";
+}, {
+    /**
+     * `0.1.5` 线：**列 rc.3，不列 rc.1**（实测结论，见下）。
+     *
+     * Session 形状未变（仍 `ownEvents()` + `inheritedEventCount`）；`dsh-schedule` 的导出面与
+     * 0.1.7-rc.1 **逐符号相同**（`renderEveryReminderBatchFraming` / `allocateScheduleId` 两边都在），
+     * 所以**符号判据区分不了这两代**，只能读版本号（issue #75）。
+     *
+     * 为什么 id 是 rc.3：`@deepseek-ai/dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，
+     * 按默认安装会把整条插件线解析到 **rc.3**；而 rc.1 的启动器 + rc.3 的插件混装**装不起来**
+     * （实测 `verify-across-kernels --steps mount` 报多个 dsh-* 插件 load 失败，与本插件无关）。
+     * 也就是说这一代用户实际拿到的是**统一的 rc.3**，能验证的形态也只有它。
+     *
+     * 该代还有一处 schemastery 差异：`s.object(...).volatile()` 在它装的 **3.18.2** 上不存在
+     * （整条插件加载失败，`…volatile is not a function`）—— 已在 `src/index.ts` 里做能力探测降级。
+     *
+     * UI 侧差异（图标尺寸后缀名、`Tooltip` 无 `portal`、`fileMediaUrl` 缺失）由
+     * `primitives-compat.ts` / `workspace-path-compat.ts` 兜住；它本身有 `FileTypeIcon`/`fileSizeText`。
+     */
+    readonly id: "0.1.5-rc.3";
+    readonly peerRange: "^0.1.5-rc.3";
+    readonly sessionApi: "own-events";
+}, {
+    /**
      * `0.1.7-rc.1`：**必须单列的组合代**（issue #75）。
      *
      * 上游两个破坏性变更不在同一个 rc 落地：

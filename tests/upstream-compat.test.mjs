@@ -113,11 +113,13 @@ function caretCovers(range, version) {
 
 test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，范围自洽）', () => {
   assert.ok(KERNEL_GENERATIONS.length >= 2, '至少覆盖两代');
-  // issue #95（2026-10-26）把下界从 0.1.1-rc.2 收缩到 0.1.7-rc.1：更早三代在**类型面**过不去
-  // （0.1.5 图标改名 + props 形状 19 条红 / 0.1.2 两条是「旧内核没有该能力」/ 0.1.1 的依赖在
-  // registry 未发布、无法自证）。入表标准因此写死为「装配功能 + 跨代 tsc 两面都过」，
-  // 而不是「跑现成 lib 产物能挂上」。
-  assert.equal(KERNEL_GENERATIONS[0].id, '0.1.7-rc.1', '下界是 0.1.7-rc.1；更早三代已按 #95 移出');
+  // issue #95（2026-10-26）先用跨代 tsc 量了一遍：0.1.1 / 0.1.2 / 0.1.5 三代都红，于是先把下界
+  // 收到 0.1.7-rc.1（PR #98）；随后按同一份测量把能兼容的补回来（PR #101）：
+  //   · 0.1.5：图标改名 / Tooltip 无 portal / 无 fileMediaUrl —— 兼容层兜住；
+  //   · 0.1.2：再加 FileTypeIcon/fileSizeText/attachments/FileBlock/ContentBlock 无 file 变体 —— 降级兜住；
+  //   · 0.1.1：`dsh-util-workspace-path@0.1.1-rc.2` 在 registry 未发布 ⇒ 装不出 ⇒ **无法自证**，仍不入表。
+  // 入表标准因此写死为「装配功能 + 跨代 tsc 两面都过」，而不是「跑现成 lib 产物能挂上」。
+  assert.equal(KERNEL_GENERATIONS[0].id, '0.1.2-rc.1', '下界是 0.1.2-rc.1（0.1.1 无法自证，未入表）');
 
   for (const gen of KERNEL_GENERATIONS) {
     // 0.1.1 出表后表里不应再有 legacy-events 的一代；read* 的兜底分支保留为防御。
@@ -128,9 +130,10 @@ test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，�
       `${gen.id} 不满足自己的 peerRange ${gen.peerRange}`,
     );
     // peerRange 的下界必须**恰为**该代次本身，不能借更早的 range 蒙混。
-    // 例：给 `0.1.7-rc.2` 写 `^0.1.7-rc.1` 虽然 semver 上"覆盖"了它（同 patch、预发布序更晚），
-    // 但那等于声明插件从 rc.1 起就支持这一代次 —— 两代是**分别验证**过的（rc.1 还是组合代，
-    // 见 issue #75），代次表的意义正是逐代留痕，故下界必须与 id 一致。
+    // 例：给 `0.1.5-rc.1` 写 `^0.1.2-rc.1` 虽然 semver 上"覆盖"了它（同 minor），
+    // 但那等于声明插件从 0.1.2 起就支持这一代次 —— 两代是**分别验证**过的（兼容面不同：
+    // 0.1.2 缺 FileTypeIcon/fileSizeText，见 #95/#101），代次表的意义正是逐代留痕，
+    // 故下界必须与 id 一致。
     assert.equal(
       gen.peerRange,
       `^${gen.id}`,
@@ -146,9 +149,9 @@ test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，�
 
   // 下界一致性：engines.dsh 必须与表的下界同一句，别让两处各说一套（issue #95 的验收项之一）
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const lower = '>=0.1.7-rc.1';
+  const lower = '>=0.1.2-rc.1';
   assert.ok(String(pkg.engines?.dsh ?? '').includes(lower), `engines.dsh 应以 ${lower} 起：${pkg.engines?.dsh}`);
-  assert.ok(!String(pkg.engines?.dsh ?? '').includes('0.1.1'), 'engines.dsh 不得再声称 0.1.1 起');
+  assert.ok(!String(pkg.engines?.dsh ?? '').includes('0.1.1'), 'engines.dsh 不得再声称 0.1.1 起（该代无法自证）');
 });
 
 test('verGt / caretCovers 自身行为正确（防护栏本身失效）', () => {

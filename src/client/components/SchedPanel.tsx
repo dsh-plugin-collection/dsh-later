@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
+import { IconClose } from '../primitives-compat.js';
 import { epochFromLocal, localFieldsOf, nextSmartAt, DEFAULT_SMART_WINDOW, type SmartWindowConfig } from '../../smart-window.js';
 import type { TextLocale } from '../../time-utils.js';
 import { canonicalLocalClock, formatAbsolute, formatRelative } from '../../time-utils.js';
@@ -306,7 +306,7 @@ export function SchedPanel({
       <div className="ss-panel-header">
         <span className="ss-panel-title">{t.panelTitle}</span>
         <button type="button" className="ss-panel-close" aria-label={t.close} onClick={onClose}>
-          <IconCloseOutlineRegular size={14} />
+          <IconClose size={14} />
         </button>
       </div>
 

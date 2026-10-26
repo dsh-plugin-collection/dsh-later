@@ -16,10 +16,24 @@
  * import 在目标导出缺失时是链接期硬失败（`SyntaxError: does not provide an export
  * named …`），会让插件在旧代次宿主上直接加载不了。这里走 namespace + 属性访问。
  *
+ * ## 第二组：图标与两个工具（issue #95 方案 B，0.1.5 / 0.1.2 兼容）
+ *
+ * 同一个包在 0.1.7 之前/之后还有三处差异，全部收敛在本文件末尾：
+ *
+ * | 东西 | 0.1.2 / 0.1.5 | 0.1.7+ |
+ * |---|---|---|
+ * | 图标命名 | 尺寸后缀 `IconClockOutline16` / `IconChevronDownOutline14` | 尺寸无关的 `…OutlineRegular` |
+ * | `Tooltip` 的 `portal` | **没有这个 prop**（实现只解构已知字段，多传被忽略） | 有 |
+ * | `FileTypeIcon` / `fileSizeText` | 0.1.5 有，**0.1.2 没有** | 有 |
+ *
+ * 直接 `import { IconClockOutlineRegular }` 在 0.1.5 上是 `TS2724`（实测 19 条红全在这里）。
+ * 所以图标也走 `pick()`：**新名优先、旧名兜底**，用法处拿到的是普通组件，调用点不必关心代次。
+ *
  * @module dsh-later/client/primitives-compat
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { CSSProperties, RefObject } from 'react';
+import { createElement, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties, JSX, RefObject } from 'react';
+import type { IconProps } from '@deepseek-ai/dsh-client-ui-primitives';
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives';
 
 /** 锚定 hook 的入参（与官方 `AnchoredPositionOptions` 同构）。 */
@@ -55,6 +69,9 @@ type UseDismissOnOutsidePointer = (
 function pick<T>(name: string): T | undefined {
   return (primitives as unknown as Record<string, unknown>)[name] as T | undefined;
 }
+
+/** 图标组件的形状（两代一致：`({ size, className }) => JSX.Element`）。 */
+export type IconComponent = (props: IconProps) => JSX.Element | null;
 
 /** 官方锚定 hook；旧代次 primitives 未导出时为 undefined。 */
 const hostUseAnchoredPosition = pick<UseAnchoredPosition>('useAnchoredPosition');
@@ -202,4 +219,149 @@ export function useEscapeToClose(open: boolean, setOpen: (open: boolean) => void
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
+}
+
+/**
+ * 图标别名：新名优先、老代次的尺寸后缀兜底。
+ *
+ * 两代都没有时的兜底是**什么都不画**（比画一个错图标更容易被发现）。
+ * `IconInfoOutline` 在老代次没有任何对应图标（两代都没有 `IconInfo*`），语义最近的是问号图标。
+ */
+/**
+ * 本插件**可能查询**的图标导出名（两代命名合起来的全集）。
+ *
+ * 为什么要把这张表公开：`import * as ns` 在 bundle 里会被 esbuild 改写成
+ * `__toESM(require(...))` —— 它只**拷贝可枚举自有属性**到新对象。真实宿主返回的是含静态导出的
+ * 普通对象（拷贝得到全部图标），但测试桩是 `Proxy`（默认没有 `ownKeys`），拷贝后什么都查不到，
+ * 图标会退化成兜底。所以测试桩要按这张表声明可枚举属性 —— 表在这里，桩才不必另抄一份。
+ */
+export const ICON_EXPORT_NAMES: readonly string[] = [
+  'IconClockOutlineRegular', 'IconClockOutline16',
+  'IconCloseOutlineRegular', 'IconCloseOutline16',
+  'IconChevronDownOutlineRegular', 'IconChevronDownOutline14',
+  'IconEditOutlineRegular', 'IconEditOutline16',
+  'IconPauseOutlineRegular', 'IconPauseOutline16',
+  'IconPlayOutlineRegular', 'IconPlayOutline16',
+  'IconSendOutlineRegular', 'IconSendOutline16',
+  'IconTrashOutlineRegular', 'IconTrashOutline16',
+  'IconInfoOutlineRegular', 'IconQuestionOutline14',
+  'IconPaperclipOutline16',
+  'FileTypeIcon', 'fileSizeText',
+] as const;
+
+const EmptyIcon: IconComponent = () => null;
+
+function firstIcon(...candidates: readonly (IconComponent | undefined)[]): IconComponent {
+  return candidates.find((candidate) => candidate !== undefined) ?? EmptyIcon;
+}
+
+export const IconClock = firstIcon(
+  pick<IconComponent>('IconClockOutlineRegular'),
+  pick<IconComponent>('IconClockOutline16'),
+);
+export const IconClose = firstIcon(
+  pick<IconComponent>('IconCloseOutlineRegular'),
+  pick<IconComponent>('IconCloseOutline16'),
+);
+export const IconChevronDown = firstIcon(
+  pick<IconComponent>('IconChevronDownOutlineRegular'),
+  pick<IconComponent>('IconChevronDownOutline14'),
+);
+export const IconEdit = firstIcon(
+  pick<IconComponent>('IconEditOutlineRegular'),
+  pick<IconComponent>('IconEditOutline16'),
+);
+export const IconPause = firstIcon(
+  pick<IconComponent>('IconPauseOutlineRegular'),
+  pick<IconComponent>('IconPauseOutline16'),
+);
+export const IconPlay = firstIcon(
+  pick<IconComponent>('IconPlayOutlineRegular'),
+  pick<IconComponent>('IconPlayOutline16'),
+);
+export const IconSend = firstIcon(
+  pick<IconComponent>('IconSendOutlineRegular'),
+  pick<IconComponent>('IconSendOutline16'),
+);
+export const IconTrash = firstIcon(
+  pick<IconComponent>('IconTrashOutlineRegular'),
+  pick<IconComponent>('IconTrashOutline16'),
+);
+export const IconInfo = firstIcon(
+  pick<IconComponent>('IconInfoOutlineRegular'),
+  pick<IconComponent>('IconQuestionOutline14'),
+);
+
+/**
+ * `Tooltip` 的 `portal` prop：0.1.7 起才有。
+ *
+ * 用 **spread** 而不是直接写 `<Tooltip portal>`：JSX 的 spread 不做多余属性检查，两代都能编译；
+ * 0.1.5 的 Tooltip 实现只解构 `label/side/delayMs/disabled/maxWidth/children`（已核对该代
+ * `lib/index.js`），多出来的 `portal` 被**静默忽略**，不会漏到 DOM 上，也不会告警。
+ *
+ * 代价：老代次的 tooltip 不再固定渲染到 `document.body`，可能被可滚动的祖先裁切 ——
+ * 这是 0.1.5 的既有能力上限，不是我们引入的降级。
+ */
+export const tooltipPortalProps: { portal?: true } = { portal: true };
+
+/** `FileTypeIcon` 的 props（两代同名同形：`{ path, size? }`）。 */
+export interface FileTypeIconProps {
+  readonly path: string;
+  readonly size?: number;
+}
+
+/**
+ * 文件类型图标：0.1.5 有 `FileTypeIcon`，**0.1.2 没有**。
+ *
+ * 降级：0.1.2 上统一画回形针（两代都有 `IconPaperclipOutline16`），即"这是个附件"而不是
+ * "这是哪种文件"。代价是丢失按扩展名区分的图标 —— 在 0.1.2 上可接受（那里连 `fileSizeText`
+ * 都没有，附件行本来就是简化形态）。
+ */
+export function FileTypeIconCompat({ path, size }: FileTypeIconProps): JSX.Element | null {
+  const host = pick<(props: FileTypeIconProps) => JSX.Element | null>('FileTypeIcon');
+  if (host !== undefined) return createElement(host, { path, size });
+  const paperclip = pick<IconComponent>('IconPaperclipOutline16');
+  if (paperclip !== undefined) return createElement(paperclip, { size });
+  return null;
+}
+
+/**
+ * 字节数的可读文本：宿主有 `fileSizeText` 就用它；0.1.2 没有，走本地实现。
+ *
+ * 本地实现刻意与宿主同量级（1024 进制、一位小数、整数不带 `.0`），差异只可能出现在极值上。
+ * 老代次没有可比对的实现，这是能做到的最接近的近似 —— **不声称与宿主逐字相同**。
+ */
+export function fileSizeTextCompat(bytes: number): string {
+  const host = pick<(value: number) => string>('fileSizeText');
+  if (host !== undefined) return host(bytes);
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Number.isInteger(kb) ? kb : kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  return `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
+}
+
+/**
+ * 本代次解析到的图标名（别名 → 实际用的宿主导出名）。
+ *
+ * 诊断与测试用：能核对"这一代到底用了哪一套名字"，而不是读代码猜。
+ */
+export function resolvedIconNames(): Record<string, string | undefined> {
+  const table: Record<string, readonly (readonly [string, IconComponent | undefined])[]> = {
+    clock: [['IconClockOutlineRegular', pick<IconComponent>('IconClockOutlineRegular')], ['IconClockOutline16', pick<IconComponent>('IconClockOutline16')]],
+    close: [['IconCloseOutlineRegular', pick<IconComponent>('IconCloseOutlineRegular')], ['IconCloseOutline16', pick<IconComponent>('IconCloseOutline16')]],
+    chevronDown: [['IconChevronDownOutlineRegular', pick<IconComponent>('IconChevronDownOutlineRegular')], ['IconChevronDownOutline14', pick<IconComponent>('IconChevronDownOutline14')]],
+    edit: [['IconEditOutlineRegular', pick<IconComponent>('IconEditOutlineRegular')], ['IconEditOutline16', pick<IconComponent>('IconEditOutline16')]],
+    pause: [['IconPauseOutlineRegular', pick<IconComponent>('IconPauseOutlineRegular')], ['IconPauseOutline16', pick<IconComponent>('IconPauseOutline16')]],
+    play: [['IconPlayOutlineRegular', pick<IconComponent>('IconPlayOutlineRegular')], ['IconPlayOutline16', pick<IconComponent>('IconPlayOutline16')]],
+    send: [['IconSendOutlineRegular', pick<IconComponent>('IconSendOutlineRegular')], ['IconSendOutline16', pick<IconComponent>('IconSendOutline16')]],
+    trash: [['IconTrashOutlineRegular', pick<IconComponent>('IconTrashOutlineRegular')], ['IconTrashOutline16', pick<IconComponent>('IconTrashOutline16')]],
+    info: [['IconInfoOutlineRegular', pick<IconComponent>('IconInfoOutlineRegular')], ['IconQuestionOutline14', pick<IconComponent>('IconQuestionOutline14')]],
+  };
+  const out: Record<string, string | undefined> = {};
+  for (const [alias, candidates] of Object.entries(table)) {
+    out[alias] = candidates.find(([, value]) => value !== undefined)?.[0];
+  }
+  return out;
 }

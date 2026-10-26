@@ -52,8 +52,14 @@ const sliceFrom = (source, marker, label) => {
 const actions = sliceFrom(component, 'function DockActions(', 'DockActions 函数');
 
 test('tooltip 走 primitives 的 Tooltip，自研 DockTip 已彻底移除（#29）', () => {
-  // 从 primitives 具名导入，且不再从 react-dom 走 portal
-  assert.match(component, /Tooltip,\n\} from '@deepseek-ai\/dsh-client-ui-primitives'/);
+  // 从 primitives 具名导入（跨代兼容后仍是单行具名导入），且不再从 react-dom 走 portal
+  assert.match(
+    component,
+    /import \{ Tooltip \} from '@deepseek-ai\/dsh-client-ui-primitives';/,
+    'Tooltip 必须仍取自宿主 primitives（兼容层只换了图标与 portal 的传法，没换气泡实现）',
+  );
+  assert.match(component, /tooltipPortalProps[\s\S]{0,80}from '\.\.\/primitives-compat\.js'/,
+    'portal 参数经兼容层传（老代次没有这个 prop，写法见 primitives-compat.ts）');
   assert.doesNotMatch(component, /from 'react-dom'/, 'dock 内不应再直接用 createPortal（#29 改用 Tooltip 的 portal）');
   assert.doesNotMatch(component, /function DockTip\b/, '自研 DockTip 不得复活（#29）');
   assert.doesNotMatch(component, /<DockTip\b/, '自研 DockTip 不得复活（#29）');
@@ -67,7 +73,10 @@ test('Tooltip 参数与宿主 dock 一致：side bottom / delayMs 500 / portal',
   // 计数只在动作区切片内做。源码里 5 个包裹：编辑 / 恢复 / 暂停 / 删除 / 插话；
   // 暂停与恢复互斥，所以任一行渲染 4 个。
   assert.equal(count(actions, '<Tooltip label='), 5, '动作区应有 5 处 Tooltip 包裹（暂停/恢复互斥）');
-  assert.equal(count(actions, 'side="bottom" delayMs={500} portal'), 5);
+  // side/delayMs 与宿主 dock 一致；`portal` 经兼容层用 spread 传入（0.1.5 的 Tooltip 没有这个 prop，
+  // 直接写 portal 会在老代次上编译失败），所以这里两段分别计数，实质仍是「5 处、参数一致、带 portal」。
+  assert.equal(count(actions, 'side="bottom" delayMs={500}'), 5, 'side bottom + delayMs 500 与宿主一致');
+  assert.equal(count(actions, '{...tooltipPortalProps}'), 5, '5 处都必须经兼容层打开 portal');
   // 动作区这 5 处不自作焦点延迟与宽度上限（宿主 dock 两处都没传；50vw 上限由
   // Tooltip.module.css 自带）。别处要用 maxWidth 不受这条约束——所以禁令也只落在切片上。
   assert.doesNotMatch(actions, /focusDelayMs=\{/, '动作区 focusDelayMs 留默认 0，与宿主 dock 一致');

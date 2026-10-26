@@ -1,5 +1,6 @@
-import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm';
+import type { ImageBlock } from '@deepseek-ai/dsh-llm';
 import type { UserScheduleDelivery } from './domain.js';
+import type { FileBlockShim } from './upstream-shims.js';
 /**
  * 随提醒一起延迟发送的附件块（宿主命令准入后的耐久引用，JSON 可序列化）。
  *
@@ -7,8 +8,17 @@ import type { UserScheduleDelivery } from './domain.js';
  * （图片→内容寻址存储，文件→staged receipt 解析），以这两种块交给 handler。
  * 块内只持有不透明 `attachmentId` 引用（非路径、非字节），因此可以安全地
  * 落进 sidecar JSON，到点投递时再拼回 user message 的 content。
+ *
+ * file 一侧用 `FileBlockShim` 而不是宿主的 `FileBlock`：`dsh-llm` 从 **0.1.5-rc.1**
+ * 起才导出 `FileBlock`（见 `upstream-shims.ts`）。shim 在有该类型的代次上直接就是宿主
+ * 自己的 `FileBlock`、在没有的代次上按当前代形状逐字段声明（含 branded `attachmentId`），
+ * 所以新代上这个联合类型仍可直接塞进 `ContentBlock[]`。
+ *
+ * 注意**存储与投递是两件事**：sidecar 里两代都按块原样存 file 块；而 0.1.2 的
+ * `ContentBlock` 联合没有 file 变体，代发时必须降级成 `[附件] <name>` 文本块——
+ * 该判定与降级在 `attachment-blocks.ts`。
  */
-export type ScheduledAttachment = ImageBlock | FileBlock;
+export type ScheduledAttachment = ImageBlock | FileBlockShim;
 /**
  * 校验并收窄任意来源（含磁盘 JSON）的附件块数组。
  *

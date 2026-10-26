@@ -149,7 +149,7 @@ test('拿不到服务时降级但不消失：能力缺失 / 待发送 / 真失�
   assert.match(thumb, /data-ss-attach=\{pending \? 'image-pending-send' : 'image-unavailable'\}/,
     '待发送（未被会话引用）与真失败必须分开渲染');
   assert.match(thumb, /classifyAttachmentFailure\(error\)/, '失败性质必须经分类器判定，不能在组件里猜字符串');
-  assert.match(thumb, /fileSizeText\(block\.bytes\)/, '失败时仍显示大小');
+  assert.match(thumb, /fileSizeTextCompat\(block\.bytes\)/, '失败时仍显示大小（0.1.2 没有宿主 fileSizeText，走兼容层）');
 });
 
 test('缩略图先查宿主缓存（peekImageUrl），命中就不发请求', () => {
@@ -160,13 +160,20 @@ test('缩略图先查宿主缓存（peekImageUrl），命中就不发请求', ()
 });
 
 test('localMediaUrl 走宿主自己的解析器，且基址在调用时读（#待发缩略图）', () => {
-  // 不自己拼 `/api/file?path=`：用宿主 `fileMediaUrl`，宿主收紧规则时自动跟上。
-  assert.match(entry, /import \{ fileMediaUrl \} from .@deepseek-ai\/dsh-util-workspace-path./,
-    '必须复用宿主的解析器');
-  assert.match(entry, /const localMediaUrl = \(path: string\): string \| undefined => fileMediaUrl\(document\.baseURI, path\);/,
-    '基址取 document.baseURI（web 与桌面 dsh-app:// 两种形态由宿主判别）');
-  assert.doesNotMatch(entry, /['"`]\/api\/file/, '禁止在插件里硬编码路由');
+  // 不自己拼 `/api/file?path=`：优先用宿主 `fileMediaUrl`（宿主收紧规则时自动跟上）；
+  // 0.1.5/0.1.2 的 dsh-util-workspace-path 没有这个导出，所以走兼容层，本地实现只在缺导出时启用。
+  assert.match(entry, /import \{ fileMediaUrlCompat \} from '\.\/workspace-path-compat\.js';/,
+    '必须经兼容层取解析器（它优先调宿主 fileMediaUrl）');
+  assert.match(entry, /const localMediaUrl = \(path: string\): string \| undefined => fileMediaUrlCompat\(document\.baseURI, path\);/,
+    '基址取 document.baseURI（web 与桌面 dsh-app:// 两种形态由宿主/兼容层判别）');
+  assert.doesNotMatch(entry, /['"`]\/api\/file/, '插件入口里禁止硬编码路由');
   assert.match(entry, /localMediaUrl,\s*\} as ScheduleDockInjected\)/, '必须注入 dock');
+  // 兼容层内部：优先宿主实现（`pick` 出来的那个），本地兜底只在老代次启用。
+  const compat = read('client/workspace-path-compat.ts');
+  assert.match(compat, /pick<\(base: string, path: string\) => string \| undefined>\('fileMediaUrl'\)/,
+    '兼容层必须先尝试宿主 fileMediaUrl');
+  assert.match(compat, /if \(hostFileMediaUrl !== undefined\) return hostFileMediaUrl\(base, path\);/,
+    '有宿主实现就必须用宿主实现（本地副本只服务没有它的老代次）');
 });
 
 test('每块独立异步加载 + alive 标志，且依赖不能用块对象（dock 每秒 tick）', () => {

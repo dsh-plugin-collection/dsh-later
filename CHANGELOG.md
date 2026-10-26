@@ -4,6 +4,57 @@
 
 ## 未发布
 
+- **breaking**（支持面调整）内核下界从 `>=0.1.1-rc.2` 收到 **`>=0.1.2-rc.1`**，并把 `0.1.2 / 0.1.5` 的
+  **类型面兼容补回来** —— 关闭 issue #95。
+  - 判据不是"旧代次坏了"，而是**类型面从来没被证明过**：把整条 `@deepseek-ai/dsh*` 依赖线换成目标
+    代次后跑本仓 tsc，`0.1.5-rc.1` 当时 19 条红、`0.1.2-rc.1` 2 条红（且 client 项目被 `&&` 短路根本
+    没跑）、`0.1.1-rc.2` **无法自证**（`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` 在 registry
+    未发布，依赖装不出）。功能面七代其实全绿，所以这是"声明与证明"的问题，不是"旧代次坏了"。
+  - **先按其时数据把下界收到 0.1.7-rc.1（PR #98），随后按同一份测量把能兼容的都补回来（PR #101）**：
+    现在 `0.1.2-rc.1` 与 `0.1.5` 线（按 **rc.3** 验证，见下）在**两个 tsconfig 上都是 0 条错误**，
+    且装配/到点投递两面都在真内核上跑绿，已回到代次表里。
+  - 补回来的四类差异（全部收在兼容层里，正常运行路径不受影响）：
+    - **图标命名**：0.1.7 之前是尺寸后缀（`IconClockOutline16` / `IconChevronDownOutline14`），之后是
+      `…OutlineRegular`。`primitives-compat.ts` 里新名优先、旧名兜底（`IconInfoOutline` 老代次没有对应
+      图标，降级到问号图标）；
+    - **`Tooltip` 的 `portal`**：老代次没这个 prop（实现只解构已知字段，多传被静默忽略）→ 用 spread 传，
+      两代都编译、行为不变；代价是老代次 tooltip 可能被可滚动祖先裁切（那是它的既有能力上限）；
+    - **`FileTypeIcon` / `fileSizeText`**：0.1.2 没有 → 降级为统一回形针图标 + 本地尺寸文案（1024 进制、
+      一位小数），**不声称与宿主逐字相同**；
+    - **`fileMediaUrl`**：0.1.5/0.1.2 的 `dsh-util-workspace-path` 没有 → 优先调宿主实现（新代次自动跟上
+      上游规则），缺时按它公开契约本地实现（scheme 白名单、绝对路径、UNC 与控制字符拒绝）；
+    - **`schemastery` 的 `Schema.volatile()`**：0.1.5 线装的是 3.18.2，没有这个方法 ——
+      真机上表现为**整条插件加载失败**（`…volatile is not a function`），已按"方法是否存在"做能力探测，
+      老内核上退化成普通 schema（代价：`advancedSyntax` 会被持久化，布尔开关写进 profile 无害）。
+  - 宿主侧三处（`CommandInputDescriptor.attachments`、`dsh-llm.FileBlock`、`ContentBlock` 的 `file` 变体）
+    由 `src/upstream-shims.ts` 按当前代形状补**结构一致**的本地声明：新代上仍是宿主类型的子类型
+    （形状漂了会立刻红），旧代能编过；`0.1.2` 的运行期把文件附件降级成 `[附件] 名字` 文本块
+    （该代 `ContentBlock` 没有 `file` 变体，硬塞会被宿主拒）。
+  - **`0.1.5` 线列 `rc.3`、不列 `rc.1`**：`dsh@0.1.5-rc.1` 的内部依赖是 `^0.1.5-rc.1`，默认安装会把整条
+    插件线解析到 rc.3；而 rc.1 启动器 + rc.3 插件混装**装不起来**（多个 dsh-* 插件 load 失败，与本插件无关）。
+    用户实际拿到的是统一 rc.3，能验证的形态也只有它。
+  - **`0.1.1-rc.2` 仍不入表**：不是代码问题，是它的依赖在 registry 不存在，任何工具都给不出结论；
+    等上游补发才谈得上支持。
+  - 三条一致性由测试钉住（表首代 = `0.1.2-rc.1`、`engines.dsh` 必须以 `>=0.1.2-rc.1` 起且不得出现
+    `0.1.1`、`peerRange` 必须逐代等于 `^<id>`）；`npm run verify:kernels --steps type` 可逐代复核。
+
+- **fix** 类型门禁不再按**失败顺序**短路：`npm run typecheck` 改成逐项目跑完再汇总（issue #96）。
+  - 病灶：`tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit` —— 宿主项目一红，
+    client 项目**完全不跑**。而跨代次回归里红的基本都在 client 侧（`dsh-client-ui-primitives` 图标
+    改名、props 形状）：`0.1.2-rc.1` 上宿主先红 2 条，client 项目的错误数至今未知。同一份脚本报出来
+    的数量取决于两个项目的失败顺序，这不是门禁该有的性质。
+  - `&&` 换 `;` 不够：退出码会被最后一条覆盖（前红后绿 ⇒ 整体绿）。改成 `scripts/typecheck-all.mjs`：
+    逐项目跑、逐项目记 `error TS` 条数、任一红即整体红；找不到 tsc 时用**退出码 2** 与「类型错误」
+    （1）区分，免得 CI 里把装依赖失败误读成类型回归。
+  - CI 的 `.gitea/workflows/ci.yml` 同样写着两条 `npx tsc`，在 Actions 的 `bash -e` 下是同一个失明，
+    一并换成同一个入口 —— 两处必须同一把尺，否则本地绿、CI 红（或反过来）会长期互相打脸。
+  - `runTypecheck()` 作为模块导出给跨代次回归复用（#97 的 `--steps type`）：**一处实现两处消费**，
+    不再在 `matrix.mjs` / `verify-across-kernels.mjs` 里各写一遍"遍历项目、数 error TS、汇总退出码"。
+  - 验收：`0.1.2-rc.1` 换线树上现在能同时看到宿主 2 条与 client 的完整错误（原先只有前者）；
+    当前代次 `npm run typecheck` 仍全绿；新增 `tests/typecheck-aggregate.test.mjs` 8 条 ——
+    含"用假 tsc 造先红后绿 / 先绿后红两种顺序"的**行为**断言（结构护栏只能防改回去，
+    防不了"实现又按顺序提前退出"）与 CLI 退出码端到端。
+
 - **test** 跨代回归脚本（`scripts/verify-across-kernels.mjs`）三处"说得比事实更肯定"的口径缺陷（issue #97）。
   - **① 代次按 rc 判，装出来的未必是请求的**：`@deepseek-ai/dsh@0.1.5-rc.1` 的内部依赖是
     `dsh-app-boot: ^0.1.5-rc.1`，现装出来是 `rc.3` —— 于是"0.1.5-rc.1 已通过"其实说的是
@@ -24,42 +75,8 @@
   - 顺带：脚本可被 import（`parseSteps`/`driftReport`/`resolvedVersions`/`scanLeaks` 导出），
     口径由纯函数测试钉住 —— 门禁脚本自己的口径不该只有在"这台机器装齐了 N 代"时才可验证。
     新增 `tests/verify-kernels-contract.test.mjs` 13 条。
-- **breaking**（支持面收缩）内核下界从 `>=0.1.1-rc.2` 收到 `>=0.1.7-rc.1` —— 关闭 issue #95。
-  - 判据不是"旧代次坏了"，而是**类型面从来没被证明过**：把整条 `@deepseek-ai/dsh*` 依赖线换成目标
-    代次后跑本仓 tsc —— `0.1.5-rc.1` 19 条红（`dsh-client-ui-primitives` 的图标改名
-    `IconClockOutline16…` → `…Regular` 共 9 条 + 5 条 props 形状，`ScheduleDock.tsx` 一家占 2/3）、
-    `0.1.2-rc.1` 2 条红（`CommandInputDescriptor` 无 `attachments`、`dsh-llm` 无 `FileBlock`，
-    属"旧内核没有该能力"）、`0.1.1-rc.2` **无法自证**（`dsh-util-workspace-path@0.1.1-rc.2`
-    在 registry 未发布，依赖装不出）。功能面七代全绿，所以这是取舍：为三代维护双轨 API 的成本
-    高于收缩声明的收益。
-  - 三条一起改，缺一条都不生效：`KERNEL_GENERATIONS`（7 → 4 代）、`scripts/sync-peer-matrix.mjs`
-    重生成的 19 个 `dsh-*` peer 枚举、`engines.dsh`（`>=0.1.7-rc.1 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`）。
-    ≤0.2.0 的内核不读 `engines.dsh`、只按 `dsh-*` peer 判；0.2.1 起反过来——两条不同时改就等于没改。
-  - **影响**：`0.1.1 / 0.1.2 / 0.1.5` 上**新装或升级到本版**会被版本门禁拒挂；**已安装的旧版本不受影响**
-    （它自己声明的范围没变）。要继续支持这三代，走 issue #95 的方案 B（图标名双轨 + props 形状 +
-    能力降级，约 5~8 个文件），本版不做。
-  - 验证口径（issue #95 的验收项）：表里**每一代**都要在
-    `scripts/verify-across-kernels.mjs`（装配 + 功能）与**跨代 tsc**（`devkit/matrix.mjs
-    --steps gate,peer,typecheck`）两面同时通过；「跑现成 lib 产物能挂上」不算。本次四代两面全过。
-  - 顺带修一条**与支持面无关的日期腐坏**：`tests/at-time-normalize.test.mjs` 的两条「真上游对账」
-    把日期写死成 `2026-10-26`，到了 10-26 当天上游就以 `not_future` 拒收——用例自己在日历上过期。
-    改成现算未来日期（含下一场美东回拨日），并留注释说明为什么这类用例不许写死日期。
-- **fix** 类型门禁不再按**失败顺序**短路：`npm run typecheck` 改成逐项目跑完再汇总（issue #96）。
-  - 病灶：`tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit` —— 宿主项目一红，
-    client 项目**完全不跑**。而跨代次回归里红的基本都在 client 侧（`dsh-client-ui-primitives` 图标
-    改名、props 形状）：`0.1.2-rc.1` 上宿主先红 2 条，client 项目的错误数至今未知。同一份脚本报出来
-    的数量取决于两个项目的失败顺序，这不是门禁该有的性质。
-  - `&&` 换 `;` 不够：退出码会被最后一条覆盖（前红后绿 ⇒ 整体绿）。改成 `scripts/typecheck-all.mjs`：
-    逐项目跑、逐项目记 `error TS` 条数、任一红即整体红；找不到 tsc 时用**退出码 2** 与「类型错误」
-    （1）区分，免得 CI 里把装依赖失败误读成类型回归。
-  - CI 的 `.gitea/workflows/ci.yml` 同样写着两条 `npx tsc`，在 Actions 的 `bash -e` 下是同一个失明，
-    一并换成同一个入口 —— 两处必须同一把尺，否则本地绿、CI 红（或反过来）会长期互相打脸。
-  - `runTypecheck()` 作为模块导出给跨代次回归复用（#97 的 `--steps type`）：**一处实现两处消费**，
-    不再在 `matrix.mjs` / `verify-across-kernels.mjs` 里各写一遍"遍历项目、数 error TS、汇总退出码"。
-  - 验收：`0.1.2-rc.1` 换线树上现在能同时看到宿主 2 条与 client 的完整错误（原先只有前者）；
-    当前代次 `npm run typecheck` 仍全绿；新增 `tests/typecheck-aggregate.test.mjs` 8 条 ——
-    含"用假 tsc 造先红后绿 / 先绿后红两种顺序"的**行为**断言（结构护栏只能防改回去，
-    防不了"实现又按顺序提前退出"）与 CLI 退出码端到端。## 1.7.0 — 2026-10-23
+
+## 1.7.0 — 2026-10-23
 
 - **feat** 「在分组徽标中显示定时任务」搬进本插件的设置卡（`showInGroupBadge`，默认开）—— 关闭 issue #83。
   - 上游：dsh-group-status 的 PR #37 删掉了它 `Config` 里的 `showScheduledInBadge`，并把 facet 协议 v1 的
