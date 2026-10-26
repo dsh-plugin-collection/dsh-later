@@ -53,7 +53,8 @@
     "prepublishOnly": "npm run build",
     "watch": "node watch.mjs",
     "verify:kernels": "node scripts/verify-across-kernels.mjs",
-    "verify:kernels:all": "node scripts/verify-across-kernels.mjs --steps mount,function,type,gate"
+    "verify:kernels:all": "node scripts/verify-across-kernels.mjs --steps mount,function,type,gate",
+    "verify:ui": "node scripts/ui-matrix/run.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
