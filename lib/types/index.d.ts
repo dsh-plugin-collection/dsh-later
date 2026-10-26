@@ -14,21 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type z from '@deepseek-ai/schemastery';
 import { name } from './domain.js';
-/** 插件配置 schema（全可选，默认开箱即用；经 cordis config 覆盖）。 */
-/**
- * 插件配置 schema（**单一事实来源**）。
- *
- * 0.2.0 起 `ctx.settings.describe()` 直接读 `entry.fiber.runtime.Config`
- * （见 dsh-settings `schema(entry)`：「`entry.fiber?.runtime?.Config`，且需有
- * `toJSON`」），据此生成该插件设置页的表单。因此**可编辑字段必须全部声明在
- * `Config` 上**——只放在 `SchedulerSettingsSchema` 里的字段在 0.2.0 下不会
- * 出现在设置 UI 中。
- *
- * 历史：0.1.5 用 `settingsProvider.register(ns, schema, …)` 注册一个**独立于
- * Config 的** schema（即 `SchedulerSettingsSchema`），0.1.7 删除了该 API。
- * 两代并存期间两份 schema 内容一致，现统一为 `Config` 一份，`SchedulerSettingsSchema`
- * 保留为别名以免大范围改动调用点。
- */
+/** 插件配置 schema（0.1.5 的 schemastery 没有 `.volatile()`，见上面的降级说明）。 */
 export declare const Config: z;
 /**
  * 所需服务（延后激活，缺失时插件不加载）。

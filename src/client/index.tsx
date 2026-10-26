@@ -32,7 +32,7 @@ import type { Context } from '@deepseek-ai/cordis';
 // 而漂移主题——上游自己的 client bundle 同样把它内联进去（dsh-client-ui-chat
 // lib/client.js 里有 `function fileMediaUrl` 的定义，而非 require）。走它而不是
 // 自己拼 URL，是为了宿主将来收紧规则（如新增 scheme 白名单）时我们自动跟上。
-import { fileMediaUrl } from '@deepseek-ai/dsh-util-workspace-path';
+import { fileMediaUrlCompat } from './workspace-path-compat.js';
 import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from './runtime-augment.js';
 import { name } from '../domain.js';
 import { dictFor, schedDicts } from './strings.js';
@@ -474,7 +474,7 @@ function apply(ctx: Context): void {
    * 文档定稿前被求值，且桌面载体走 `dsh-app://app/` 基址——两种形态由宿主
    * `fileMediaUrl` 自己判别，非法基址或非法路径它返回 `undefined`，组件据此降级。
    */
-  const localMediaUrl = (path: string): string | undefined => fileMediaUrl(document.baseURI, path);
+  const localMediaUrl = (path: string): string | undefined => fileMediaUrlCompat(document.baseURI, path);
 
   /**
    * 待发送提醒 dock（对齐 QueueDock 呈现；排在排队消息之后）。只依赖命令通道，

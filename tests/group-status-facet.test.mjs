@@ -26,6 +26,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import {
   GROUP_BADGE_SETTING_KEY,
   LATER_SCHEDULE_FACET_ID,
@@ -36,6 +37,21 @@ import {
   laterScheduleFacetLabel,
   mergeLaterSchedule,
 } from '../lib/schedule-facet.js';
+
+/**
+ * 兼容层可能查询的图标名清单 —— **从源码里读**，不在这里另抄一份。
+ *
+ * 为什么要这张表：`import * as ns` 在 bundle 里被 esbuild 改写成 `__toESM(require(...))`，
+ * 只拷贝**可枚举自有属性**；测试桩是 Proxy，默认 `ownKeys` 为空，拷贝后一个图标都查不到
+ * （插件的兼容层只能退化到兜底图标 → "图标是不是宿主那一份"这条断言假红）。
+ * 真实宿主返回的是含静态导出的普通对象，不存在这个问题。
+ */
+const PRIMITIVES_ICON_NAMES = (() => {
+  const source = readFileSync(new URL('../src/client/primitives-compat.ts', import.meta.url), 'utf8');
+  const block = /export const ICON_EXPORT_NAMES: readonly string\[\] = \[([\s\S]*?)\] as const;/.exec(source);
+  if (block === null) throw new Error('primitives-compat.ts 里找不到 ICON_EXPORT_NAMES 清单');
+  return [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+})();
 
 // ── 过渡基线（oracle）：逐行照抄 group-status src/client/legacy/schedule.ts ─────────
 
@@ -260,7 +276,18 @@ async function loadClientBundle({ groupStatus = 'default', localeActive = () => 
         return { createPortal: () => null, createRoot: () => ({ render() {}, unmount() {} }) };
       }
       if (id === '@deepseek-ai/dsh-client-ui-primitives') {
+        // 桩必须声明**可枚举自有属性**：`import * as ns` 在 bundle 里被 esbuild 改写成
+        // `__toESM(require(...))`，只拷贝可枚举自有属性（用 getter 惰性指回原对象）。
+        // Proxy 默认 ownKeys 为空 ⇒ 拷贝后连一个图标都查不到 ⇒ 插件的兼容层只能退化到兜底图标，
+        // 于是"图标是不是宿主那一份"这条断言会假红。真实宿主是含静态导出的普通对象，不存在这个问题。
+        const stubKeys = [...Object.keys(primitivesHooks), ...PRIMITIVES_ICON_NAMES];
         return new Proxy({}, {
+          ownKeys: () => stubKeys,
+          getOwnPropertyDescriptor: (_t, name) => (
+            typeof name === 'string' && stubKeys.includes(name)
+              ? { enumerable: true, configurable: true }
+              : undefined
+          ),
           get: (_t, name) => {
             if (typeof name !== 'string') return undefined;
             if (name in primitivesHooks) return primitivesHooks[name];

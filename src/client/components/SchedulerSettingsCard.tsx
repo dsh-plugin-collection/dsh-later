@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import { IconInfoOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
+import { IconInfo } from '../primitives-compat.js';
 import { isValidHhmm } from '../../smart-window.js';
 import { CLOCK_SVG_CLASSIC, CLOCK_SVG_MODERN } from '../session-presence.js';
 
@@ -573,7 +573,7 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
                           aria-controls={`ss-help-${field.key}`}
                           onClick={() => setHelpOpen((prev) => ({ ...prev, [field.key]: !prev[field.key] }))}
                         >
-                          <IconInfoOutlineRegular size={12} />
+                          <IconInfo size={12} />
                         </button>
                       )}
                     </div>

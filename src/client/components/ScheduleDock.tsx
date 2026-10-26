@@ -11,19 +11,20 @@
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import {
-  FileTypeIcon,
-  IconChevronDownOutlineRegular,
-  IconClockOutlineRegular,
-  IconCloseOutlineRegular,
-  IconEditOutlineRegular,
-  IconPauseOutlineRegular,
-  IconPlayOutlineRegular,
-  IconSendOutlineRegular,
-  IconTrashOutlineRegular,
-  fileSizeText,
-  Tooltip,
-} from '@deepseek-ai/dsh-client-ui-primitives';
+  FileTypeIconCompat,
+  IconChevronDown,
+  IconClock,
+  IconClose,
+  IconEdit,
+  IconPause,
+  IconPlay,
+  IconSend,
+  IconTrash,
+  fileSizeTextCompat,
+  tooltipPortalProps,
+} from '../primitives-compat.js';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
 import type { SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
@@ -700,7 +701,7 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
             {saving ? '…' : t('editSave')}
           </button>
           <button type="button" className="ss-dock-action" onClick={cancelEdit} aria-label={t('editCancel')}>
-            <IconCloseOutlineRegular size={14} />
+            <IconClose size={14} />
           </button>
           {editErr !== null && <span className="ss-dock-edit-err">{editErr}</span>}
         </li>
@@ -733,14 +734,14 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
           单条时行首补一个时钟 glyph。宿主 QueueDock 就是这么做的（`QueueDock.tsx:197`
           「Single-item strip has no count header, so the row itself carries the queue
           glyph」）：多条时图标在计数 header 里，单条时 header 不渲染，行首就空了。
-          图标用**官方时钟** `IconClockOutlineRegular`（与 header 同一个，零新增依赖）：
+          图标用**官方时钟** `IconClock`（与 header 同一个，零新增依赖）：
           宿主自己的定时任务 UI 全程用它（`ui-schedule/ScheduleTaskTab.tsx:121`、
           `DeliveryHistory.tsx:152` 的行级 `deliveryGlyph`），而图标集里的闹钟
           `IconAlarmClockOutline*` 在上游**零消费方** —— 官方选的"定时/提醒"就是时钟。
         */}
         {schedules.length === 1 && (
           <span className="ss-dock-lead" aria-hidden="true">
-            <IconClockOutlineRegular size={16} />
+            <IconClock size={16} />
           </span>
         )}
         <DockAttachments item={item} t={t} sessionId={sessionId} loadImage={loadImage} peekImage={peekImage} localMediaUrl={localMediaUrl} />
@@ -806,7 +807,7 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
             onClick={() => setCollapsed((value) => !value)}
           >
             <span className="ss-dock-lead" aria-hidden="true">
-              <IconClockOutlineRegular size={16} />
+              <IconClock size={16} />
             </span>
             <span className="ss-dock-count">{t('panelCount', { n: schedules.length })}</span>
             {/*
@@ -823,7 +824,7 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
               <span className="ss-dock-status" role="status">{t('sending')}</span>
             )}
             <span className={expanded ? 'ss-dock-chevron ss-open' : 'ss-dock-chevron'} aria-hidden="true">
-              <IconChevronDownOutlineRegular size={14} />
+              <IconChevronDown size={14} />
             </span>
           </button>
         )}
@@ -1022,7 +1023,7 @@ function DockActions({
 }: DockActionsProps): JSX.Element {
   return (
     <div className="ss-dock-actions">
-      <Tooltip label={t('editTask')} side="bottom" delayMs={500} portal>
+      <Tooltip label={t('editTask')} side="bottom" delayMs={500} {...tooltipPortalProps}>
         <button
           type="button"
           className="ss-dock-action"
@@ -1030,11 +1031,11 @@ function DockActions({
           disabled={busy}
           onClick={onEdit}
         >
-          <IconEditOutlineRegular size={14} />
+          <IconEdit size={14} />
         </button>
       </Tooltip>
       {paused ? (
-        <Tooltip label={t('resumeTask')} side="bottom" delayMs={500} portal>
+        <Tooltip label={t('resumeTask')} side="bottom" delayMs={500} {...tooltipPortalProps}>
           <button
             type="button"
             className="ss-dock-action"
@@ -1042,13 +1043,13 @@ function DockActions({
             disabled={busy}
             onClick={onResume}
           >
-            <IconPlayOutlineRegular size={16} />
+            <IconPlay size={16} />
           </button>
         </Tooltip>
       ) : (
         /* 不可用的原因走宿主那套分工：Tooltip `disabled` 抑制气泡，原生 `title` 承载原因，
          * `aria-label` 只留动作名——避免同一句话在气泡与读屏里各念一遍。 */
-        <Tooltip label={t('pauseTask')} side="bottom" delayMs={500} portal disabled={!canPauseNow}>
+        <Tooltip label={t('pauseTask')} side="bottom" delayMs={500} {...tooltipPortalProps} disabled={!canPauseNow}>
           <button
             type="button"
             className="ss-dock-action"
@@ -1057,11 +1058,11 @@ function DockActions({
             disabled={!canPauseNow || busy}
             onClick={onPause}
           >
-            <IconPauseOutlineRegular size={16} />
+            <IconPause size={16} />
           </button>
         </Tooltip>
       )}
-      <Tooltip label={t('deleteTask')} side="bottom" delayMs={500} portal>
+      <Tooltip label={t('deleteTask')} side="bottom" delayMs={500} {...tooltipPortalProps}>
         <button
           type="button"
           className="ss-dock-action"
@@ -1069,11 +1070,11 @@ function DockActions({
           disabled={busy}
           onClick={onDelete}
         >
-          <IconTrashOutlineRegular size={14} />
+          <IconTrash size={14} />
         </button>
       </Tooltip>
       {item.kind !== 'every' && (
-        <Tooltip label={steerDone ? t('steerAlreadySent') : t('steerTask')} side="bottom" delayMs={500} portal>
+        <Tooltip label={steerDone ? t('steerAlreadySent') : t('steerTask')} side="bottom" delayMs={500} {...tooltipPortalProps}>
           <button
             type="button"
             className={`ss-dock-action ss-dock-action-steer${steerDone ? ' ss-done' : ''}`}
@@ -1081,7 +1082,7 @@ function DockActions({
             disabled={busy || steerDone}
             onClick={onSteer}
           >
-            <IconSendOutlineRegular size={16} />
+            <IconSend size={16} />
           </button>
         </Tooltip>
       )}
@@ -1392,7 +1393,7 @@ function DockThumb({
         aria-label={label}
       >
         <span className="ss-dock-file-name">{label}</span>
-        {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeText(block.bytes)}</span>}
+        {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeTextCompat(block.bytes)}</span>}
       </span>
     );
   }
@@ -1415,11 +1416,11 @@ function DockFileChip({
     <span className="ss-dock-file" data-ss-attach="file" aria-label={label} title={name.length > 0 ? name : undefined}>
       {name.length > 0 && (
         <span className="ss-dock-file-icon" aria-hidden="true">
-          <FileTypeIcon path={name} size={16} />
+          <FileTypeIconCompat path={name} size={16} />
         </span>
       )}
       <span className="ss-dock-file-name">{name}</span>
-      {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeText(block.bytes)}</span>}
+      {block.bytes !== undefined && <span className="ss-dock-file-size">{fileSizeTextCompat(block.bytes)}</span>}
     </span>
   );
 }

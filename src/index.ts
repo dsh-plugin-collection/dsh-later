@@ -56,7 +56,28 @@ import { hostDictFor, hostFormat } from './strings.js';
  * 两代并存期间两份 schema 内容一致，现统一为 `Config` 一份，`SchedulerSettingsSchema`
  * 保留为别名以免大范围改动调用点。
  */
-export const Config: z = s.object({
+/**
+ * `.volatile()` 的降级调用：**schemastery 3.18.4 起才有**这个方法。
+ *
+ * 0.1.5 线的安装树装的是 schemastery **3.18.2**，真机上整条插件加载失败：
+ * `s.object(...).volatile is not a function`（`verify-across-kernels --steps mount` 在
+ * 0.1.5-rc.3 上复现）。这不是本插件的抽象问题，是那个包少了一个方法。
+ *
+ * 老内核上退化成**普通 schema**，代价只有一个：`advancedSyntax` 这类字段会被**持久化**
+ * （新内核上 `.volatile()` 标的是"不落盘"）。它是布尔开关，写进 profile 也无害，
+ * 所以选择"降级"而不是"老内核完全不加载插件"。
+ *
+ * 判定按**方法是否存在**（能力探测，不是代次推断）：`.volatile()` 的有无不影响任何业务分支，
+ * 它只是 schema 的模式标记。
+ * @param schema - `s.object({...})` 得来的 schema。
+ * @returns 支持时 `.volatile()` 的结果，否则原样返回。
+ */
+function volatileIfSupported(schema: z): z {
+  const candidate = schema as z & { volatile?: () => z };
+  return typeof candidate.volatile === 'function' ? candidate.volatile() : schema;
+}
+
+const configSchema: z = s.object({
   /** 单 session 用户任务上限。 */
   maxSchedules: s.number().step(1).min(1).default(DEFAULT_MAX_SCHEDULES),
   /** 是否解除提示字符的默认上限（1000）；关闭时 maxPromptChars 不生效。 */
@@ -122,7 +143,10 @@ export const Config: z = s.object({
    * 与本开关无关，始终生效。
    */
   advancedSyntax: s.boolean().default(true),
-}).volatile();
+});
+
+/** 插件配置 schema（0.1.5 的 schemastery 没有 `.volatile()`，见上面的降级说明）。 */
+export const Config: z = volatileIfSupported(configSchema);
 
 /**
  * 0.1.5 时代 settings namespace 注册所用的 schema。

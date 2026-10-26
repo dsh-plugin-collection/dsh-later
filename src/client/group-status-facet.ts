@@ -38,7 +38,7 @@
  * @module dsh-later/client/group-status-facet
  */
 import { createElement, type ReactNode } from 'react';
-import { IconClockOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
+import { IconClock } from './primitives-compat.js';
 import type { ScheduleSummaryMap } from '../schedule-summary.js';
 import {
   LATER_SCHEDULE_FACET_ID,
@@ -180,7 +180,7 @@ export function registerLaterScheduleFacet(
     renderIcon: (fold) => createElement(
       'span',
       { style: { color: facetIconColor(fold.tone), display: 'inline-flex', alignItems: 'center' } },
-      createElement(IconClockOutlineRegular, { size: FACET_ICON_SIZE }),
+      createElement(IconClock, { size: FACET_ICON_SIZE }),
     ),
     order: LATER_SCHEDULE_FACET_ORDER,
   };

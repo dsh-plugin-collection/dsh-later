@@ -203,6 +203,84 @@ function published(name, version) {
 }
 
 /**
+ * 把树里**已经装上但版本不是请求代次**的 `@deepseek-ai/dsh*` 包也 pin 回去（最多 3 轮）。
+ *
+ * 为什么光 pin 关键包不够：`dsh-base` 的补丁会加载一批 dsh-* 插件（本机实测 0.1.5 树里
+ * `dsh-session-persistence-jsonl` / `dsh-jobs-local` 等被 caret 带到了 **0.1.5-rc.3**），
+ * 于是 rc.1 的启动器 + rc.3 的插件混装，装配直接报 "plugin(s) failed to load" ——
+ * 又是 #97 #1 那条"请求的代次 ≠ 装出来的代次"，只是这次发生在传递依赖上。
+ *
+ * 只处理 `@deepseek-ai/dsh*`：`cordis` / `cordis-plugin-*` / `schemastery` 各有自己的次版本线，
+ * 跟着内核版本改会把树改坏（实测 ERR_PNPM_NO_MATCHING_VERSION 那一类）。
+ * @param {string} root - 内核树根。
+ * @param {string} version - 目标代次。
+ * @returns {{ pinned: number, skipped: string[] }} 补 pin 的包数与被跳过的包（该代次无此版本）。
+ */
+function pinAllDrifted(root, version) {
+  let pinned = 0;
+  const skipped = [];
+  const scopeDir = join(root, 'node_modules', '@deepseek-ai');
+  for (let pass = 0; pass < 3; pass += 1) {
+    let entries = [];
+    try { entries = readdirSync(scopeDir); } catch { return { pinned, skipped }; }
+    const specs = [];
+    for (const name of entries) {
+      if (!/^dsh(-|$)/.test(name)) continue;
+      const man = join(scopeDir, name, 'package.json');
+      if (!existsSync(man)) continue;
+      const actual = JSON.parse(readFileSync(man, 'utf8')).version;
+      if (actual === version) continue;
+      if (published(name, version)) specs.push(`@deepseek-ai/${name}@${version}`);
+      else if (!skipped.includes(name)) skipped.push(name);
+    }
+    if (specs.length === 0) break;
+    const r = spawnSync('npm', ['i', '--no-audit', '--no-fund', '--save-exact', '--legacy-peer-deps', ...specs],
+      { cwd: root, encoding: 'utf8', timeout: 900_000 });
+    if (r.status !== 0) break;
+    pinned += specs.length;
+  }
+  return { pinned, skipped };
+}
+
+/**
+ * 补装 `dsh-app-boot` 声明的 peer（最多 3 轮）。
+ *
+ * 为什么需要：老代次的 app-boot 把一批包声明成 **peer**（0.1.5 的 `cordis-plugin-group@^1.0.2`、
+ * `cordis-plugin-loader`、`dsh-launch-environment` 等）。而 pin 安装在上游 peer 范围自相矛盾时
+ * 会退回 `--legacy-peer-deps`，那一路**不会自动装 peer** —— 于是装配报
+ * `Cannot find package '@deepseek-ai/cordis-plugin-group'`。这不是被测插件的问题，是装配环境缺件。
+ *
+ * 装法：`@deepseek-ai/dsh*` 系的 peer 跟代次同步（该代次有发布就 pin 到它），其余按声明的范围装。
+ * @param {string} root - 内核树根。
+ * @param {string} version - 目标代次。
+ * @returns {{ installed: string[], missing: string[] }} 本轮补装的包与仍然缺失的包。
+ */
+function ensureBootPeers(root, version) {
+  const installed = [];
+  const bootMan = join(root, 'node_modules', '@deepseek-ai', 'dsh-app-boot', 'package.json');
+  if (!existsSync(bootMan)) return { installed, missing: [] };
+  for (let pass = 0; pass < 3; pass += 1) {
+    const peers = JSON.parse(readFileSync(bootMan, 'utf8')).peerDependencies ?? {};
+    const specs = [];
+    for (const [name, range] of Object.entries(peers)) {
+      if (existsSync(join(root, 'node_modules', name))) continue;
+      const short = name.replace('@deepseek-ai/', '');
+      const pinned = name.startsWith('@deepseek-ai/dsh') && published(short, version);
+      specs.push(`${name}@${pinned ? version : range}`);
+    }
+    if (specs.length === 0) break;
+    spawnSync('npm', ['i', '--no-audit', '--no-fund', '--save-exact', '--legacy-peer-deps', ...specs],
+      { cwd: root, encoding: 'utf8', timeout: 900_000 });
+    installed.push(...specs);
+    const after = Object.keys(peers).filter((name) => !existsSync(join(root, 'node_modules', name)));
+    if (after.length === 0) break;
+  }
+  const missing = Object.keys(JSON.parse(readFileSync(bootMan, 'utf8')).peerDependencies ?? {})
+    .filter((name) => !existsSync(join(root, 'node_modules', name)));
+  return { installed, missing };
+}
+
+/**
  * 取该代次的内核树；没有就现装一次。
  *
  * **pin exact**（#97 #1）：只装 `dsh@<v>` 会让它 package.json 里的 `^<v>` 把兄弟包带到
@@ -243,9 +321,27 @@ function kernelTree(version) {
   if (!hasBoot()) {
     return { root: null, note: `npm i 后仍没有 @deepseek-ai/dsh-app-boot（该代次可能没有可安装的启动器）`, pinned: false };
   }
+  const peers = ensureBootPeers(root, version);
+  if (peers.missing.length) {
+    return { root: null, note: `app-boot 的 peer 装不齐（${peers.missing.join(', ')}）`, pinned: false };
+  }
+  // 传递依赖也会 caret 漂移（0.1.5 的插件被带到 rc.3）—— 装配前把整条 dsh-* 线拉回请求代次。
+  const driftPins = pinAllDrifted(root, version);
+  // 补 pin 后 peer 可能又缺（包版本变了，声明的 peer 也变），再补一轮。
+  const peers2 = ensureBootPeers(root, version);
   writeFileSync(marker, `${version}\n${pins.join('\n')}\n`);
   const drift = driftReport(root, version).drifted;
-  return { root, note: drift.length ? `现场安装（pin 后仍漂移：${drift.join(', ')}）` : `现场安装（pin ${pins.length} 个关键包）`, pinned: pins.length > 0 };
+  const peerNote = [
+    peers2.installed.length ? `补装 app-boot peer ${peers2.installed.length} 个` : '',
+    driftPins.pinned ? `拉回 dsh-* 漂移 ${driftPins.pinned} 个` : '',
+  ].filter(Boolean).map((x) => `；${x}`).join('');
+  return {
+    root,
+    note: drift.length
+      ? `现场安装（pin 后仍漂移：${drift.join(', ')}${peerNote}）`
+      : `现场安装（pin ${pins.length} 个关键包${peerNote}）`,
+    pinned: pins.length > 0,
+  };
 }
 
 /** 按 zstd 帧 magic 切分逐帧解（多帧拼接的日志只解第一帧会漏掉后半）。 */

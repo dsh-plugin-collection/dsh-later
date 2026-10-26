@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { IconClockOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
+import { IconClock } from '../primitives-compat.js';
 import { detectTimeZone } from '../../time-utils.js';
 import { useSchedT, type LocaleFaceLike } from '../useSchedT.js';
 import type { ClientSchedule, CreateCommandPayload } from '../types.js';
@@ -113,7 +113,7 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
         disabled={!enabled}
         onClick={() => setOpen((value) => !value)}
       >
-        <IconClockOutlineRegular size={16} />
+        <IconClock size={16} />
       </button>
       {open && (
         <>
