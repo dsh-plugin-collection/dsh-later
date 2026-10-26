@@ -24,7 +24,22 @@
   - 顺带修一条**与支持面无关的日期腐坏**：`tests/at-time-normalize.test.mjs` 的两条「真上游对账」
     把日期写死成 `2026-10-26`，到了 10-26 当天上游就以 `not_future` 拒收——用例自己在日历上过期。
     改成现算未来日期（含下一场美东回拨日），并留注释说明为什么这类用例不许写死日期。
-## 1.7.0 — 2026-10-23
+- **fix** 类型门禁不再按**失败顺序**短路：`npm run typecheck` 改成逐项目跑完再汇总（issue #96）。
+  - 病灶：`tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit` —— 宿主项目一红，
+    client 项目**完全不跑**。而跨代次回归里红的基本都在 client 侧（`dsh-client-ui-primitives` 图标
+    改名、props 形状）：`0.1.2-rc.1` 上宿主先红 2 条，client 项目的错误数至今未知。同一份脚本报出来
+    的数量取决于两个项目的失败顺序，这不是门禁该有的性质。
+  - `&&` 换 `;` 不够：退出码会被最后一条覆盖（前红后绿 ⇒ 整体绿）。改成 `scripts/typecheck-all.mjs`：
+    逐项目跑、逐项目记 `error TS` 条数、任一红即整体红；找不到 tsc 时用**退出码 2** 与「类型错误」
+    （1）区分，免得 CI 里把装依赖失败误读成类型回归。
+  - CI 的 `.gitea/workflows/ci.yml` 同样写着两条 `npx tsc`，在 Actions 的 `bash -e` 下是同一个失明，
+    一并换成同一个入口 —— 两处必须同一把尺，否则本地绿、CI 红（或反过来）会长期互相打脸。
+  - `runTypecheck()` 作为模块导出给跨代次回归复用（#97 的 `--steps type`）：**一处实现两处消费**，
+    不再在 `matrix.mjs` / `verify-across-kernels.mjs` 里各写一遍"遍历项目、数 error TS、汇总退出码"。
+  - 验收：`0.1.2-rc.1` 换线树上现在能同时看到宿主 2 条与 client 的完整错误（原先只有前者）；
+    当前代次 `npm run typecheck` 仍全绿；新增 `tests/typecheck-aggregate.test.mjs` 8 条 ——
+    含"用假 tsc 造先红后绿 / 先绿后红两种顺序"的**行为**断言（结构护栏只能防改回去，
+    防不了"实现又按顺序提前退出"）与 CLI 退出码端到端。## 1.7.0 — 2026-10-23
 
 - **feat** 「在分组徽标中显示定时任务」搬进本插件的设置卡（`showInGroupBadge`，默认开）—— 关闭 issue #83。
   - 上游：dsh-group-status 的 PR #37 删掉了它 `Config` 里的 `showScheduledInBadge`，并把 facet 协议 v1 的
