@@ -30,9 +30,9 @@ Click the **"Schedule send"** button to the right of the input box. The panel us
 |---|---|
 | Quick chips | One-tap `in 10 minutes` / `in 1 hour` / `work hours` (configurable in settings) |
 | Custom time | "Custom…" opens date + time inputs |
-| Send preview | See the exact due-time form before confirming |
-| Task list | All scheduled items, deletable one by one |
-| Cancel all | Cancel action on the chip clears every reminder in this conversation |
+| Task list | This conversation's scheduled items, deletable one by one |
+
+Pause, resume, text editing and send-now are not in the panel: they are per-row actions in the [pending dock](#pending-dock).
 
 ### Time formats
 
@@ -92,6 +92,8 @@ One difference between anchor and relative chains (deliberate, not a bug):
 /later +2h+1h+30m 催我交周报
 ```
 
+The dock buttons are not a private channel: they run `/user-schedule-create`, `-list`, `-delete`, `-edit`, `-pause`, `-resume`, `-steer-now` (arguments are a JSON object). You can type them too, but they are designed to be clicked, not typed.
+
 ### Images and files
 
 `/later` carries attachments: paste an image or drop a file into the composer, then type `/later +10m take a look at this` and hit enter. When it fires, the content goes out **with the attachments**, under your identity — the message has exactly the same shape as a "text + image" message you send by hand.
@@ -100,14 +102,17 @@ One difference between anchor and relative chains (deliberate, not a bug):
 - Multi-shot syntax (`+1h*3`) attaches **the same** files to each expanded task; each row is still independently cancellable, editable and sendable.
 - The dock row shows a **real thumbnail**. Before it fires, the Host's session-log-authorized image channel cannot read the attachment (it is not in the log yet — expected, not corruption), so the thumbnail comes from the Host's own local-file route `GET /api/file`; after it fires, both channels work. If this Host's attachment backend is not file-backed, the thumbnail degrades into a "Available after send + size" marker — that does **not** mean the attachment was lost; it still ships with the message.
 - Each task renders at most 8 thumbnails in the dock, with `+N` for the rest; non-image attachments become a "file name + size" chip.
+- On kernel `0.1.2` the host `ContentBlock` union has no `file` variant, so a non-image attachment ships as a `[附件] <file name>` text block instead. Image blocks pass through unchanged on every supported kernel. See [Supported DSH kernels](#supported-dsh-kernels).
 
-The model can also call user tools on your behalf to create, inspect and delete reminders (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete`; editing content, pausing and send-now happen in the panel and dock). **Endlessly recurring** reminders (every hour, forever) are only reachable this way: ask the model "每小时提醒我喝水" and it creates an `every_seconds` schedule — such a task has no end condition and must be deleted by hand.
+The model can call three user tools on your behalf: create, inspect and delete (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete`). Editing the text, pausing, resuming and send-now are **not** exposed to the model; they are dock buttons over the `/user-schedule-*` commands, meant to be clicked by you. **Endlessly recurring** reminders (every hour, forever) are only reachable through the model: ask it to remind you every hour and it creates an `every_seconds` schedule. Such a task has no end condition and must be deleted by hand.
 
 The model also ships with a `SKILL.md` (skill name `later-reminders`). It stays in the model's skill catalog and covers **when to offer a reminder** and **how it differs from the kernel's official `schedule_create`**; argument rules deliberately stay out of it, so they cannot drift from the tool schema. This entry is optional: a host assembly without the skills service simply never shows it, and everything else keeps working.
 
 ### Pending dock
 
-The countdown rows above the input box. Each row ends with three buttons: **Edit reminder** (change the text inline), **Delete reminder** (cancel that item), and **Send now** (push it to the agent immediately, skipping the countdown).
+The countdown rows above the input box. Each row ends with four buttons: **Edit reminder** (change the text inline), **Pause / resume reminder**, **Delete reminder** (cancel that item), and **Send now** (push it to the agent immediately, skipping the countdown; periodic `every` rows have no Send now button).
+
+Pause is only open to "wait N more minutes" (`after`) reminders that have not fired yet: clock-time `at` rows and recurring `every` rows grey the button out and say why on hover, and a row that already fired can only be deleted or sent. While paused the countdown and the progress bar freeze and the attachments stay on the item; resuming re-arms the **remaining** time from the moment you resume, so the fire time moves later by however long it was paused.
 
 > ⚠️ "Send now" is not a confirm button — it **immediately** delivers the reminder text to the agent and wakes the model. To cancel, use Delete.
 
@@ -121,7 +126,9 @@ Conversations with active reminders show a pixel clock in their sidebar row (alo
 | <img src="assets/icons/icon-presence-urgent.svg?v=18" width="28" alt="urgent"/> | Amber · next fire within 5 minutes |
 | <img src="assets/icons/icon-presence-overdue.svg?v=18" width="28" alt="overdue"/> | Red · overdue (waiting for the session to become idle) |
 
-Hover shows "Next at 15:32 · 3 task(s)"; when overdue it shows "Due · 3 task(s) (sends when the session is idle)".
+Hover shows "Next at 15:32 · 3 task(s)"; when overdue it shows "Due · 3 task(s) (sends when the session is idle)". When every reminder in the conversation is paused the icon stays purple and hover reads "Paused · 3 task(s)", because a paused item has no scheduled time to report.
+
+The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:32"), shaped like the host's own status rows and **appended** to them: the existing rows and their ordering are untouched, and overdue and paused each have their own wording.
 
 ---
 
@@ -153,10 +160,11 @@ Hover shows "Next at 15:32 · 3 task(s)"; when overdue it shows "Due · 3 task(s
 
 ## Feature overview
 
-- **Input-bar timer button**: one click opens the schedule panel — smart time slots / custom time / send preview / pending list / countdown chip.
-- **Pending dock**: a list above the input box; each item can be **cancelled** individually or **edited inline** via its edit icon.
+- **Input-bar timer button**: one click opens the schedule panel: smart time slots / custom time / this conversation's pending list / countdown.
+- **Pending dock**: a list above the input box; each item can be **cancelled**, **edited inline**, **paused and resumed** (`after` items), or sent to the agent right away.
 - **`/later` delayed send**: deliver *the text you are typing right now* later, as yourself (see [the difference](#reminders-vs-delayed-sends-whats-the-difference)).
-- **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time.
+- **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
+- **Works across six kernel generations**: verified from `0.1.2-rc.1` to `0.2.1-rc.2`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed**: reminders persist server-side and arrive on time across devices.
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
 - **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
@@ -179,6 +187,37 @@ Hover shows "Next at 15:32 · 3 task(s)"; when overdue it shows "Due · 3 task(s
 
 ## Quick start
 
+### Supported DSH kernels
+
+| Kernel generation | Status |
+|---|---|
+| `0.1.2-rc.1` | Supported |
+| `0.1.5-rc.3` | Supported |
+| `0.1.7-rc.1` / `0.1.7-rc.2` | Supported |
+| `0.2.0-rc.2` / `0.2.1-rc.2` | Supported |
+
+The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`. Node `^22.19 || >=24`.
+
+Two boundaries are worth stating, otherwise they look like oversights:
+
+- **`0.1.1-rc.2` is not supported.** Not because the code fails there, but because its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict. Support is moot until upstream publishes it.
+- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`, and an "rc.1 launcher + rc.3 components" mix does not start at all (unrelated to this plugin). What you actually get is a uniform `rc.3`.
+
+Each generation is verified on four faces (baseline `main@28ca1dc`, i.e. 1.8.0, measured 2026-10-26): mount (a cold start on a real kernel loads the plugin), function (a due reminder really delivers, judged on event shapes, not on log text), type (the entire `@deepseek-ai/dsh*` line swapped to that generation, both tsconfig projects compile with zero errors), UI (a real GUI renders the timer button, the dock and the panel, screenshotted per generation). Rerun the first three with `npm run verify:kernels:all`, and the UI face with `npm run verify:ui`. The measurements, per-generation verdicts and method belong to [docs/verification.md](./docs/verification.md) and [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md); this table reports conclusions only.
+
+The bundled `SKILL.md` exposure point is not covered by that baseline. It depends on the **assembly**, not the generation (it silently disappears when the host assembly has no skills service, see above), and its cross-generation evidence lives in `tests/skill-provider.test.mjs`: the real `SkillRegistry` cases run `0.2.1-rc.2` by default, and other generations need `DSH_LATER_SKILL_PKG` pointed at that generation's `dsh-skill/lib/index.js`.
+
+Which side enforces the version gate also depends on the generation: kernels up to `0.2.0` do **not** read `engines.dsh` (they check only the per-generation `@deepseek-ai/dsh-*` peer list), and from `0.2.1` on `engines.dsh` decides on its own. So "it got installed on this old kernel" does not mean "this kernel honours the range I declared".
+
+Old kernels come with four visible degradations. Nothing is lost, but the looks and the wording change.
+
+| Kernel | What you see |
+|---|---|
+| `0.1.2` | Non-image attachments arrive as a `[附件] <file name>` text block (that generation's `ContentBlock` has no `file` variant); image blocks are unaffected |
+| `0.1.2` | Attachment icons are always a paperclip, and the size text is computed locally (base 1024, one decimal), not guaranteed to match the host's wording character for character |
+| `0.1.5` and older | `Tooltip` has no `portal`, so a long tooltip can be clipped by a scrollable ancestor |
+| `0.1.5` line | Settings are persisted into the profile (that schemastery has no `Schema.volatile()`); the affected fields are boolean switches, so writing them is harmless |
+
 ### Install into DSH
 
 **From npm (recommended — prebuilt, no approval needed):**
@@ -192,8 +231,8 @@ Or build from source and add it to your DSH Web profile:
 
 ```sh
 cd dsh-later
-npm install
-npm run build
+pnpm install                # the repo is a pnpm workspace (pnpm-lock.yaml + pnpm-workspace.yaml)
+pnpm run build
 
 dsh plugin --profile web add "file:/path/to/dsh-later"
 # restart dsh web to activate
@@ -245,7 +284,7 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | Clock icon style | `auto` (by kernel version) / `modern` / `classic` | auto |
 | **Advanced syntax** (Beta) | Master switch for multi-shot forms: `+1h*3`, `+1h+1h+0.5h`, `15:32+16:32`, `9:00+1d`. When off, those forms are rejected with a pointer back to settings | **On** |
 
-> Advanced syntax is marked Beta not because it is untested (43 new unit tests cover it) but because **the expanded result still needs real-world observation**: whether 10 tasks flood the dock, and whether the 60-second floor and 10-task cap are the right sizes.
+> Advanced syntax is marked Beta not because it is untested (the grammar and the expansion are covered case by case in `tests/occurrences.test.mjs`, with per-generation measurements in [docs/verification.md](./docs/verification.md)) but because **the expanded result still needs real-world observation**: whether 10 tasks flood the dock, and whether the 60-second floor and 10-task cap are the right sizes.
 > Turning it off does **not** restore the old silent mis-parse (`+1h*3 x` creating one task whose content is `*3 x`) — that was a bug, not a fallback. The residual-token guard is independent of this switch and always on.
 
 > Advanced: defaults can also be overridden at startup via `cordis.patch.yml` (e.g. `maxSchedules`) — see `docs/` and the schema.
@@ -335,6 +374,7 @@ Developer- and maintainer-oriented content has moved out of this README:
 - [Architecture & data flow](./docs/architecture.md) — host/client layering, event flow, layout, scheduler rationale
 - [Key design decisions](./docs/design-decisions.md) — `source` field, slash channel, fork isolation, anti-spoofing tradeoffs
 - [Verification & acceptance criteria](./docs/verification.md) — tests, live E2E, cross-kernel compatibility, AC table
+- [Cross-kernel UI screenshot matrix](./docs/notes/ui-matrix.md) (how each generation boots a real GUI, what is judged, and the running verdicts)
 
 ## References
 

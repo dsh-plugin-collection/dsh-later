@@ -76,6 +76,9 @@
   「一个隐蔽的构建耦合」：**任何类型错误都会让 `build.mjs` 从 tsc 回退到 esbuild bundle**，
   而 bundle 会内联本地模块、产生双副本，进而改变运行时语义。故 typecheck 干净
   不只是代码整洁问题，**它是构建产物形态的前置条件**。
+- **单元/集成测试（2026-10-27 复核，取代上一句的 183）**：**620 条 / 613 passed / 0 failed / 7 skipped**（`node --test "tests/*.test.mjs"`，基线 `main@4ef6af5`，含 `SKILL.md` provider 那 30 条），`node scripts/typecheck-all.mjs` 两个 tsconfig 都通过。
+  7 条 skip 全在构建端到端用例，条件是 `skip: !existsSync('<repo>/node_modules/esbuild')`：本轮在没装依赖的 worktree 里跑，
+  所以它们跳过，CI 装齐依赖时会跑。skip 的成因与本轮改动无关，但**如实记在这里**，免得日后被读成"已通过"。
 - **独立实例线上 E2E（Playwright 无头真点 UI）**：按钮渲染→开面板→自定义时间→确认→芯片出现→任务列表可见→**到期真触发（≈计划 75s，实测 72s）→对话出现 `user/message`（source=plugin:later）**；磁盘日志逐条确认 create→owned→dispatch→followup 全持久化、无重复触发。
 - **内核代次兼容（2026-09-07 实测）**：`0.1.1-rc.2` 与 `0.1.2-rc.1` 两代均通过 host 入口链接（运行时符号 17/17 存在）、headless 真实启动（停在 `MISSING_CREDENTIAL`，在插件加载之后）与 web 真实启动（`lib/client.js` HTTP 200）。跨代做法有三处：
   1. **peer 枚举完整覆盖**：除了 `dsh-schedule / dsh-session / dsh-session-projection`，把宿主直接 import 的 `@deepseek-ai/{cordis,dsh-agent,dsh-commands,dsh-llm,dsh-settings,dsh-tools,schemastery}` 全部列入 peer + dev——`0.1.1-rc.2` 经 `dsh-schedule` 传递提升到顶层 `node_modules/@deepseek-ai/` 时这些包是可达的；`0.1.2-rc.1` 的 hoisting 策略变化把它们留在 `.pnpm/`，**未声明 peer 的会运行时报 `ERR_MODULE_NOT_FOUND`**（已实测 `lib/runtime.js` import `@deepseek-ai/dsh-llm` 在 0.1.2 直接崩）。

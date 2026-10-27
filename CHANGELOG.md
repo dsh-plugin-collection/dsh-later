@@ -44,6 +44,21 @@
   - 顺带修正 README 两处与实现不符的表述：模型可用的工具是 create/list/delete 三个（`user_schedule_edit`
     属面板/dock 通道），附件与「以本人身份发送」仍只有 `/later` 一条路。
 
+- **docs** README（中/英两份）对齐 1.7.0 与 1.8.0 的现状，并给这些事实加一道同源护栏。
+  - 新增「支持的 DSH 内核」一节：逐代列出 `0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.2`，
+    逐字写出 `engines.dsh`，说明 `0.1.1-rc.2` 为什么不支持（依赖线在 registry 装不出）、`0.1.5` 为什么按 `rc.3` 验，
+    并列出老内核的四处可见降级（0.1.2 文件附件退成 `[附件] 文件名` 文本、附件图标退成回形针且尺寸文案本地算；
+    0.1.5 及更早 `Tooltip` 无 `portal` 可能被裁切；0.1.5 线设置项会被持久化进 profile）。
+    门禁在哪一侧生效也写明：`0.2.0` 及更早不读 `engines.dsh`，`0.2.1` 起才由它单独决定。
+  - 修掉四处与代码不符的描述：面板的「发送预览」与「取消全部」（`SchedPanel.tsx` 文件头写明无预览块，`handleCancelAll` 无组件消费）、
+    模型侧的 `user_schedule_edit`（`src/index.ts` 只注册 create/list/delete 三个工具，改内容/暂停/恢复/立即发送是 dock 按钮，走 `/user-schedule-*`）、
+    dock 的「三个按钮」（实为四个：编辑 / 暂停或恢复 / 删除 / 插话发送，`every` 行没有插话按钮）。
+  - 补上从未写过的：暂停只开放给未到点的 `after`（`at` 与 `every` 置灰并给出原因，恢复按**剩余时长**重新排期）、
+    侧栏的「已暂停」态与悬浮卡片追加的状态行、仓库是 pnpm workspace（安装命令随之改）。
+  - 新增 `tests/readme-facts.test.mjs`（中/英各 4 条）：代次表与 `KERNEL_GENERATIONS` 逐项相等、`engines.dsh` 逐字出现在兼容小节、
+    被代码否掉的功能名不得复现、dock 一节必须写暂停与恢复。三条变异自检（删掉一代、把 engines 串改错、把 "three buttons" 写回去）各自打红。
+  - `docs/verification.md` 的「183 个全绿」按 2026-10-27 复核取代：620 条 / 613 passed / 0 failed / 7 skipped，skip 成因（worktree 未装 esbuild）写明。
+
 - **test** 跨内核代次 **UI 面**矩阵进仓：`npm run verify:ui` 一条命令把每一代 GUI 拉起来、拍三张证据、拼成一页矩阵（issue #95 补齐的第三个面）。
   - 每个代次三张：作曲行 + 定时按钮（client bundle 在该代次加载成功）／待发送 dock 行（发一条
     `/later +30m 截图矩阵 <代次> …` 经真实命令通道造出来，不烧模型；**正文带代次**，所以截图
