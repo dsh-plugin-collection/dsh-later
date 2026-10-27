@@ -84,23 +84,48 @@ export declare function resolveSkillLocale(localeId: string | undefined): HostLo
 /**
  * 构造随包分发的 skill provider。
  *
- * @param getLocale - 宿主当前语言（`ctx.get('locale')?.getSnapshot().active`）；
- *   host 平面通常拿不到，`undefined` 按中文处理，与工具 description 的语言一致。
+ * **provider 对外永不抛**，这是本模块最硬的一条不变式，因为抛错的代价不是「我们少一行
+ * 曝光」，而是全机器的 skill 面降质：
+ *  - `list()` 抛 → 内核 `listLayerCandidates` 虽然 catch 住并记 warn，但同时置
+ *    `cacheable = false`；`SkillRegistry.collect()` 只在 cacheable 时写缓存，
+ *    `snapshot()` 于是把 `complete: false` 交出去。而 dsh-tool-skill 在 `agent/pre-step`
+ *    里 `if (!snapshot.complete) return decision;`：**那一轮整个 catalog 不发布也不更新**
+ *    （模型看不到任何 skill，包括宿主 filesystem 那一批），且因为永不缓存，每个 step 都要
+ *    重新 collect 全部 provider。
+ *  - `get()` 抛 → `SkillRegistry.get()` 对 `provider.get()` **没有** try/catch，异常直接
+ *    冒给调用方（模型的 `skill` 工具、用户的显式 `/skill` 注入）。
+ *
+ * 所以两条失败路径都收敛成「本 skill 缺席 + 一条 warn」：`list()` 返回空数组（裸数组按
+ * 内核 `normalizeProviderObservation` 就是 `complete: true`，catalog 照常发布），`get()`
+ * 返回 `undefined`（契约里这就是「不再可加载」，内核据此作废该条目）。
+ *
+ * @param getLocale - 宿主当前语言 id。注意 **host 平面今天拿不到它**：`locale` 是
+ *   client 侧服务（见 `src/index.ts` 顶层 `inject` 的注释），所以生产路径上恒为
+ *   `undefined`，实际恒走中文那一份。保留这条判定是为了语言源一旦可达时不必再改形状。
  * @param paths - 双语文件路径，测试可注入夹具。
+ * @param onWarn - 失败上报口（接宿主 `logger.warn`）；默认静默。
  */
-export declare function laterSkillProvider(getLocale?: () => string | undefined, paths?: Record<HostLocaleId, string>): SkillProviderLike;
+export declare function laterSkillProvider(getLocale?: () => string | undefined, paths?: Record<HostLocaleId, string>, onWarn?: (message: string) => void): SkillProviderLike;
 /**
  * 把 {@link laterSkillProvider} 挂进宿主的 skills 服务，**fail-safe**。
  *
- * 三层退化，最坏结果都只是「少一个曝光位」，永远不会是「插件起不来」：
+ * 四条退化路径，最坏结果都只是「本 skill 缺席 + 一条 warn」，永远不会是「插件起不来」，
+ * 也永远不会是「整台宿主的 catalog 降质」（后者是 provider 抛错的代价，见
+ * {@link laterSkillProvider} 的不变式）：
  *  1. `inject` 不是函数（宿主形态不符）→ 直接返回；
- *  2. `inject(['skills'], …)` 当场抛 → catch 后记一条 warn；
- *  3. 注入的那层 ctx 没有 `registerProvider` → 静默返回。
+ *  2. `ctx.inject(...)` **这一步**同步抛 → 外层 catch 记一条 warn；
+ *  3. 注入的那层 ctx 没有 `registerProvider` → 静默返回；
+ *  4. 回调体内抛（`registerProvider` 遇到同层重名或撞保留名 `runtime` 就抛）→ **必须**由
+ *     回调自己的 catch 兜住。cordis 的子 fiber 是异步 apply 的（`_reload` 先
+ *     `await Promise.resolve()` 再执行），所以第 2 层那个外层 catch 根本接不到回调里的
+ *     抛错：不加回调内的 catch，那句 warn 永远不会出现，只剩 cordis 自己把子 fiber 标成
+ *     FAILED（父入口不受影响，但现场没有任何属于本插件的说明）。
  *
- * 第 4 种情形不在这三层里，而是注入点本身不激活：宿主装配里没有 `skills` 服务时，
- * cordis 给这条**子 fiber** 建的门控永远不满足，回调根本不执行，父入口照常激活。
- * 本仓支持的代次都带该服务（实测 0.1.2-rc.1 与 0.2.1-rc.2 两代的 `SkillRegistry` 都能
- * 收下这个 provider），所以这条路是给「装配里没有它」的宿主留的，不是给某个代次留的。
+ * 还有一种情形不在这四条里，而是注入点永不激活：宿主装配里没有 `skills` 服务时，cordis
+ * 给这条**子 fiber** 建的门控永远不满足，回调根本不执行，父入口照常激活。本仓支持的各代
+ * 内核都带该服务（0.2.1-rc.2 由测试用真 `SkillRegistry` 实跑；0.1.2-rc.1 一代是脱离本仓
+ * 单独装包跑通同一对 `list()`/`get()` 的，复现方式见 `tests/skill-provider.test.mjs` 的
+ * `DSH_LATER_SKILL_PKG`），所以这条路是给「装配里没有它」的宿主留的，不是给某个代次留的。
  * 要点是形状而不是概率：`'skills'` 一旦误进 `src/index.ts` 的顶层 `inject`（那是整个
  * 插件的激活门控），它就从「少一行 catalog」变成「服务不来则整插件永久 pending、
  * `/later` 与 `/schedule` 集体消失」。这条边界由 `tests/skill-provider.test.mjs` 与

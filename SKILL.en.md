@@ -23,10 +23,11 @@ This skill only covers **when to schedule and which tool to use**.
 | Calendar repetition: every day at 9, every Monday | official `schedule_create` (this plugin only does fixed intervals) |
 
 One test decides it: **is this due item meant for the user to see and manage in the
-reminder list, or only for the model?** Both tools exist in the same session, so do
-not reach for the official one by default; in the other direction, this plugin has no
-calendar repetition, so hand "every day at 9" back to the official tool. Neither
-tool's tasks show up in the other's list.
+reminder list, or only for the model?** The two tools are usually both present in the
+same session, so do not reach for the official one by default; in the other direction,
+this plugin has no calendar repetition, so hand "every day at 9" back to the official
+tool. This plugin's panel and dock only list the tasks `user_schedule_*` manages, so
+the official tool's tasks are not in them.
 
 ## Create without being asked
 
@@ -65,9 +66,10 @@ reminder ends: a recurring task has no end condition and only the user can delet
 
 ## What happens at the due time
 
-The reminder renders as a **scheduled reminder** line in the conversation
-(`Scheduled · HH:MM · content`) and wakes the model to act on it. So the `prompt` is
-read cold by your future self: state what to check, where, and what "done" means.
+The reminder shows up in the conversation as a **scheduled reminder**, not as words the
+user typed (only `/later` sends as the user), and it wakes the model to act on it. So
+the `prompt` is read cold by your future self: state what to check, where, and what
+"done" means.
 
 ## What only the model can do
 

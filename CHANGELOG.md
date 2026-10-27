@@ -12,21 +12,35 @@
     （要用户在定时面板与 dock 里看得见、管得到的走 `user_schedule_create`；官方 `schedule_create`
     归内核自己的调度面，日历式重复如「每天九点」也只有它有，本插件只有固定间隔）。
     参数规则一律不复述，留在 `strings.ts` 的工具 description 里，避免两处漂移（有测试锁住）。
-  - 双语两份文件按宿主 locale 选（`SKILL.md` / `SKILL.en.md`），与宿主侧微文案同一套回退规则；
-    语言在 catalog 列出时定死，防止「中文描述点开是英文正文」。文件每次读取时才解析，改文案不用重建。
+  - 双语两份文件（`SKILL.md` / `SKILL.en.md`）按 locale 选，规则与宿主侧微文案同源。**要知道的一条
+    限制**：`locale` 是 client 侧服务，host 平面拿不到，所以当前实际恒走中文那份；英文那份是给语言源
+    一旦可达时准备的，也供测试与手工换语言验证。语言在 catalog 列出时定死写进 `locator`，防止
+    「中文描述点开是英文正文」。文件每次调用才读盘，但 catalog 的重建节奏由内核按 revision 缓存决定
+    （provider 注册/析构才失效），所以「改了立刻生效」只在缓存失效后的那一轮成立，不是实时热更。
   - **fail-safe 注册**：走 `ctx.inject(['skills'], …)` 子 fiber，**不进**顶层 `inject`。顶层
     `inject` 是整个插件的激活门控，把可选面写进门控等于让「少一行 catalog」升级成「整个插件
     永久 pending、`/later` 与 `/schedule` 集体消失」，这是仓里踩过的坑（`b7fc4b7`）。装配里
     没有 skills 服务时，这条注入永不激活，少的只有这个曝光位。现由 `tests/skill-provider.test.mjs`
     与 `tests/host-entry-activation.test.mjs` 双向锁住。
+  - **provider 对外永不抛**，这是本条功能真正的 fail-safe 落点，评审时才发现抛错的代价远比「我们少
+    一行」大：`list()` 抛会被内核 catch，但它同时置 `cacheable = false`，catalog 因此永不缓存且
+    `snapshot().complete` 为 false，而 dsh-tool-skill 在 `agent/pre-step` 里碰到 incomplete 就
+    **整轮不发布 catalog**（模型连宿主自带的 skill 都看不见）；`get()` 抛更是直达调用方，
+    `SkillRegistry.get()` 对 `provider.get()` 没有 try/catch。现在两条失败路径都收敛成「本 skill
+    缺席 + 一条 warn」（`list()` 返空数组、`get()` 返 `undefined`），坏形状里最现实的一种 **BOM**
+    也单独剥掉了。判据放到内核那一侧去证：测试用真 `SkillRegistry` 断言我们的 provider 失败时
+    `snapshot().complete` 仍为 true、别的 skill 不陪葬。
   - **修正 issue #104 的一条前提**：issue 写「内核下界 0.1.2-rc.1 无 skills 服务」，核对不成立。
     `@deepseek-ai/dsh-skill` 有 0.1.2-rc.1 这一版，且 `@deepseek-ai/dsh@0.1.2-rc.1` 就把它列为直接
-    依赖；两代的 `BUNDLED_SKILL_RANK` 同为 600、`registerProvider` 与 bare-array 形态也一致。实测
-    本 provider 在 `0.1.2-rc.1` 与 `0.2.1-rc.2` 两代的真 `SkillRegistry` 上都能进 catalog 并取回
-    正文（zh/en 各一遍）。因此守卫防的是「装配里没有该服务」，不是某个代次；兼容验收按此重新表述。
-  - 新增 `tests/skill-provider.test.mjs` 25 条：frontmatter 坏形状、provider 契约形状、双语与语言
-    锁定、三层 fail-safe 退化（无 `inject`／`skills` 缺席／注入抛错）、description 词数预算与中英一致、
-    参数规则漂移护栏，外加用**真内核 `SkillRegistry`** 跑一遍 catalog 与正文取回（未装 skills 包时显式跳过）。
+    依赖；两代的 `BUNDLED_SKILL_RANK` 同为 600、`registerProvider` 与 bare-array 形态也一致。
+    本 provider 在真 `SkillRegistry` 上跑通了 catalog 与正文取回：`0.2.1-rc.2` 是常规回归的一部分，
+    `0.1.2-rc.1` 一代可用 `DSH_LATER_SKILL_PKG=<该代 lib/index.js>` 指认进来复现（命令写在测试的
+    `findKernelSkillEntries` 注释里），跑起来诊断会打印「已跑 2 代 × zh/en」。因此守卫防的是
+    「装配里没有该服务」，不是某个代次；兼容验收按此重新表述。
+  - 新增 `tests/skill-provider.test.mjs` 30 条：frontmatter 坏形状与 BOM、provider 契约形状、
+    **永不抛**与 incomplete 判据、双语与语言锁定、退化路径（无 `inject`／`skills` 缺席／注入抛／
+    回调体内抛，后者按 cordis 的异步 apply 时序建模）、description 词数预算与中英一致、
+    参数规则漂移护栏，外加真 `SkillRegistry` 的 catalog 与正文取回（装几代跑几代，缺代次显式跳过）。
   - 顺带修正 README 两处与实现不符的表述：模型可用的工具是 create/list/delete 三个（`user_schedule_edit`
     属面板/dock 通道），附件与「以本人身份发送」仍只有 `/later` 一条路。
 

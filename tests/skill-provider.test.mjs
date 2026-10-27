@@ -7,15 +7,18 @@
  * 也测「服务缺席时炸不了、且门控没被污染」。
  *
  * 覆盖面：
- *   1. `SKILL.md` frontmatter 解析与各种坏形状；
+ *   1. `SKILL.md` frontmatter 解析与各种坏形状（含 BOM）；
  *   2. provider `list()`/`get()` 的契约形状（内核会逐项 validate）；
- *   3. 双语按 locale 选文件，且语言在 `list()` 一次定死（防「中文描述点开是英文正文」）；
- *   4. `registerBundledSkill` 的三层 fail-safe 退化；
- *   5. `skills` 不得进 host 顶层 inject；
- *   6. description 的词数预算与中英一致；
- *   7. 正文不得复述工具 schema 的参数规则（两处漂移护栏）；
- *   8. 与真内核对得上：rank 常量同值，且真 `SkillRegistry` 能收进 catalog 并取回正文。
- *      本机没装 skills 包时这两条显式 diagnostic 跳过，不做无声的 green。
+ *   3. **provider 永不抛**：读不到/解析坏了一律退化成「本 skill 缺席 + 一条 warn」，并用
+ *      真内核 registry 证 `snapshot().complete` 不被我们拖成 false（那是全宿主降质的开关）；
+ *   4. 双语按 locale 选文件，且语言在 `list()` 一次定死（防「中文描述点开是英文正文」）；
+ *   5. `registerBundledSkill` 的退化路径，含 cordis 异步 apply 下**回调体内**的抛错；
+ *   6. `skills` 不得进 host 顶层 inject；
+ *   7. description 的词数预算与中英一致；
+ *   8. 正文不得复述工具 schema 的参数规则（两处漂移护栏）；
+ *   9. 与真内核对得上：rank 常量同值，真 `SkillRegistry` 能收进 catalog 并取回正文。
+ *      本机装了几代就跑几代；没装时显式 diagnostic 跳过，不做无声的 green。老代次可用
+ *      `DSH_LATER_SKILL_PKG=<该代的 lib/index.js>` 指认进来（命令见 `findKernelSkillEntries`）。
  * @module tests/skill-provider
  */
 import { test } from 'node:test';
@@ -23,7 +26,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   SKILL_NAME,
   SKILL_PROVIDER,
@@ -111,8 +114,9 @@ test('provider.get() 返回正文，且 name 与 candidate 一致', async () => 
   assert.equal(definition.provider, SKILL_PROVIDER);
 });
 
-test('文件即真相：改盘上的 SKILL.md，provider 下一轮就读到新值（不需重建）', async () => {
-  // 用临时目录里的夹具，验证 load-on-call 不是只在注释里成立。
+test('load-on-call：改盘上的 SKILL.md，provider 下一次调用就读到新值', async () => {
+  // 用临时目录里的夹具，验证「不重建也读到新文案」。注意生效节奏仍受内核的
+  // revision 缓存支配（见 skill.ts 纪律 2），这条只证 provider 这一层没有缓存。
   const dir = await mkdtemp(join(tmpdir(), 'dsh-later-skill-'));
   try {
     const path = join(dir, 'SKILL.md');
@@ -124,9 +128,93 @@ test('文件即真相：改盘上的 SKILL.md，provider 下一轮就读到新�
     assert.equal((await provider.list({}))[0].description, '第一版');
     write('第二版');
     assert.equal((await provider.list({}))[0].description, '第二版');
-    // 文件被删掉时要抛错（内核会 containment 成「本 skill 缺席」并记一条 warn）。
-    rmSync(path);
-    await assert.rejects(() => provider.list({}), /SKILL\.md/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('读不到文件时 provider 永不抛：list 退化成空数组 + warn，get 退化成 undefined', async () => {
+  // 这条是本模块最硬的不变式。代价不是「我们少一行曝光」：list() 一抛，内核置
+  // cacheable=false，catalog 永不缓存且 snapshot().complete 变 false，而 dsh-tool-skill
+  // 在 agent/pre-step 里遇到 incomplete 就整轮不发布 catalog（所有插件的所有 skill 一起
+  // 看不见）；get() 一抛更是直接冒给模型/用户，内核 SkillRegistry.get() 没有 try/catch。
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-later-skill-'));
+  try {
+    const missing = join(dir, 'SKILL.md');
+    const warns = [];
+    const provider = laterSkillProvider(() => 'zh', { zh: missing, en: missing }, (m) => warns.push(m));
+    /** 断言「这一步恰好新增一条 warn」，累计条数随调用序列变，不做判据。 */
+    const once = (label, before) => {
+      assert.equal(warns.length, before + 1, `${label}：应新增且只新增一条 warn`);
+      return warns.length;
+    };
+
+    // 缺席要说得出原因，不要静默：静默是这个仓里最贵的一种失败。
+    let seen = warns.length;
+    assert.deepEqual(await provider.list({}), [], 'list 必须返回空数组（裸数组即 complete:true）');
+    seen = once('文件缺失的 list', seen);
+    assert.match(warns[seen - 1], /later: 跳过 later-reminders/);
+    assert.match(warns[seen - 1], /其余功能不受影响/);
+
+    // get() 抛出去会直达模型与用户，所以必须走契约内的 undefined（内核据此作废条目）。
+    assert.equal(await provider.get({ name: 'later-reminders', locator: { path: missing } }), undefined);
+    seen = once('文件缺失的 get', seen);
+
+    // 坏内容（不只是没文件）同一条路：写坏再读。
+    writeFileSync(missing, '---\nname: later-reminders\n---\n# 没有 description\n');
+    assert.deepEqual(await provider.list({}), []);
+    once('坏 frontmatter 的 list', seen);
+    assert.match(warns[warns.length - 1], /没有 description/, '要说得出坏在哪，便于现场定位');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('BOM 不毁形状：带 U+FEFF 的 SKILL.md 照常解析', () => {
+  // 现实触发面是 Windows 编辑器与某些落盘路径；一旦当成坏形状，整份 skill 就缺席。
+  const withBom = '﻿' + '---\nname: later-reminders\ndescription: "带 BOM"\n---\n# 正文\n';
+  assert.equal(descOf(withBom), '带 BOM');
+});
+
+test('真内核 registry：provider 失败时 catalog 照常发布（别的 skill 不陪葬）', async (t) => {
+  // 这条把上面那条不变式**放到内核那一侧**去证：只有真 SkillRegistry + 真
+  // snapshot() 才能证明「incomplete 会不会被触发」，而这正是整台宿主降质的开关。
+  const installed = findKernelSkillEntries();
+  if (installed.length === 0) {
+    t.diagnostic('本机没有 @deepseek-ai/dsh-skill 安装，跳过 incomplete 判据');
+    return;
+  }
+  const { Context } = await import('@deepseek-ai/cordis');
+  const { SkillRegistry } = await import(installed[0].url.href);
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-later-skill-'));
+  try {
+    const registry = new SkillRegistry(new Context());
+    // 一个健康 provider（代表宿主自带的别的 skill）+ 我们坏掉的 provider。
+    registry.registerProvider(() => ({
+      name: 'healthy-provider',
+      list: async () => [
+        {
+          name: 'healthy-skill',
+          description: 'healthy',
+          invocation: { modelInvocable: true, userInvocable: false },
+          source: 'bundled',
+          provider: 'healthy-provider',
+          rank: 600,
+          locator: null,
+        },
+      ],
+      get: async () => undefined,
+    }));
+    const missing = join(dir, 'SKILL.md');
+    registry.registerProvider(() => laterSkillProvider(() => 'zh', { zh: missing, en: missing }, () => undefined));
+
+    const snapshot = await registry.snapshot({});
+    assert.equal(snapshot.complete, true, '我们的 provider 失败不得把整张 catalog 变成 incomplete');
+    assert.deepEqual(
+      snapshot.skills.map((skill) => skill.name),
+      ['healthy-skill'],
+      '只该少了我们自己那一行',
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -142,7 +230,20 @@ test('双语文件路径都落在包根（不是 lib/，构建形态不能挪走
   }
 });
 
-test('locale=en 取英文文件，其余（含拿不到 locale 服务）取中文文件', () => {
+test('两份文件的 frontmatter name 就是 provider 注册的那个名字', () => {
+  // provider 只把 SKILL_NAME 常量交给内核，文件里那行 `name:` 从来不被读。
+  // 不同步的话，它就是一句谎话（用户照它去 /skill 调用会调不到）。
+  for (const [label, raw] of [['SKILL.md', SKILL_ZH], ['SKILL.en.md', SKILL_EN]]) {
+    const front = raw.slice(4, raw.indexOf('\n---\n', 4));
+    const name = /^name:[ \t]*(\S+)[ \t]*$/m.exec(front)?.[1];
+    assert.equal(name, SKILL_NAME, `${label} 的 frontmatter name 与常量不一致`);
+  }
+});
+
+test('locale=en 取英文文件，其余取中文文件（注意 host 平面今天恒拿不到 locale）', () => {
+  // `locale` 是 client 侧服务，src/index.ts 的顶层 inject 注释把这条写死了：host 上
+  // ctx.get('locale') 恒为 undefined，所以生产路径实际恒走中文那份，SKILL.en.md 是给
+  // 语言源一旦可达时准备的（也供测试与手工换语言验证）。这里断言的是**选文件规则**本身。
   assert.equal(resolveSkillLocale('en'), 'en');
   assert.equal(resolveSkillLocale('zh'), 'zh');
   assert.equal(resolveSkillLocale(undefined), 'zh', 'host 平面通常拿不到 locale，必须回退中文');
@@ -230,6 +331,41 @@ test('inject 当场抛错 → 收敛成一条 warn，不让插件起不来', () 
   assert.match(warns[0], /skill 注入失败/);
 });
 
+test('回调是异步跑的：registerProvider 在回调里抛时，仍要由我们自己兜住并 warn', async () => {
+  // 这条补的是上一条评论区没覆盖到的那半边：cordis 的子 fiber 由 `_reload` 触发，而
+  // `_reload` 先 `await Promise.resolve()` 才执行 apply，所以回调体里的抛错**到不了**
+  // registerBundledSkill 外层那个 try/catch。真宿主下如果只依赖外层，抛错只会让子 fiber
+  // 静默 FAILED，我们那句 warn 永远打不出来（现实触发：同层重名、或撞保留名 runtime）。
+  const warns = [];
+  let pending;
+  const { host } = fakeHost({
+    inject: (_deps, callback) => {
+      pending = callback;
+      return () => undefined;
+    },
+    logger: { warn: (m) => warns.push(m) },
+  });
+  registerBundledSkill(host, () => 'zh');
+  assert.equal(warns.length, 0, '注册动作还没发生');
+
+  // 让出微任务，按 cordis 的实际时序再跑回调。
+  await Promise.resolve();
+  assert.doesNotThrow(
+    () =>
+      pending({
+        skills: {
+          registerProvider: () => {
+            throw new Error('skill provider "dsh-later" already registered');
+          },
+        },
+      }),
+    '回调体内的抛错必须被回调自己的 catch 吃掉',
+  );
+  assert.equal(warns.length, 1, `应有且只有一条 warn，实测 ${warns.length} 条`);
+  assert.match(warns[0], /provider 注册失败/);
+  assert.match(warns[0], /already registered/, '原始信息要带出来，否则现场无法定位');
+});
+
 test('宿主连 logger 都没有时也不能抛（可选面就要真的可选）', () => {
   const { host } = fakeHost({
     inject: () => {
@@ -276,7 +412,7 @@ test('host 入口真的挂上了注册调用（不是写完没接线的死代码
 test('description 在词数预算内（catalog 每轮常驻，是常驻 token 成本）', () => {
   const en = descOf(SKILL_EN);
   assert.ok(enWords(en) <= 80, `英文 ${enWords(en)} 词，超 80`);
-  assert.ok(enWords(en) >= 40, `英文 ${enWords(en)} 词，短到不足以路由`);
+  assert.ok(enWords(en) >= 60, `英文 ${enWords(en)} 词，低于口径下限 60，短到不足以路由`);
   const zh = descOf(SKILL_ZH);
   // 中文按字计：一个汉字约 1 token，80 个英文词约 100~110 token，取同量级预算。
   assert.ok(zhChars(zh) <= 130, `中文 ${zhChars(zh)} 字，超预算`);
@@ -338,11 +474,11 @@ test('SKILL 不复述工具 schema 的参数规则（同一事实只该有一处
  */
 function findKernelSkillEntries() {
   const base = new URL('../node_modules/.pnpm/', import.meta.url);
-  let entries;
+  let entries = [];
   try {
     entries = readdirSync(base, { withFileTypes: true });
   } catch {
-    return []; // 连 node_modules 都没有（未安装的仓），无从比对。
+    /* 连 node_modules 都没有（未安装的仓）：仍然接受下面显式指认的外包。 */
   }
   const found = [];
   for (const dir of entries
@@ -355,6 +491,22 @@ function findKernelSkillEntries() {
       found.push({ url, dir });
     } catch {
       /* 该目录形态不符，跳过 */
+    }
+  }
+  // 换线树（`verify:kernels`）之外，还允许把任意一代**指认**进来，好让「另一代也跑得通」
+  // 这句话能被复现而不是只能相信。例：
+  //   npm i --prefix /tmp/skill-old @deepseek-ai/dsh-skill@0.1.2-rc.1
+  //   DSH_LATER_SKILL_PKG=/tmp/skill-old/node_modules/@deepseek-ai/dsh-skill/lib/index.js npm test
+  const extra = process.env.DSH_LATER_SKILL_PKG;
+  if (extra !== undefined && extra !== '') {
+    try {
+      const url = new URL(`file://${resolve(extra)}`);
+      readFileSync(url, 'utf8');
+      if (!found.some((entry) => entry.url.href === url.href)) {
+        found.push({ url, dir: `env:${extra}` });
+      }
+    } catch (error) {
+      throw new Error(`DSH_LATER_SKILL_PKG 指向的文件读不到：${extra}（${error.message}）`);
     }
   }
   return found;
