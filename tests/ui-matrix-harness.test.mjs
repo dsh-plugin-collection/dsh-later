@@ -8,11 +8,16 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { classifyLauncher, ensureModuleFallbackManifest, instanceSummary } from '../scripts/ui-matrix/instance.mjs';
+import {
+  classifyLauncher,
+  createInstance,
+  ensureModuleFallbackManifest,
+  instanceSummary,
+} from '../scripts/ui-matrix/instance.mjs';
 import { buildEvidenceManifest, renderMatrixHtml } from '../scripts/ui-matrix/run.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -138,4 +143,39 @@ test('结构：记录文档在 docs 里，且第 5 节是可追加的结论表',
   assert.match(doc, /## 5\. 历次结论（append-only）/);
   assert.match(doc, /6\/6 通过/);
   assert.match(doc, /PLAYWRIGHT_MODULE/, '要写清 playwright 怎么来（CI 里没有）');
+});
+
+test('createInstance：插件副本跟着 package.json 的 files 白名单走（不再手写第二份清单）', () => {
+  // 这条是补 bug 的：副本清单原先手写四条（package.json/cordis.patch.yml/icon.svg + 三个目录），
+  // 于是 `files` 加了 SKILL.md 之后，隔离实例里根本没有它 —— provider 读盘必失败，
+  // skill 在矩阵与所有实例里静默缺席。用假版本树跑真 createInstance，判据落在**副本里有没有**。
+  const home = mkdtempSync(join(tmpdir(), 'dsh-later-instance-'));
+  const versionsRoot = mkdtempSync(join(tmpdir(), 'dsh-later-versions-'));
+  try {
+    // 版本树只要"看起来完整"：createInstance 判存在 + 逐条软链，不执行宿主代码。
+    mkdirSync(join(versionsRoot, 'node_modules', '@deepseek-ai', 'dsh'), { recursive: true });
+    const version = join(versionsRoot, 'fake-0.0.0');
+    mkdirSync(join(version, 'node_modules', '@deepseek-ai', 'dsh'), { recursive: true });
+    createInstance({ version: 'fake-0.0.0', versionsRoot, pluginDir: root, home, profile: 'ui' });
+
+    const copy = join(home, 'profiles', 'ui', 'node_modules', 'dsh-later');
+    const declared = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).files;
+    assert.ok(Array.isArray(declared) && declared.length > 0, 'package.json 要有 files 白名单');
+    for (const entry of declared) {
+      assert.ok(existsSync(join(copy, entry)), `files 里的 ${entry} 没进副本`);
+    }
+    // 点名这两份：它们是 provider 每次读盘要用的东西，缺了不报错、只是静默没 skill。
+    assert.ok(existsSync(join(copy, 'SKILL.md')), 'SKILL.md 必须在副本里');
+    assert.ok(existsSync(join(copy, 'SKILL.en.md')), 'SKILL.en.md 必须在副本里');
+    assert.ok(existsSync(join(copy, 'lib', 'skill.js')), 'provider 产物必须在副本里');
+    // 副本必须是实体文件：软链仓库目录会让插件解析到自己那份宿主包（矩阵失真的老根因）。
+    assert.equal(
+      [...readFileSync(join(copy, 'SKILL.md'), 'utf8')].length > 0,
+      true,
+      'SKILL.md 要有实际内容',
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(versionsRoot, { recursive: true, force: true });
+  }
 });

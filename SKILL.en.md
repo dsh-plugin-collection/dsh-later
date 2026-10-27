@@ -11,6 +11,12 @@ cancel it there; the reminder also reaches the model. The official
 `schedule_create` belongs to the kernel's own scheduling surface and never appears
 in this plugin's panel or dock.
 
+Check that this applies first: **if `user_schedule_create` is not in your tool list,
+do not follow this skill**. A delegated subagent session does not have it (this plugin
+mounts its tools on root sessions only) while the skill catalog is visible to every
+agent. The right move there is to **schedule nothing** and leave "should there be a
+reminder" to the session that delegated you.
+
 How to fill the arguments is defined by the tool's own parameter descriptions.
 This skill only covers **when to schedule and which tool to use**.
 

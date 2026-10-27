@@ -9,6 +9,10 @@ description: "给用户排提醒用 user_schedule_create，官方 schedule_creat
 dock 里看得见、能改能删，这条提醒同时进模型的上下文。官方 `schedule_create` 归
 内核自己的调度面管，不在本插件的面板与 dock 里。
 
+先确认适用：**手上没有 `user_schedule_create` 就别按这份走**。子 agent 委派出来的
+会话里没有它（本插件的工具只给根会话挂），而 skill catalog 是所有 agent 都看得见的。
+那种会话里的正确动作是**什么都不排**，把「要不要设提醒」留给发起你的那个会话。
+
 参数怎么填以工具自身的说明为准，这里只讲**何时用、用哪个**。
 
 ## 先分清两个调度工具
