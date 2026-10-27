@@ -4,6 +4,31 @@
 
 ## 未发布
 
+- **feat** 随插件分发 `SKILL.md`（技能名 `later-reminders`，issue #104）：模型有了一处「何时主动排程」的常驻位点。
+  - 动机是可见面的差别：工具 description 只在模型**已经**考虑调用该工具时才进上下文，而 skill catalog
+    每一行常驻模型每轮。于是「我吃完饭回来继续」这类没明说「设个提醒」的场景，第一次有了能让模型主动
+    想起本插件的入口。
+  - 内容只写「何时用 + 用哪个」：主动触发场景、不该建的情形、建完怎么向用户交代，以及**双调度路由**
+    （本插件 `user_schedule_create` 给用户排提醒 vs 内核官方 `schedule_create` 给模型自己排唤醒）。
+    参数规则一律不复述，留在 `strings.ts` 的工具 description 里，避免两处漂移（有测试锁住）。
+  - 双语两份文件按宿主 locale 选（`SKILL.md` / `SKILL.en.md`），与宿主侧微文案同一套回退规则；
+    语言在 catalog 列出时定死，防止「中文描述点开是英文正文」。文件每次读取时才解析，改文案不用重建。
+  - **fail-safe 注册**：走 `ctx.inject(['skills'], …)` 子 fiber，**不进**顶层 `inject`。顶层
+    `inject` 是整个插件的激活门控，把可选面写进门控等于让「少一行 catalog」升级成「整个插件
+    永久 pending、`/later` 与 `/schedule` 集体消失」，这是仓里踩过的坑（`b7fc4b7`）。装配里
+    没有 skills 服务时，这条注入永不激活，少的只有这个曝光位。现由 `tests/skill-provider.test.mjs`
+    与 `tests/host-entry-activation.test.mjs` 双向锁住。
+  - **修正 issue #104 的一条前提**：issue 写「内核下界 0.1.2-rc.1 无 skills 服务」，核对不成立。
+    `@deepseek-ai/dsh-skill` 有 0.1.2-rc.1 这一版，且 `@deepseek-ai/dsh@0.1.2-rc.1` 就把它列为直接
+    依赖；两代的 `BUNDLED_SKILL_RANK` 同为 600、`registerProvider` 与 bare-array 形态也一致。实测
+    本 provider 在 `0.1.2-rc.1` 与 `0.2.1-rc.2` 两代的真 `SkillRegistry` 上都能进 catalog 并取回
+    正文（zh/en 各一遍）。因此守卫防的是「装配里没有该服务」，不是某个代次；兼容验收按此重新表述。
+  - 新增 `tests/skill-provider.test.mjs` 25 条：frontmatter 坏形状、provider 契约形状、双语与语言
+    锁定、三层 fail-safe 退化（无 `inject`／`skills` 缺席／注入抛错）、description 词数预算与中英一致、
+    参数规则漂移护栏，外加用**真内核 `SkillRegistry`** 跑一遍 catalog 与正文取回（未装 skills 包时显式跳过）。
+  - 顺带修正 README 两处与实现不符的表述：模型可用的工具是 create/list/delete 三个（`user_schedule_edit`
+    属面板/dock 通道），附件与「以本人身份发送」仍只有 `/later` 一条路。
+
 - **test** 跨内核代次 **UI 面**矩阵进仓：`npm run verify:ui` 一条命令把每一代 GUI 拉起来、拍三张证据、拼成一页矩阵（issue #95 补齐的第三个面）。
   - 每个代次三张：作曲行 + 定时按钮（client bundle 在该代次加载成功）／待发送 dock 行（发一条
     `/later +30m 截图矩阵 <代次> …` 经真实命令通道造出来，不烧模型；**正文带代次**，所以截图
