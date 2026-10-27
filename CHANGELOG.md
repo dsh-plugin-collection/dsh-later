@@ -4,8 +4,35 @@
 
 ## 未发布
 
-## 1.8.0 — 2026-10-26
+- **test** 跨内核代次 **UI 面**矩阵进仓：`npm run verify:ui` 一条命令把每一代 GUI 拉起来、拍三张证据、拼成一页矩阵（issue #95 补齐的第三个面）。
+  - 每个代次三张：作曲行 + 定时按钮（client bundle 在该代次加载成功）／待发送 dock 行（发一条
+    `/later +30m 截图矩阵 <代次> …` 经真实命令通道造出来，不烧模型；**正文带代次**，所以截图
+    自己能证明跑的是哪一代）／面板展开。判据是结构性的（按钮在、dock 有行、
+    面板开了、控制台零真实错误），截图作人眼复核材料 —— 不设像素阈值，避免把字体渲染差异当回归。
+  - 产物落在 `.verify/ui-matrix/`（gitignore）：`<version>-{1-composer,2-dock,3-panel}.png`、
+    `matrix.json`、`matrix.html`。
+  - **实例引导是仓内自包含的**（`scripts/ui-matrix/instance.mjs`，不依赖 devkit），并处理了三处
+    跨代次差异 —— 每一处都是实测出来的：
+    - `.bin/dsh` 可能是**指向 JS 的软链**（npm 树）或 **POSIX shell 脚本**（pnpm 树）：前者要
+      `node <realpath>`，后者要直接执行，混用会得到 `SyntaxError: Invalid or unexpected token`；
+    - 某些代次的 `dsh-app-boot` 模块回退层要读 `<dsh 包>/node_modules/package.json`，缺了抛
+      `ENOENT`（0.1.5 的 npm 树实测）→ 补一个 `{}` 占位清单；
+    - `cordis.patch.yml` 里 **hmr 必须开启**：0.1.2 的 `watchUserPatches()` 在 hmr 服务缺失时直接
+      `Error: user patch-layer watching requires the Cordis HMR service`。
+  - 采集件需要 playwright（本仓 devDependencies 里没有，CI 也不装，故**不进 CI**）：用
+    `PLAYWRIGHT_MODULE` 指认，或本机已装裸 `playwright`。凭据只**软链**（实例没有自己的 secret
+    时页面壳能开、API 全 401 → 插件按钮根本不渲染）；工作区清单从 `~/.dsh/storages/workspace.json`
+    **只读复制**一份（缺了 composer 是禁用态，同样测不到插件）。
+  - **方法与结果都留档**：方法（拍什么/判什么/三处跨代次差异/加新代次的步骤）写在
+    `docs/notes/ui-matrix.md`，结论是 append-only 的表；进仓证据在 `docs/media/ui-matrix/`
+    —— 一页拼图 + 每代 dock 缩略图（900px，别把 26M 原件搬进仓库）+ `manifest.json`
+    （钉住"哪次运行、什么结论、哪个文件、文件 sha256"）。一条命令刷新：
+    `npm run verify:ui -- --evidence docs/media/ui-matrix`。
+  - 新增 `tests/ui-matrix-harness.test.mjs` 10 条：启动器形态判定、占位清单补写、矩阵页渲染、
+    证据清单形状，以及三条结构约束（playwright 不许静态依赖、跨代次差异必须在代码里、
+    `verify:ui` 入口存在）。
 
+## 1.8.0 — 2026-10-26
 - **breaking**（支持面调整）内核下界从 `>=0.1.1-rc.2` 收到 **`>=0.1.2-rc.1`**，并把 `0.1.2 / 0.1.5` 的
   **类型面兼容补回来** —— 关闭 issue #95。
   - 判据不是"旧代次坏了"，而是**类型面从来没被证明过**：把整条 `@deepseek-ai/dsh*` 依赖线换成目标

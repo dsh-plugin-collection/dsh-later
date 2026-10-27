@@ -1,0 +1,123 @@
+{
+  "pluginVersion": "1.7.0",
+  "commit": "bd6b8d2",
+  "capturedAt": "2026-10-26T09:20:29.669Z",
+  "deviceScaleFactor": 2,
+  "howToRegenerate": "npm run verify:ui -- --evidence docs/media/ui-matrix（需要 playwright 与本地版本树）",
+  "frames": [
+    {
+      "version": "0.1.2-rc.1",
+      "verdict": "CAPTURED",
+      "button": true,
+      "dockRows": 1,
+      "panelOpened": true,
+      "consoleErrors": 0,
+      "error": null,
+      "evidence": {
+        "file": "0.1.2-rc.1-dock.png",
+        "bytes": 63129,
+        "sha256": "9f3cf52136af59fe5f8676997695cb84a2fee11c83f99b10666739b73de74748"
+      },
+      "sources": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.2-rc.1-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.2-rc.1-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.2-rc.1-3-panel.png"
+      }
+    },
+    {
+      "version": "0.1.5-rc.3",
+      "verdict": "CAPTURED",
+      "button": true,
+      "dockRows": 1,
+      "panelOpened": true,
+      "consoleErrors": 0,
+      "error": null,
+      "evidence": {
+        "file": "0.1.5-rc.3-dock.png",
+        "bytes": 64004,
+        "sha256": "cd976318081d3ff111673dbf614ad5cc7abf0ecb1e854df3b92660e56665b27c"
+      },
+      "sources": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.5-rc.3-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.5-rc.3-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.5-rc.3-3-panel.png"
+      }
+    },
+    {
+      "version": "0.1.7-rc.1",
+      "verdict": "CAPTURED",
+      "button": true,
+      "dockRows": 1,
+      "panelOpened": true,
+      "consoleErrors": 0,
+      "error": null,
+      "evidence": {
+        "file": "0.1.7-rc.1-dock.png",
+        "bytes": 64534,
+        "sha256": "965e32e71c994a51726195c04fcd5e9620050acce483d46dd6b112b0335122fd"
+      },
+      "sources": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.7-rc.1-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.7-rc.1-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.7-rc.1-3-panel.png"
+      }
+    },
+    {
+      "version": "0.1.7-rc.2",
+      "verdict": "CAPTURED",
+      "button": true,
+      "dockRows": 1,
+      "panelOpened": true,
+      "consoleErrors": 0,
+      "error": null,
+      "evidence": {
+        "file": "0.1.7-rc.2-dock.png",
+        "bytes": 64886,
+        "sha256": "95ae44af7b2b8adbf674b051945e2c280b398d2fae2f549c7a365d3d26791fc1"
+      },
+      "sources": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.7-rc.2-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.7-rc.2-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.1.7-rc.2-3-panel.png"
+      }
+    },
+    {
+      "version": "0.2.0-rc.2",
+      "verdict": "CAPTURED",
+      "button": true,
+      "dockRows": 1,
+      "panelOpened": true,
+      "consoleErrors": 0,
+      "error": null,
+      "evidence": {
+        "file": "0.2.0-rc.2-dock.png",
+        "bytes": 64873,
+        "sha256": "3ed1d1943ffc261ce01a5fa3f2f89328a7a3e979fa6616d3695526f6d2e2fe68"
+      },
+      "sources": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.2.0-rc.2-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.2.0-rc.2-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.2.0-rc.2-3-panel.png"
+      }
+    },
+    {
+      "version": "0.2.1-rc.2",
+      "verdict": "CAPTURED",
+      "button": true,
+      "dockRows": 1,
+      "panelOpened": true,
+      "consoleErrors": 0,
+      "error": null,
+      "evidence": {
+        "file": "0.2.1-rc.2-dock.png",
+        "bytes": 68047,
+        "sha256": "8c14646309a3e96c059c683a1eb3ffb9bf45c7c47d8f94341783d3903f99d7d4"
+      },
+      "sources": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.2.1-rc.2-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.2.1-rc.2-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/feat/ui-matrix-harness/.verify/ui-matrix/0.2.1-rc.2-3-panel.png"
+      }
+    }
+  ]
+}

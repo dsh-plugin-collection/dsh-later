@@ -4,6 +4,32 @@
 
 ## 验证状态
 
+### UI 面：跨代次截图矩阵（`npm run verify:ui`）
+
+`verify:kernels` 证明"装配起来、到点发得出去"，`--steps type` 证明"能对着那一代的类型编译"；
+**UI 面**是第三件事："画出来、点得动"，只能看。所以这里给的是**结构性判据 + 截图**：
+
+| 每代三张 | 判据 |
+|---|---|
+| 作曲行 + 定时按钮 | `[class*=ss-sched-btn]` 存在（client bundle 在该代次加载成功） |
+| 待发送 dock 行 | 发 `/later +30m …`（真实命令通道，不烧模型）后 `[class*=ss-dock-row]` 出现 |
+| 面板展开 | 点按钮后 `[class*=ss-panel]` 出现 |
+
+产物 `.verify/ui-matrix/{matrix.json,matrix.html,*.png}`（gitignore）。不设像素阈值 —— 跨代次的
+字体渲染差异不该被当回归；截图是给人复核的。
+
+**方法与历次结论**记在 [`notes/ui-matrix.md`](notes/ui-matrix.md)（含"每代拍什么/判什么"、
+三处跨代次差异、以及 append-only 的结论表）；**进仓证据**在
+[`media/ui-matrix/`](media/ui-matrix/)：一页拼图 `matrix.png` + 每代 `-dock.png` 缩略图 + `manifest.json`
+（把"哪次运行、什么结论、哪个文件、文件 sha256"钉在一起）。
+
+实例引导自包含在 `scripts/ui-matrix/instance.mjs`，处理了三处实测出来的跨代次差异：
+`.bin/dsh` 可能是软链（npm 树）或 shell 脚本（pnpm 树，混用会 `SyntaxError`）；
+模块回退层要的 `<dsh 包>/node_modules/package.json` 占位；`cordis.patch.yml` 里 **hmr 必须开启**
+（0.1.2 的 `watchUserPatches()` 缺 hmr 服务会直接抛错）。隔离靠 `DSH_HOME`，**没有** unshare/容器 ——
+插件若往 `DSH_HOME` 之外写，这里挡不住（dsh-later 已实测只写 DSH_HOME）。
+
+
 ### 跨代回归脚本的四个面（2026-10-26，issue #97 补齐后两个）
 
 `npm run verify:kernels`（`scripts/verify-across-kernels.mjs`）是"某代次到底支不支持"的判决者，
