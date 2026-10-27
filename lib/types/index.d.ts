@@ -6,6 +6,7 @@
  *  2. 注册 slash 命令（客户端 → host 的创建/删除/列表变更通道）；
  *  3. 为每个 root agent 注册用户工具 `user_schedule_create/list/delete`
  *     （PRD「用户工具（底层暴露）」，模型亦可调用，与 dsh-schedule 双入口互补）。
+ *  4. 把随包分发的 `SKILL.md` 注册进 skills 服务（可选面：装配里没有该服务时静默跳过）。
  *
  * 依赖顺序：作为 peer 依赖的 dsh-schedule 需先加载（其 agent-runtime 负责
  * 到期 dispatch + followup 注入；本插件只负责「用户接口层」）。

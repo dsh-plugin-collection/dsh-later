@@ -6,6 +6,7 @@
  *  2. 注册 slash 命令（客户端 → host 的创建/删除/列表变更通道）；
  *  3. 为每个 root agent 注册用户工具 `user_schedule_create/list/delete`
  *     （PRD「用户工具（底层暴露）」，模型亦可调用，与 dsh-schedule 双入口互补）。
+ *  4. 把随包分发的 `SKILL.md` 注册进 skills 服务（可选面：装配里没有该服务时静默跳过）。
  *
  * 依赖顺序：作为 peer 依赖的 dsh-schedule 需先加载（其 agent-runtime 负责
  * 到期 dispatch + followup 注入；本插件只负责「用户接口层」）。
@@ -40,6 +41,8 @@ import { name, SETTINGS_NAMESPACE } from './domain.js';
 import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { createRuntimeRegistry } from './runtime-registry.js';
 import { hostDictFor, hostFormat } from './strings.js';
+import { registerBundledSkill } from './skill.js';
+import type { SkillHostLike } from './skill.js';
 
 /** 插件配置 schema（全可选，默认开箱即用；经 cordis config 覆盖）。 */
 /**
@@ -667,6 +670,23 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
       await runtimeRegistry.unmountAll();
     };
   }, 'later.userToolsLifecycle()');
+
+  // 4. 随插件分发的 `SKILL.md`：把「何时该主动排程、两个调度工具怎么选」放进模型的
+  //    skill catalog。工具 description 只有模型**已经**考虑调用该工具时才进上下文，
+  //    catalog 的每一行则每轮常驻，是「用户没开口只说了一句稍后再做」这类场景唯一的曝光位。
+  //
+  //    为什么走 `ctx.inject(['skills'], …)` 这条**子 fiber** 注入，而不是加进顶层
+  //    `inject`：顶层 `inject` 是整个入口的激活门控，服务不来则入口永久 pending、
+  //    `/later` 与 `/schedule` 全体消失（见文件头注释与 `tests/host-entry-activation.test.mjs`）。
+  //    skills 是一个曝光位，不是本插件功能的必要条件，而且它**不在**本包的
+  //    peerDependencies 里：宿主是否挂载它由装配决定，不该由插件去断言。拿一个可选面
+  //    去当激活门控，等于让「少一行 catalog」升级成「整个插件不加载」。子 fiber 的门控
+  //    只挂它自己，缺席时少的只有这个曝光位。守卫形状与三层退化都在 `skill.ts` 的
+  //    `registerBundledSkill` 里，那里可直接用假 ctx 测。
+  registerBundledSkill(
+    ctx as unknown as SkillHostLike,
+    () => ctx.get('locale')?.getSnapshot().active,
+  );
 
   // 既有会话水合：插件重载/热更新会 teardown 再 apply，而既有会话不会重发
   // `agent/created`。不补这一次，那些会话的提醒永远不触发、Send now 报 no_runtime。

@@ -37,6 +37,8 @@
     "icon.svg",
     "lib",
     "cordis.patch.yml",
+    "SKILL.md",
+    "SKILL.en.md",
     "README.md",
     "README.en.md",
     "CHANGELOG.md"

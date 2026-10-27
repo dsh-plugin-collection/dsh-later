@@ -101,7 +101,9 @@ One difference between anchor and relative chains (deliberate, not a bug):
 - The dock row shows a **real thumbnail**. Before it fires, the Host's session-log-authorized image channel cannot read the attachment (it is not in the log yet — expected, not corruption), so the thumbnail comes from the Host's own local-file route `GET /api/file`; after it fires, both channels work. If this Host's attachment backend is not file-backed, the thumbnail degrades into a "Available after send + size" marker — that does **not** mean the attachment was lost; it still ships with the message.
 - Each task renders at most 8 thumbnails in the dock, with `+N` for the rest; non-image attachments become a "file name + size" chip.
 
-The model can also call user tools on your behalf to create/inspect/delete/edit reminders (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete` / `user_schedule_edit`). **Endlessly recurring** reminders (every hour, forever) are only reachable this way: ask the model "每小时提醒我喝水" and it creates an `every_seconds` schedule — such a task has no end condition and must be deleted by hand.
+The model can also call user tools on your behalf to create, inspect and delete reminders (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete`; editing content, pausing and send-now happen in the panel and dock). **Endlessly recurring** reminders (every hour, forever) are only reachable this way: ask the model "每小时提醒我喝水" and it creates an `every_seconds` schedule — such a task has no end condition and must be deleted by hand.
+
+The model also ships with a `SKILL.md` (skill name `later-reminders`). It stays in the model's skill catalog and covers **when to offer a reminder** and **how it differs from the kernel's official `schedule_create`**; argument rules deliberately stay out of it, so they cannot drift from the tool schema. This entry is optional: a host assembly without the skills service simply never shows it, and everything else keeps working.
 
 ### Pending dock
 
@@ -157,6 +159,7 @@ Hover shows "Next at 15:32 · 3 task(s)"; when overdue it shows "Due · 3 task(s
 - **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time.
 - **Fires with the page closed**: reminders persist server-side and arrive on time across devices.
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
+- **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
 - **Multilingual**: follows the DSH UI language (Chinese / English), live without reload.
 - **Reminders don't carry across sessions**: sessions forked from this one never inherit the parent's reminders.
 
