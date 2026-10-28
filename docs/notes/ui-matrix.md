@@ -189,7 +189,55 @@ CSS 动画相位与暂停/恢复的视觉冻结；插话投递的命令往返结
 `HTTP 401` 是正常输出不是故障：`instance.mjs:192-200` 把 200/401 都算「服务已起」，鉴权 token
 走 URL 查询参数；若真是 401 页，`matched`/`dock`/`badge` 不可能有值。
 
-### 8.1 仍未判定
-0.1.5-rc.3 / 0.1.7-rc.2 / 0.2.0-rc.2 本轮没复跑（修复前红的那两代里 0.1.7-rc.1 已复验，
-同族代次同一形状）；0.2.1-rc.3 / rc.4 仍未进 UI 矩阵（不在 `KERNEL_GENERATIONS`）；§7.5 列的
-其余界面分支不变。
+### 8.1 当时的未判定 → 已由 §9 的全量复跑关闭
+
+那一小节写的时候只复验了三代，剩下五代（0.1.5-rc.3 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-rc.3 /
+0.2.1-rc.4）仍是"按同族形状推断"，不是实测。随后补了全 8 代的复跑，见 §9。
+
+## 9. 全 8 代复跑（同日，`main` = `53774ac`）
+
+两个面一起跑，且 **mount/function 逐代各起一个独立进程**——这是刻意的：`verify-across-kernels`
+在同一进程里连跑多代时，前一代的 cordis / `dsh-*` 实例不会随换树消失，而同源守卫只看**解析
+路径**、看不到**已加载实例**，这类污染仍可能报绿（§7.2 记过这条）。逐代一进程直接绕开。
+
+**A. mount + function（8 代，各自独立进程）**
+
+```
+0.1.2-rc.1 … 0.2.1-rc.4   全部 GREEN
+  内核=<代> · 同源=same · 投递 spliced=1 dispatch=Y · at 形状 5/5
+  汇总：绿 8 / 红 0 / 未判定 0（逐代明细 .verify/across-kernels-*.json）
+```
+
+**B. UI 面（全 8 代，含此前不在表里的 rc.3 / rc.4）**
+
+```
+0.1.2-rc.1   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.1.5-rc.3   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.1.7-rc.1   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.1.7-rc.2   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.2.0-rc.2   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.2.1-rc.2   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.2.1-rc.3   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.2.1-rc.4   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+汇总：通过 8 / 不通过 0
+```
+
+对照 §7.1 修复前在 0.1.7+ 量到的 `selectorRows=11 / badgeable=0 / badges=0`：现在
+`matched=12`（会话行重新进入候选集）、`badgeable=1`、实际注入 1 个 badge。
+`drift=0`（自检不响）是**正确**结果——判据只在「有提醒且可标注行为 0」时说话。
+
+**为什么信这组数而不只信 JSON**（§7.3 的教训：JSON 全绿而界面是空的）：
+- 8 个实例目录、8 张 badge 截图 sha256 **各不相同**、mtime 间隔 ~15s，确认是 8 次独立启动；
+- 人工看过 0.1.7-rc.1 与 0.2.0-rc.2 两张帧：会话行「新会话」上有时钟 badge，dock 行与面板
+  同时在（0.2.0-rc.2 修复前是 FAIL 图）。
+- 遗留 `/tmp/fake-dsh-home-*` = 0（§8 之外，`5485ce7` 之后测试不再攒垃圾，这里再次确认）。
+
+证据：`matrix-full-8gen.json` 与 5 张新增 `*-PASS-badge-after-fix-real-gui.png`；修复前的
+4 张 `*-FAIL-badge-missing-real-gui.png` 仍在同目录，通过/失败成对。
+
+### 9.1 仍未判定（诚实的剩余部分）
+`HTTP 401` 是正常输出（`instance.mjs` 把 200/401 都算服务已起，token 走 URL 参数），但它
+意味着**鉴权后的真实用户路径**没有被逐请求核验；§7.5 列的界面分支（hover card 状态行、
+进度条 CSS 相位、暂停/恢复视觉冻结、插话命令往返、`prefers-reduced-motion`、焦点与键盘导航、
+en locale、侧栏收起/多工作区折叠）本轮**一条都没测**；设置卡 `loading→ready` 翻转路径仍未被
+真 GUI 触发过（首帧即 ready），因此 §7 那条"运行时未复现"的定性不变。
