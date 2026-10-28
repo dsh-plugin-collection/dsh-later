@@ -64,6 +64,7 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
 | 日期 | 基线 | 代次 | 结论 | 证据 |
 |---|---|---|---|---|
 | 2026-10-26 | `main@28ca1dc` | 0.1.2-rc.1 / 0.1.5-rc.3 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-rc.2 | **6/6 通过**：按钮在、dock 各 1 行（正文带代次）、面板打开、控制台 0 条真实错误 | [`docs/media/ui-matrix/manifest.json`](../media/ui-matrix/manifest.json) + `matrix.png` + 每代 `-dock.png` |
+| 2026-10-28 | `test/ui-face@d4a7895`（插件 1.9.0） | 同上六代 | **结构性三面 6/6 通过**（按钮在、dock 各 1 行、面板打开、`consoleErrors`=0）；**但侧栏 badge 自 0.1.7 起四代全 FAIL**，且本轮新加的漂移自检**一条都没告**（假阴性，见 §7）。退出码按仓内约定应为 **1（有红）**，不是全绿 | [`docs/media/ui-matrix-2026-10-28-realgui/`](../media/ui-matrix-2026-10-28-realgui/README.md)：`matrix.json` + `badge-probe.json` + 每代 PASS/FAIL 图 |
 
 > 更早一次（2026-10-26 上午）的临时脚本只跑到 **5/6**：0.1.5 的 GUI 起不来（就是上面第 2 条
 > 模块回退清单那个 `ENOENT`，加上启动器形态那条）。那次结论没有进仓，因为脚本本身不可复跑；
@@ -75,3 +76,81 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
 2. 本地 `~/dsh-versions/<版本>` 铺好该版本树（`npm i @deepseek-ai/dsh@<版本>`，老代次参考上文第 4 条）；
 3. `npm run verify:ui -- --versions <版本>` 看它是否画得出来；
 4. 通过后 `npm run verify:ui -- --evidence docs/media/ui-matrix` 刷新证据，并在第 5 节追加一行。
+
+## 7. 2026-10-28 这轮补的扩展判据（结构性三面之外）
+
+`verify:ui` 的三面只回答"画没画出来"，回答不了本轮真正改的那四件事。补的判据与结论：
+
+| 判据 | 结论 | 依据（真 GUI 实测数） |
+|---|---|---|
+| 无提醒时 dock **不注册**秒级 interval | PASS | `.ss-dock-root` =0；插件归因 1s interval =0（页面全部 1s 也 =0） |
+| 有提醒时 tick 起来、倒计时逐秒走 | PASS | 插件归因 1s interval =1（调用栈含 `useNow`）；倒计时 `剩 30:00` →(2.3s) `剩 29:58` |
+| 清空提醒后 tick 停摆 | PASS | 归因 =0，页面 1s 总数 0→0 |
+| 设置卡·插件详情页 surface | PASS | `.ss-settings-form` =1，5 个 section、10 个 input（含 5 个 `HH:mm`）、6 个 switch；`maxPromptChars` disabled（联动锁在位） |
+| 设置卡·保存 | PASS | `workStart` 09:00→07:30，保存后回读 07:30，`pageerror` =0 |
+| 设置卡·设置对话框 surface | PASS | 账号菜单 → 设置：`[role=dialog]` =1、`.ss-settings-form` =1、`workStart` =07:30（与详情页同源） |
+| hooks 次序（旧缺陷：快照状态翻转时抛 `Rendered more hooks…`） | PASS（运行时未复现）+ 结构判据 | 全轮 0 条该报错；外层组件 hooks 全在早退**之前**（`SchedulerSettingsCard.tsx:278-306`），表单 hooks 在子组件（:343）。⚠️ 真 GUI 里快照首帧就 `ready`，**没观测到 loading 帧**，所以翻转路径本身没被界面触发过 |
+| 智能时段设置**真的生效** | PASS | 保存 `workStart=07:30` 后，面板芯片由「明天 09:00」变「明天 07:30」 |
+| 暂停/恢复按钮可用态 | PASS | 展开 dock 后两行 `visible=true`：`after` 行 `暂停提醒:enabled`、`at` 行 `暂停提醒:disabled` |
+| 侧栏 badge | **FAIL（0.1.7 起四代）** | 见下表 |
+| 漂移自检 console.warn | **FAIL（假阴性）** | 见下 |
+
+### 7.1 侧栏 badge 在 0.1.7+ 整块不出现，且自检告不出来
+
+逐代实测（`badge-probe.json`，每代都是真起实例 + 真发一条 `/later` + 等摘要起来后测）：
+
+| 代次 | 会话行 `draggable` | `selectorRows` | 排除后可标注行 | `.ss-presence` | 摘要 `indexSize` | console.warn |
+|---|---|---|---|---|---|---|
+| 0.1.2-rc.1 | `true` | 12 | 1 | **1** | 1 | 0 |
+| 0.1.5-rc.3 | `true` | 12 | 1 | **1** | 1 | 0 |
+| 0.1.7-rc.1 | **`false`** | 11 | **0** | 0 | 1 | **0** |
+| 0.1.7-rc.2 | `false` | 11 | 0 | 0 | 1 | 0 |
+| 0.2.0-rc.2 | `false` | 11 | 0 | 0 | 1 | 0 |
+| 0.2.1-rc.2 | `false` | 11 | 0 | 0 | 1 | 0 |
+
+两条独立的结论：
+
+1. **漂了**。`HOST_DOM.sessionRow = '[role="treeitem"][draggable="true"]'` 从 0.1.7 起只命中
+   **工作区行**（`YDXeBa_projectRow`，带 `aria-expanded`），会话行（`YDXeBa_sessionRow`）改成了
+   `draggable="false"`，于是被 `aria-expanded` 排除规则全部剔掉 → 可标注行恒为 0 → badge 永不注入。
+   数据面没漂：同一轮探针里 `indexSize=1`（摘要有这条提醒），所以纯粹是 DOM 假设过期。
+2. **新加的漂移自检抓不到它**。`scan()` 的判据用的是**排除前**的 `rows.length`
+   （`session-presence.ts:306-323`）：`rows.length>0` 就认定"结构探测仍然对得上"并把
+   `sidebarDriftWarned` 复位。而真漂移的形态恰恰是"选择器还命中一堆，但排除后一个都不剩"——
+   四代 × 10+ 次扫描，**一条 warn 都没有**。注释里那句「命中过行 = 结构探测仍然对得上」在
+   这条路径上是错的。修法（本轮**未改**，只报）：判据改成排除后的可标注行数
+   （`badgeable === 0 && index.size > 0` 才告），行选择器另需放宽或加 fiber 反查兜底。
+
+### 7.2 采集件自身的两个缺口（下轮值得补进 `scripts/ui-matrix/`）
+
+- `capture.mjs` 只记 `m.type() === 'error'`，**warning 不进 `matrix.json`** —— 漂移自检发的正是
+  `console.warn`，所以六代"控制台 0 错误"完全掩盖了它。
+- 三面判据里没有 badge，因此 badge 全红时 `run.mjs` 仍 `process.exit(0)`。**全绿 ≠ 用户看得见**，
+  这一轮就是实例。
+
+### 7.3 本轮差点误判的四地方（写下来免得下轮重走）
+
+1. 第一轮扩展判据里 `pause-disabled-for-at` / `smart-window` / `settings-*` 全红，**是驱动的锅不是插件的锅**：
+   (a) 没造第二条 `at` 任务就去查"第二行的暂停按钮"；(b) 「无草稿且无提醒」时按钮是 `disabled`，
+   点它没反应 → 面板根本没开；(c) 设置卡入口是「插件页 → 已安装插件卡片标题按钮」，按文本匹配会点到侧栏的工作区行。
+2. 一张叫 `PASS-pause-states` 的整页截图其实只拍到折叠头（多条时列表带 `hidden`），**图与结论对不上** →
+   重拍成"展开 dock + 元素 bounding box 裁切"。
+3. `indexSize` 前 8 次扫描都是 0（摘要 store 有分钟级时效），只看前几条会误判成"数据面也漂了"。
+4. 跑完后真实 `~/.dsh` 里 `storages/cost-meter/ledger.json`、`storages/workspace.json`、
+   `plugin-state/gitea-dispatch/…` 的 mtime 仍在变 —— 用「确认无实例进程后再等 40s 重采样」归因：
+   它们由**活着的宿主**持续写，不是本轮写的。
+
+### 7.4 隔离核对（本轮）
+
+- `~/.dsh/.credentials.yaml` sha256 与 mtime **未变**；`sessions/`、`storages/`、`plugin-state/`
+  相对基线**无新增条目**。
+- 每个实例的会话/存储都落在自己的 `DSH_HOME`（`.verify/…/homes/<版本>/`，各 3–4 个会话目录）。
+- 收尾 `pgrep` 无残留实例进程；本轮未在 `/tmp` 造 `fake-dsh-home-*`。`.verify/` 约 80M，已 gitignore。
+- 未跑 `--deploy`、未设 `DSH_LATER_RELINK`。
+
+### 7.5 本轮**没能**验证的部分
+
+0.2.1-rc.3 / rc.4（树在本机有，但不在 `KERNEL_GENERATIONS` 表里，矩阵按表跑）；设置卡的
+`loading→ready` 翻转路径（真 GUI 首帧即 ready）；悬浮卡片（hover card）的状态行增补；dock 进度条
+CSS 动画相位与暂停/恢复的视觉冻结；插话投递的命令往返结果；`prefers-reduced-motion`、焦点管理、
+键盘导航；en locale；侧栏收起 / 多工作区折叠等布局分支。

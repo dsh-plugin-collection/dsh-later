@@ -1,0 +1,194 @@
+[
+  {
+    "version": "0.1.2-rc.1",
+    "port": 3600,
+    "verdict": "BADGE-OK",
+    "buttonFound": true,
+    "dom": {
+      "badges": 1,
+      "selectorRows": 12,
+      "badgeable": 1,
+      "treeitems": 12,
+      "nonExpanded": [
+        {
+          "draggable": "true",
+          "cls": "YDXeBa_sessionRow YDXeBa_selected",
+          "text": "新会话"
+        }
+      ],
+      "dockRows": 1
+    },
+    "probes": {
+      "count": 8,
+      "last": {
+        "rows": 12,
+        "badgeable": 1,
+        "indexSize": 1
+      },
+      "everIndex": true,
+      "everBadgeable": true
+    },
+    "driftWarn": [],
+    "consoleErrors": []
+  },
+  {
+    "version": "0.1.5-rc.3",
+    "port": 3601,
+    "verdict": "BADGE-OK",
+    "buttonFound": true,
+    "dom": {
+      "badges": 1,
+      "selectorRows": 12,
+      "badgeable": 1,
+      "treeitems": 12,
+      "nonExpanded": [
+        {
+          "draggable": "true",
+          "cls": "YDXeBa_sessionRow YDXeBa_selected",
+          "text": "新会话"
+        }
+      ],
+      "dockRows": 1
+    },
+    "probes": {
+      "count": 9,
+      "last": {
+        "rows": 12,
+        "badgeable": 1,
+        "indexSize": 1
+      },
+      "everIndex": true,
+      "everBadgeable": true
+    },
+    "driftWarn": [],
+    "consoleErrors": []
+  },
+  {
+    "version": "0.1.7-rc.1",
+    "port": 3602,
+    "verdict": "BADGE-MISSING-DOM-DRIFT",
+    "buttonFound": true,
+    "dom": {
+      "badges": 0,
+      "selectorRows": 11,
+      "badgeable": 0,
+      "treeitems": 12,
+      "nonExpanded": [
+        {
+          "draggable": "false",
+          "cls": "YDXeBa_sessionRow YDXeBa_selected",
+          "text": "新会话"
+        }
+      ],
+      "dockRows": 1
+    },
+    "probes": {
+      "count": 8,
+      "last": {
+        "rows": 11,
+        "badgeable": 0,
+        "indexSize": 1
+      },
+      "everIndex": true,
+      "everBadgeable": false
+    },
+    "driftWarn": [],
+    "consoleErrors": []
+  },
+  {
+    "version": "0.1.7-rc.2",
+    "port": 3603,
+    "verdict": "BADGE-MISSING-DOM-DRIFT",
+    "buttonFound": true,
+    "dom": {
+      "badges": 0,
+      "selectorRows": 11,
+      "badgeable": 0,
+      "treeitems": 12,
+      "nonExpanded": [
+        {
+          "draggable": "false",
+          "cls": "YDXeBa_sessionRow YDXeBa_selected",
+          "text": "新会话"
+        }
+      ],
+      "dockRows": 1
+    },
+    "probes": {
+      "count": 8,
+      "last": {
+        "rows": 11,
+        "badgeable": 0,
+        "indexSize": 1
+      },
+      "everIndex": true,
+      "everBadgeable": false
+    },
+    "driftWarn": [],
+    "consoleErrors": []
+  },
+  {
+    "version": "0.2.0-rc.2",
+    "port": 3604,
+    "verdict": "BADGE-MISSING-DOM-DRIFT",
+    "buttonFound": true,
+    "dom": {
+      "badges": 0,
+      "selectorRows": 11,
+      "badgeable": 0,
+      "treeitems": 12,
+      "nonExpanded": [
+        {
+          "draggable": "false",
+          "cls": "YDXeBa_sessionRow YDXeBa_selected",
+          "text": "新会话"
+        }
+      ],
+      "dockRows": 1
+    },
+    "probes": {
+      "count": 7,
+      "last": {
+        "rows": 11,
+        "badgeable": 0,
+        "indexSize": 1
+      },
+      "everIndex": true,
+      "everBadgeable": false
+    },
+    "driftWarn": [],
+    "consoleErrors": []
+  },
+  {
+    "version": "0.2.1-rc.2",
+    "port": 3605,
+    "verdict": "BADGE-MISSING-DOM-DRIFT",
+    "buttonFound": true,
+    "dom": {
+      "badges": 0,
+      "selectorRows": 11,
+      "badgeable": 0,
+      "treeitems": 12,
+      "nonExpanded": [
+        {
+          "draggable": "false",
+          "cls": "YDXeBa_sessionRow YDXeBa_selected",
+          "text": "新会话"
+        }
+      ],
+      "dockRows": 1
+    },
+    "probes": {
+      "count": 10,
+      "last": {
+        "rows": 11,
+        "badgeable": 0,
+        "indexSize": 1
+      },
+      "everIndex": true,
+      "everBadgeable": false
+    },
+    "driftWarn": [],
+    "consoleErrors": []
+  }
+]
