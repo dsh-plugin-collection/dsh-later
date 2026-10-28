@@ -159,21 +159,27 @@ test('缩略图先查宿主缓存（peekImageUrl），命中就不发请求', ()
   assert.match(entry, /peekImage: peekAttachmentUrl/, 'peek 能力必须注入 dock');
 });
 
-test('localMediaUrl 走宿主自己的解析器，且基址在调用时读（#待发缩略图）', () => {
-  // 不自己拼 `/api/file?path=`：优先用宿主 `fileMediaUrl`（宿主收紧规则时自动跟上）；
-  // 0.1.5/0.1.2 的 dsh-util-workspace-path 没有这个导出，所以走兼容层，本地实现只在缺导出时启用。
+test('localMediaUrl 经解析层出 URL，且基址在调用时读（#待发缩略图）', () => {
+  // 解析实现只有本插件这一份：宿主 `fileMediaUrl` 所在的包在 8 个代次都进不了宿主浏览器模块
+  // 表（无 lib/client.js、无 dsh 字段、不在 seed 词表），外置会在 factory 求值期抛错。
+  // 这里原先断言的是「兼容层必须先试宿主实现、有宿主实现就必须用宿主实现」——那条探测在产品里
+  // 恒为「有宿主实现」，因为 esbuild 把 devDependencies 钉住的那一份内联进了我们自己的产物；
+  // 也就是说这两条文本断言把一个小谎钉成了不可改的契约。详见 workspace-path-compat.ts 文件头。
   assert.match(entry, /import \{ fileMediaUrlCompat \} from '\.\/workspace-path-compat\.js';/,
-    '必须经兼容层取解析器（它优先调宿主 fileMediaUrl）');
+    '必须经解析层取 URL，不在入口里拼路由');
   assert.match(entry, /const localMediaUrl = \(path: string\): string \| undefined => fileMediaUrlCompat\(document\.baseURI, path\);/,
-    '基址取 document.baseURI（web 与桌面 dsh-app:// 两种形态由宿主/兼容层判别）');
+    '基址取 document.baseURI（web 与桌面 dsh-app:// 两种形态由解析层判别）');
   assert.doesNotMatch(entry, /['"`]\/api\/file/, '插件入口里禁止硬编码路由');
   assert.match(entry, /localMediaUrl,\s*\} as ScheduleDockInjected\)/, '必须注入 dock');
-  // 兼容层内部：优先宿主实现（`pick` 出来的那个），本地兜底只在老代次启用。
+  // 解析层内部：委托给唯一实现，而那份实现住在可被行为测试直接测的 media-url 里。
   const compat = read('client/workspace-path-compat.ts');
-  assert.match(compat, /pick<\(base: string, path: string\) => string \| undefined>\('fileMediaUrl'\)/,
-    '兼容层必须先尝试宿主 fileMediaUrl');
-  assert.match(compat, /if \(hostFileMediaUrl !== undefined\) return hostFileMediaUrl\(base, path\);/,
-    '有宿主实现就必须用宿主实现（本地副本只服务没有它的老代次）');
+  assert.match(compat, /return fileMediaUrlFallback\(base, path\);/,
+    '解析层必须委托给 fileMediaUrlFallback');
+  // 反向守卫：不许重新 import 宿主那个包——一旦 import 回来，esbuild 就又把它内联进来，
+  // `pick` 探测跟着复活，`fileMediaUrlFallback` 的行为测试就又变成产品里永不执行的装饰。
+  // 只盯「是否从那个包引入」这个结构信号，不用包名做全文匹配（文件头注释里必须提它）。
+  assert.doesNotMatch(compat, /from '@deepseek-ai\/dsh-util-workspace-path/,
+    '不许重新引入对宿主 workspace-path 包的运行时探测（该包在浏览器侧不可解析）');
 });
 
 test('每块独立异步加载 + alive 标志，且依赖不能用块对象（dock 每秒 tick）', () => {

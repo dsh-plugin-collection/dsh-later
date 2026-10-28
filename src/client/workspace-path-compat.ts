@@ -1,45 +1,44 @@
 /**
- * `@deepseek-ai/dsh-util-workspace-path` 的跨代兼容层（issue #95 方案 B）。
+ * 本地绝对路径 → 媒体 URL：**本插件自己的实现**，不探测宿主。
  *
- * 只为一件事存在：`fileMediaUrl`（本地绝对路径 → 媒体 URL）在 **0.1.5 / 0.1.2 的
- * 那个包里没有导出**，而 0.1.7+ 有。本插件 `src/client/index.tsx` 需要它来把附件路径
- * 变成可渲染的图片地址。
+ * ## 这里为什么不再有「跨代兼容层」
  *
- * ## 为什么能本地实现
+ * 本文件原名 `@deepseek-ai/dsh-util-workspace-path` 的跨代兼容层（issue #95 方案 B），并声称
+ * 「新代次走宿主实现、宿主将来收紧规则我们自动跟上」。那句话在产品里从不成立：
  *
- * 它是**纯字符串函数**：没有服务、没有插槽身份，也不会因模块实例不同而漂移主题
- * （上游自己的 client bundle 同样把它内联进 bundle）。所以老代次上按它公开的契约做一份
- * 等价实现是安全的 —— 契约（取自当前代实现与它会返回 `undefined` 的分支）：
+ * 1. 该包**在全部 8 个代次都无法被宿主解析**：没有 `lib/client.js`、`package.json` 无 `dsh`
+ *    字段 ⇒ 永远不是 graph row；也不在 shell 的 seed 词表里（seed 只有 react / react-dom /
+ *    cordis / zod / react-virtual / dsh-client-store / ui-slots / ui-primitives / ui-dockkit）；
+ *    `__ModuleLoader__.load` 注册的 id（0.1.2 计 47 个、0.2.1-rc.4 计 80 个）里也没有它。
+ *    `dsh.client.inject` 对查不到 row 的项是**静默跳过**，不会替它注册。
+ * 2. 因此「加进 client external」不是老代次才炸，而是**每一代都炸**：宿主 require 的三条路
+ *    （seed / loadCache / factories）全落空即抛 `client-modules: require("…") missed the
+ *    module table`，且该 require 落在产物顶部、factory 求值期 ⇒ 插件 client 整条不渲染。
+ *    上游自己也是把它内联进各宿主 bundle（命中 6~11 个），不是运行时解析。
+ * 3. 所以原先那份 `import * as workspacePath` 的真实效果是：esbuild 把 **devDependencies
+ *    钉住的那一份**内联进我们的产物（`lib/client.js` 里留着它的 inlined-from 标记与绝对路径），
+ *    `pick('fileMediaUrl')` 读的是这份构建期副本、恒为「有」⇒ `hostFileMediaUrl !== undefined`
+ *    恒真 ⇒ 下面的 fallback 分支与 `hasHostFileMediaUrl` 在产品里**永不可达**。我们跟着的从来
+ *    不是运行中的宿主，而是一个被冻进发布产物的版本。
  *
- * 1. `base` 必须是 `http(s):` 或 `dsh-app://app/`，否则返回 `undefined`；
- * 2. `path` 必须是绝对路径（POSIX `/…` 或 Windows `X:/…`、`\\…`），否则 `undefined`；
- * 3. `path` 以 UNC 起点 `//`、`\\` 开头 → `undefined`（避免被当成网络路径）；
- * 4. `path` 含控制字符（`\u0000-\u001f`、`\u007f`）→ `undefined`；
- * 5. 合法则返回 `<base>api/file?path=<encodeURIComponent(path)>` 的绝对 URL。
+ * ## 现在为什么敢只用自己这份
  *
- * 新代次**仍然走宿主实现**（`pickFileMediaUrl()` 优先），所以宿主将来收紧规则时我们自动跟上；
- * 这份副本只服务于不会再变化的老代次，因此不会持续漂移。
+ * 动手前跑过差分：宿主那份（0.2.1-rc.2）与 `src/media-url.ts` 的实现，在 42 组
+ * `(base, path)` 上**逐位一致**——覆盖 `http://` / `https://` / `dsh-app://app/` / `file://`
+ * 四类基址，以及空格、`%` 编码、相对路径、盘符、UNC 样式等路径形态。所以这次切换不是「换个
+ * 算法」，是拆掉一条永远走不到的探测。
+ *
+ * ## 代价（如实写明）
+ *
+ * 不再有「宿主收紧规则我们自动跟上」这回事。宿主将来改变合法路径判定时，需要**手工**同步
+ * `src/media-url.ts`。这条职责原先被那句假承诺掩盖，现在是显式的。
+ *
+ * 契约与 `src/media-url.ts` 的行为测试同源：base 必须是 `http(s):` 或 `dsh-app://`；path 必须
+ * 绝对（POSIX `/…` 或 `X:/…`）；UNC 起点 `//`、`\\` 与控制字符一律 `undefined`；合法则返回
+ * `<base>api/file?path=<encodeURIComponent(path)>`。
  * @module dsh-later/client/workspace-path-compat
  */
-import * as workspacePath from '@deepseek-ai/dsh-util-workspace-path';
 import { fileMediaUrlFallback } from '../media-url.js';
-
-/**
- * 读取一个**可能不存在**的导出。
- *
- * 与 `primitives-compat.ts` 的 `pick()` 同一个理由：ESM 具名 import 在目标导出缺失时是
- * **链接期硬失败**（`SyntaxError: does not provide an export named …`），会让插件在旧代次
- * 宿主上直接加载不了；老代次的这个包没有 `fileMediaUrl`，所以只能走 namespace + 属性访问。
- */
-function pick<T>(name: string): T | undefined {
-  return (workspacePath as unknown as Record<string, unknown>)[name] as T | undefined;
-}
-
-/** 宿主提供的 `fileMediaUrl`；老代次为 undefined。 */
-const hostFileMediaUrl = pick<(base: string, path: string) => string | undefined>('fileMediaUrl');
-
-/** 是否由宿主提供（诊断/测试用：老代次应为 false）。 */
-export const hasHostFileMediaUrl = hostFileMediaUrl !== undefined;
 
 /**
  * 本地绝对路径 → 媒体 URL。
@@ -50,15 +49,14 @@ export const hasHostFileMediaUrl = hostFileMediaUrl !== undefined;
  * @returns 媒体 URL；非法基址或路径返回 `undefined`，调用方据此降级（不渲染图片）。
  */
 export function fileMediaUrlCompat(base: string, path: string): string | undefined {
-  if (hostFileMediaUrl !== undefined) return hostFileMediaUrl(base, path);
   return fileMediaUrlFallback(base, path);
 }
 
 /**
- * 兜底实现从 `src/media-url.ts` 来（纯字符串、可被 tests 直接测）。
+ * 实现住在 `src/media-url.ts`，这里只转发。
  *
- * 为什么不在本文件里写：客户端模块会被 bundle 进 `lib/client.js`，`tests/` 只能对着
- * 源码文本断言，跑不了行为；而这段逻辑恰恰是"只有老代次才跑"的分支，最需要行为测试。
- * 放在宿主侧既能共用，又能被 `lib/media-url.js` 直接测。
+ * 为什么不在本文件里写：客户端模块会被 bundle 进 `lib/client.js`，`tests/` 只能对着源码文本
+ * 断言、跑不了行为；放在宿主侧既能共用，又能被 `lib/media-url.js` 直接测——现在它是**唯一**
+ * 实现，那几条行为测试也从「装饰」变成了真正的守护。
  */
 export { fileMediaUrlFallback } from '../media-url.js';
