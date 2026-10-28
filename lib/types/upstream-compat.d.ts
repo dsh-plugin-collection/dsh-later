@@ -7,7 +7,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
  * 能力 / 这个符号改了名」——issue #95 就是这么把 0.1.1 / 0.1.2 / 0.1.5 三代请出表的。
  *
  * - `id`：semver 精确版本（发布 tag）
- * - `peerRange`：写入 package.json 的范围（node-semver 预发布需显式枚举）
+ * - peer 条款由 `genPeerRange(id)` 从 id 推导：`>=<id> <该段下一 patch>-0`（逐代枚举 + 各带上界）
  * - `sessionApi`：Session 读日志的形状（见 readOwnEvents / readInheritedEventCount）。
  *   现在表里**没有任何一代用 `legacy-events`**（0.1.1 已出表）；该取值与 read* 的兜底分支
  *   保留为防御——第三方伪造 Session、或未来某代悄悄改形状时，失败要可诊断而不是抛 undefined。
@@ -24,7 +24,6 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * 的兼容层里（见 issue #95 / #101），跨代 tsc 两个项目都是 0 条错误。
      */
     readonly id: "0.1.2-rc.1";
-    readonly peerRange: "^0.1.2-rc.1";
     readonly sessionApi: "own-events";
 }, {
     /**
@@ -54,7 +53,6 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * `primitives-compat.ts` / `workspace-path-compat.ts` 兜住；它本身有 `FileTypeIcon`/`fileSizeText`。
      */
     readonly id: "0.1.5-rc.3";
-    readonly peerRange: "^0.1.5-rc.3";
     readonly sessionApi: "own-events";
 }, {
     /**
@@ -80,7 +78,6 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * `sessionApi` 仍是 `own-events`：Session 形状这一面本代未变，变的只是消息准入。
      */
     readonly id: "0.1.7-rc.1";
-    readonly peerRange: "^0.1.7-rc.1";
     readonly sessionApi: "own-events";
 }, {
     /**
@@ -100,7 +97,6 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * 不单列 0.1.6-alpha.*：alpha 线无独立兼容面，且 0.1.7 已覆盖其功能面。
      */
     readonly id: "0.1.7-rc.2";
-    readonly peerRange: "^0.1.7-rc.2";
     readonly sessionApi: "own-events";
 }, {
     /**
@@ -125,7 +121,6 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * 此前只是警告）。故这一代次的缺失曾让插件在 0.2.0 上完全失效。
      */
     readonly id: "0.2.0-rc.2";
-    readonly peerRange: "^0.2.0-rc.2";
     readonly sessionApi: "own-events";
 }, {
     /**
@@ -150,7 +145,30 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * `tsc --noEmit` 零错误，`npm test` 407 项全绿。
      */
     readonly id: "0.2.1-rc.2";
-    readonly peerRange: "^0.2.1-rc.2";
+    readonly sessionApi: "own-events";
+}, {
+    /**
+     * `0.2.1-rc.3` / `0.2.1-rc.4` 两代：上游只往前走了 rc 号，实测四个面与 rc.2 无差异。
+     *
+     * 实证（2026-10-28，本机 `~/dsh-versions/<代>` 树，`--no-install` 复用）：
+     * - mount + function：各起**独立进程**跑，GREEN；`同源=same`（同源守卫通过）、真投递
+     *   `agent/inbox/spliced` 命中、`schedule/change dispatch` 在、`at` 五形状 5/5。
+     * - type：换线 19 处后 host + client 两个 tsconfig 均通过。
+     * - gate：用**该代自己的** `evaluatePluginCompatibility` 判 pass，最新语义亦 pass。
+     *
+     * 为什么单独登记而不是"反正 engines 的 `0.2.1` 段上界已经放行"：登记 peer 侧是必需的
+     * ——`0.2.1-rc.3/rc.4` 运行时读 engines，但同段的更晚版本、以及**别的**读 peer 的运行时
+     * 都可能在混合部署里出现；更重要的是这张表是「已完整验证」的台账，跑过就得记，
+     * 否则下一次有人问「rc.4 到底验没验」，答案又只能靠猜。
+     *
+     * ⚠️ 入表的连带后果：`sync-peer-matrix` 把 devDependencies 固定到**表里最后一代**，
+     * 因此本地编译与回归的基准代次随之前移到 `0.2.1-rc.4`。
+     */
+    readonly id: "0.2.1-rc.3";
+    readonly sessionApi: "own-events";
+}, {
+    /** 见上一条 `0.2.1-rc.3` 的实证说明；同样四面全绿。本代是当前的 dev 固定代次。 */
+    readonly id: "0.2.1-rc.4";
     readonly sessionApi: "own-events";
 }];
 /**
@@ -158,6 +176,21 @@ export declare const KERNEL_GENERATIONS: readonly [{
  * cordis / schemastery 等独立 semver 包**不**列入——它们不随内核 rc 枚举。
  */
 export declare const KERNEL_SCOPED_PACKAGES: readonly ["@deepseek-ai/dsh-agent", "@deepseek-ai/dsh-commands", "@deepseek-ai/dsh-llm", "@deepseek-ai/dsh-schedule", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-projection", "@deepseek-ai/dsh-settings", "@deepseek-ai/dsh-tools"];
+/**
+ * 单代的 peer 条款：`>=<id> <该段下一 patch>-0`。
+ *
+ * **为什么不写成 `^<id>`**（本轮修复点）：caret 带预发布时展开为
+ * `>=0.1.2-rc.1 <0.2.0-0`，即**整条 minor 都命中**。于是六枚逐代 caret 的并集照样放行
+ * `0.1.3-alpha.2` / `0.1.6-alpha.1` / `0.1.7-alpha.1` / `0.1.5-rc.1` —— 拿真内核评估器对
+ * 当前 manifest 实测，四条全 pass。而这几个运行时**恰好只读 peer、不读 `engines.dsh`**
+ * （0.2.1 起才反过来），所以收紧 engines 对它们毫无作用：peer 是它们唯一的门。
+ * 只修 engines 等于把门修在了没人走的那一侧。
+ *
+ * 逐代一条 + 各带上界，既保住「下界恰为该代本身、逐代留痕」这条既有政策（见
+ * `tests/upstream-compat.test.mjs` 的注释），又真的收住。形状由 id **推导**而不是手抄：
+ * 手抄一定会漂，engines 与 peer 上一轮就是这样各说各话的。
+ */
+export declare function genPeerRange(id: string): string;
 /** 由 KERNEL_GENERATIONS 拼出的 peer 范围串（`a || b`）。 */
 export declare function peerRangeFor(packageName: string): string;
 /** 全部需逐代枚举的 `{ package, range }`（sync-peer-matrix / 矩阵测试共用）。 */
