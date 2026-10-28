@@ -165,6 +165,37 @@ export declare function peerMatrixEntries(): ReadonlyArray<{
     packageName: string;
     range: string;
 }>;
+/**
+ * 由 KERNEL_GENERATIONS 推导 `engines.dsh` 的范围串（**逐 tuple 上界**写法）。
+ *
+ * ## 为什么 engines 与 peer 用两种形状，而不是照抄 peer 的逐代 `^id`
+ *
+ * peer 侧刻意逐代枚举、且「下界恰为该代本身」（见 `tests/upstream-compat.test.mjs`
+ * 那条「逐代留痕，不借用更早下界」）——那是**证据台账**。engines 侧要解决的是另一个
+ * 问题：node-semver **不把预发布算进普通范围**，所以 `>=0.1.2-rc.1 <0.2.0-0` 这种写法
+ * 会把别的 tuple 上的预发布也放进来（实测 `0.1.3-alpha.2`、`0.1.6-alpha.1`、
+ * `0.1.7-alpha.1`、`0.2.2-alpha.2`、`0.1.5-rc.1/rc.2` 全判「支持」，而这几个我们一次都没跑过）。
+ * 逐代 `^id` 拼进 engines 同样不行：`^0.2.1-rc.2` 本身就吃下整个 0.2.1 tuple。
+ * 所以这里按 tuple 收口：**下界 = 该 tuple 里最早已验证的那一代，上界 = 下一个 patch 的 `-0`**。
+ *
+ * `-0` 这个上界是刻意的：按 semver §11，`X.Y.Z-0` 低于 `X.Y.Z` 的**任何**预发布，
+ * 于是 `<0.2.2-0` 既排除 `0.2.2`，也排除 `0.2.2-alpha.2`；而本仓库自带的
+ * `compareVersions` 就是按 §11 实现的，判定与内核的 `semver.satisfies(..., {includePrerelease:true})`
+ * 一致（实测对照见 `tests/support-surface.test.mjs`）。
+ *
+ * ## 这个写法明确做不到的一件事（别当它做到了）
+ *
+ * range 语法**表达不出「只认这几个已验证版本」**：`0.1.5-rc.1/rc.2` 与已验证的 `0.1.5-rc.3`
+ * 同 tuple，任何范围都会一起放行；同理各 tuple 的正式版也在范围内。要精确只能改成
+ * 逐版本 `\|\|` 列表，代价是每个新 rc 都得重发插件——那条路我们不走，并把代价写在这儿：
+ * **engines 是「同 tuple 内向后放行」，不是「白名单」。**
+ *
+ * 顺带一条真实效力边界（实测逐代 grep 门禁函数得出）：`engines.dsh` **单独决定**判定只在
+ * 0.2.1-rc.2 及以后；0.1.7-rc.1 ~ 0.2.0-rc.2 只看 peerDependencies，**不读 engines**；
+ * 0.1.2-rc.1 与 0.1.5-rc.3 两代根本没有门禁。所以收紧这一行并不等于全线生效——
+ * 另一半靠 peer 范围兜。
+ */
+export declare function enginesDshRange(): string;
 /** Session 读日志的最小结构（鸭子类型；两代公有面）。 */
 export interface SessionLogSurface {
     readonly header?: {
