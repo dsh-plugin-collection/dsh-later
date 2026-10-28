@@ -61,7 +61,7 @@ import {
   detectTimeZone,
 } from './time-utils.js';
 import { epochFromLocal } from './smart-window.js';
-import { readLogCursor, readOwnEvents } from './upstream-compat.js';
+import { readFoldInput, readLogCursor } from './upstream-compat.js';
 
 /** 单 session 用户任务上限（PRD：防滥用）。 */
 export const DEFAULT_MAX_SCHEDULES = 100;
@@ -433,7 +433,7 @@ const foldCache = new WeakMap<object, FoldCacheEntry>();
 
 /** fold 当前会话的完整用户调度状态（带缓存；调用方不得变更返回值）。
  *
- * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readOwnEvents /
+ * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readFoldInput /
  * readLogCursor）——新 rc 若再改名只动那一处。
  *
  * 判据为什么从「数组引用 + 长度」换成「游标 + sidecar 代数」：`ownEvents()` 在
@@ -461,11 +461,14 @@ export function foldUserState(session: Session): UserFoldState {
   ) {
     return cached.state;
   }
-  // 只有真要重算时才读全量日志：命中路径上一次分配都没有。
-  const events = readOwnEvents(session);
+  // 只有真要重算时才读日志：命中路径上一次分配都没有。
+  // 数组与前缀长度**成对**取自 readFoldInput——曾经这里是 `readOwnEvents()` 配
+  // `cursor.offset`，等于把继承前缀排除两次，fork 会话上要么抛错要么静默丢最早的
+  // 自有事件（见 upstream-compat.ts 的 readFoldInput 注释）。
+  const { events, inheritedEventCount } = readFoldInput(session);
   // number 形式进入 foldScheduleEvents：0.1.2 brandshape 校验接受 safe integer；
   // 0.1.1 直接收 number。
-  const folded = asLegacySchedules(foldScheduleEvents(events, cursor.offset as never));
+  const folded = asLegacySchedules(foldScheduleEvents(events, inheritedEventCount as never));
   // 所有权与投递形态：sidecar 为准（新写入），日志中的历史 OWNED 事件作底
   // （仅对已迁移的历史日志有效，见 #58：未迁移的旧日志会被宿主整份拒读）。
   const sessionId = session.header?.id;

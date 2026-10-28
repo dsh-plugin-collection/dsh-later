@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 // 先导入 helper：它在求值时就把 sidecar 指向一次性临时目录（见该文件的历史教训）。
 import { freshOwnershipDir, markOwnership } from './helpers/ownership-state.mjs';
 import { foldUserState, userScheduleCreate } from '../lib/user-tools.js';
+import { readFoldInput } from '../lib/upstream-compat.js';
 import { ownershipGeneration } from '../lib/ownership-store.js';
 
 let seqCounter = 0;
@@ -76,17 +77,11 @@ const fakeCtx = { sessions: { flush: async () => true } };
 
 /** 建一条真实可 fold 的用户提醒，返回 session。
  *
- * fork 场景下补几条自有 filler 事件，让自有段长度 ≥ `inheritedEventCount`——否则
- * 上游 `foldScheduleEvents` 会直接抛（见本文件末尾那条 skip 的用例，那是一个**独立
- * 的既存缺陷**，与本文件要测的缓存判据无关，不该在这里把它顺带改掉）。
+ * fork 场景不再需要垫自有段：`readFoldInput` 之后传给 fold 的前缀长度是 0，
+ * 自有段长度与前缀长度不再互为约束（要垫的那种写法，本身就是在迁就双重排除的缺陷）。
  */
 async function sessionWithOneSchedule(forkOffset = 0) {
   const session = new ModernSession(forkOffset);
-  // 必须在 create **之前**垫：上游 fold 的校验是 offset > events.length 才抛，
-  // 而 create 路径内部要先 fold 一次拿配额。
-  for (let i = session.log.length - forkOffset; i < forkOffset; i += 1) {
-    session.append('session/meta', { note: 'pad own segment' });
-  }
   const result = await userScheduleCreate(atInput, { id: 'a', session, ctx: {} }, fakeCtx);
   assert.ok(result.ok, `create 应成功：${JSON.stringify(result)}`);
   return { session, created: result };
@@ -183,15 +178,40 @@ test('不同 Session 实例各自独立缓存（键是会话不是全局）', as
  *  - 自有段长度 ≥ 前缀长度时：静默跳过前 `inheritedEventCount` 条**自有**事件，
  *    于是 fork 会话里最早那几条用户提醒既不出现也不触发。
  *
- * 下面这条用「忠实复刻内核行为的 fork 会话」把它钉成可运行的复现：期望是 create 成功、
- * 折叠能看到 1 条 active；现状是 create 直接失败。修的时候正确做法在兼容层——
- * 读的是自有段就传 0，读的是含前缀的整表（0.1.1 那代的 `.events`）才传前缀长度，
- * 两者必须成对决定，别让调用方各查一次。
+ * 下面三条是这个缺陷的看守（缺陷本身已由 `readFoldInput` 修掉：读自有段就传 0，
+ * 读含前缀的整表才传前缀长度，两者成对决定，调用方不再自己拼）。
  */
-test.skip('fork 会话上 fold 双重排除前缀：create 直接失败（待单独决策的既存缺陷）', async () => {
+
+test('fork 会话：自有段短于继承前缀也必须能建提醒（旧实现当场抛）', async () => {
   const session = new ModernSession(5);
   const result = await userScheduleCreate(atInput, { id: 'a', session, ctx: {} }, fakeCtx);
 
   assert.ok(result.ok, `fork 会话应能建提醒，实际：${JSON.stringify(result)}`);
-  assert.equal(foldUserState(session).folded.active.length, 1);
+  assert.equal(foldUserState(session).folded.active.length, 1, 'fork 会话上 fold 看不见自有提醒');
+});
+
+test('fork 会话：自有段长于继承前缀时，最早那几条不能被静默切掉', async () => {
+  // 这条专门盯「静默」那一半：先把提醒建成自有段的**第 1 条**事件，再把自有段垫到
+  // 长于前缀——旧实现此时不会抛，而是 `slice(offset)` 把最早的几条直接丢掉。
+  const session = new ModernSession(3);
+  const result = await userScheduleCreate(atInput, { id: 'a', session, ctx: {} }, fakeCtx);
+  assert.ok(result.ok, String(JSON.stringify(result)));
+  for (let i = 0; i < 4; i += 1) session.append('session/meta', { note: 'pad own segment' });
+
+  const folded = foldUserState(session);
+  assert.equal(folded.folded.active.length, 1, '最早的自有提醒被静默跳过');
+  assert.ok(folded.owned.has(result.id), '所有权也没跟上');
+});
+
+test('兼容层：数组与前缀长度成对决定（ownEvents→0，.events 整表→前缀长度）', async () => {
+  const modern = new ModernSession(4);
+  const paired = readFoldInput(modern);
+  assert.equal(paired.inheritedEventCount, 0, '自有段必须配 0，否则前缀被排除两次');
+  assert.equal(paired.events.length, 0, '现代形状只拿到自有段');
+
+  // 旧代 `.events` 含 seed 全长：这时前缀长度**才**该交给 fold 去切。
+  const legacy = { header: { id: 'session-legacy-1', seedLength: 3 }, events: Array.from({ length: 6 }, (unused, index) => ({ type: 'session/meta', seq: index, time: 0, data: {} })) };
+  const legacyPair = readFoldInput(legacy);
+  assert.equal(legacyPair.inheritedEventCount, 3, '含前缀的整表必须把前缀长度传下去');
+  assert.equal(legacyPair.events.length, 6);
 });
