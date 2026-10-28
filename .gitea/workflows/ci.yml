@@ -22,8 +22,8 @@ jobs:
         # 与本地旧 `&&` 是同一个失明（issue #96）。脚本逐项目跑完再汇总退出码。
         run: node scripts/typecheck-all.mjs
       - name: 构建（测试跑在刚从 src 产出的 lib/ 上）
-        # 为什么必须有这一步：lib/ 是**纳入版本管理的构建产物**，而 tests/ 下 56 个测试文件里
-        # 有 32 个直接 `import '../lib/...'`（`grep -l "'\.\./lib/" tests/*.test.mjs | wc -l`）。
+        # 为什么必须有这一步：lib/ 是**纳入版本管理的构建产物**，而 tests/ 里一大批文件直接
+        # `import '../lib/...'`（现算：`grep -l "'\.\./lib/" tests/*.test.mjs | wc -l`）。
         # 缺了 build，CI 测的就是上一次提交里那份 lib/：改了 src/ 忘了重编也照样全绿，
         # 门禁验的是与本次 diff 无关的旧产物。本地 `npm test` 同构，所以这条也不只是 CI 的规矩。
         # 为什么不是「把测试改成 import src」：测试要盯的是最终交付形态（lib/ 才是发布物），
@@ -43,4 +43,10 @@ jobs:
         # 就是刚编出来的 lib/。要留字节门禁，只能显式可选（另开 script），前提是先证明产物字节稳定。
         run: npm run build
       - name: 测试
+        # `npm test` = node scripts/run-tests.mjs：自己把 tests/*.test.mjs 展开成**显式文件列表**
+        # 再交给 node --test，因为展开交给 node 就得不到判空：实测
+        # `node --test "tests/NOPE-*.test.mjs"` 打 `# tests 0 / # pass 0` 并以 **0** 退出，
+        # 于是一个打错的 pattern 在 CI 上就是一条绿色空测试步骤。
+        # 脚本的三条判定：零匹配即红（不起 node --test）、解析不到 pass 数或 pass 为 0 即红、
+        # 其余原样传播 node --test 的退出码。判据与用例见 tests/run-tests-gate.test.mjs。
         run: npm test

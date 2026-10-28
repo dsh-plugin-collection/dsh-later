@@ -51,7 +51,7 @@
     "build": "node build.mjs",
     "deploy": "node build.mjs --deploy",
     "typecheck": "node scripts/typecheck-all.mjs",
-    "test": "node --test \"tests/*.test.mjs\"",
+    "test": "node scripts/run-tests.mjs",
     "prepublishOnly": "npm run build",
     "watch": "node watch.mjs",
     "verify:kernels": "node scripts/verify-across-kernels.mjs",
