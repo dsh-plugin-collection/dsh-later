@@ -472,18 +472,24 @@ test('HOST_DOM 搬家后语义不变：aria-expanded 的工作区行仍被排除
   }
 });
 
-test('特征化断言（已记录盲区）：只命中工作区行时按现判据不告警', async () => {
+test('真漂移形态：只命中工作区行（排除后可标注行为 0）必须告警', async () => {
   const h = await mountPresenceHarness({ schedulesInStore: 1 });
   try {
-    // 判据是「treeitem 查询命中 0 行」，取的是**过滤前**的行数：工作区行也算命中。
-    // 于是「会话行丢了 draggable、工作区行还在」这一类漂移不会告警——本测把该
-    // 取舍固定下来，避免后来者以为是漏写。收紧成「过滤后再判」需同步改这里。
+    /**
+     * 这条对应 2026-10-28 真 GUI 矩阵抓到的实际失效：宿主从 0.1.7 起把会话行的
+     * `draggable` 改成 false，于是 `[role="treeitem"][draggable="true"]` 只剩工作区行命中
+     * （实测 selectorRows=11 / badgeable=0）。旧判据取**排除前**的命中数，11>0 就判定
+     * "探测正常"并复位告警标志，四代零告警。
+     *
+     * 本测原先是特征化断言，钉的正是"不告警"这个盲区——它的注释自己写着
+     * 「收紧成『过滤后再判』需同步改这里」。现在按那句改掉。
+     */
     const workspaceRow = makeRow(h.El, 'session-reminded-0', { workspace: true });
     h.doc.body.append(workspaceRow);
 
     await h.settle();
     await h.rescan();
-    assert.equal(h.warnings.length, 0, '命中 ≥1 行（含工作区行）时现判据不告警');
+    assert.equal(h.warnings.length, 1, '排除后可标注行为 0 却仍不告警 —— 判据又退回排除前了');
     assert.equal(workspaceRow.querySelector('.ss-presence'), null, '工作区行仍然绝不注入');
   } finally {
     h.dispose();

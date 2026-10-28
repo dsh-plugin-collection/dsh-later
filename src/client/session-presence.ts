@@ -309,16 +309,24 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     const dict = dictForNow();
     const now = Date.now();
     const rows = Array.from(document.querySelectorAll<HTMLElement>(HOST_DOM.sessionRow));
+    /**
+     * 排除工作区行之后、真正能挂 badge 的行数。
+     *
+     * ⚠️ 漂移判据必须看这个数，**不能看排除前的 `rows.length`**。上一版写的是
+     * `if (rows.length > 0) 复位`，注释还写着「命中过行 = 结构探测仍然对得上」——
+     * 而真漂移的形态恰恰是「还命中一堆（工作区行），排除后一个不剩」。实测后果：
+     * badge 自 0.1.7 起在 4 个代次整块不出现，这条自检一条都没告，等于它最该说话的时候
+     * 沉默。判据错位比没有判据更糟，因为它提供虚假的安全感。
+     */
+    const badgeable = rows.filter((row) => !row.hasAttribute(HOST_DOM.workspaceRowAttr));
     // 漂移自检（fail-open，唯一副作用是一条 console.warn，见 reportSidebarDrift）。
-    if (rows.length > 0) {
-      // 命中过行 = 结构探测仍然对得上：复位，让下一轮漂移还能告出来。
+    if (badgeable.length > 0) {
+      // 确实有行可标注 = 结构探测仍然对得上：复位，让下一轮漂移还能告出来。
       sidebarDriftWarned = false;
     } else if (index.size > 0) {
       reportSidebarDrift(index.size);
     }
-    for (const row of rows) {
-      // 工作区行带 aria-expanded；会话行没有。探测失败安静跳过。
-      if (row.hasAttribute(HOST_DOM.workspaceRowAttr)) continue;
+    for (const row of badgeable) {
       applyBadge(row, now, dict);
     }
     // 悬浮卡片只有在弹出时才存在于 DOM；未弹出时是零开销的空查询。
