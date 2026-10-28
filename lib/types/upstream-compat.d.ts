@@ -35,9 +35,17 @@ export declare const KERNEL_GENERATIONS: readonly [{
      * 所以**符号判据区分不了这两代**，只能读版本号（issue #75）。
      *
      * 为什么 id 是 rc.3：`@deepseek-ai/dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，
-     * 按默认安装会把整条插件线解析到 **rc.3**；而 rc.1 的启动器 + rc.3 的插件混装**装不起来**
-     * （实测 `verify-across-kernels --steps mount` 报多个 dsh-* 插件 load 失败，与本插件无关）。
-     * 也就是说这一代用户实际拿到的是**统一的 rc.3**，能验证的形态也只有它。
+     * 按默认安装会把整条插件线解析到 **rc.3**（实测 lockfile 里 238 个 `@deepseek-ai/dsh*`
+     * 有 237 个不是 rc.1）——也就是说这一代用户实际拿到的是**统一的 rc.3**，能验证的形态也只有它。
+     *
+     * ⚠️ 早先这里写的是「rc.1 启动器 + rc.3 组件混装**装不起来**」，那是**误判**，别再照着它做
+     * 决定。逐插件补全 peer 后同一棵树能 mount（投递 spliced=1 / dispatch=Y / at 5/5）。当时的
+     * RED 来自 `scripts/verify-across-kernels.mjs` 自己的两个装配口径：① 写死顶层
+     * `dsh-app-boot` 路径，而纯 rc.1 安装会把它嵌到 `dsh/node_modules` 下；② 用
+     * `--legacy-peer-deps` 跳过 peer，而 `ensureBootPeers` 只补 app-boot 一棵线——
+     * `dsh-session-persistence-jsonl` 是靠 **peer** 拿 `dsh-session-persistence` 的，于是报
+     * `Cannot find package`。这两个洞应当修在脚本里；在此之前，脚本对 rc.1 的 RED **不构成**
+     * 「该代不支持」的证据。
      *
      * 该代还有一处 schemastery 差异：`s.object(...).volatile()` 在它装的 **3.18.2** 上不存在
      * （整条插件加载失败，`…volatile is not a function`）—— 已在 `src/index.ts` 里做能力探测降级。
