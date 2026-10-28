@@ -31,14 +31,6 @@ export type DeliveryMode = 'followup' | 'steer';
  * 也不要静默当成成功。
  */
 export declare const DELIVERY_CONFIRM_TIMEOUT_MS = 2000;
-/**
- * 日志中是否出现该 message id。
- *
- * 判据是消息**真的进了会话日志**。这里刻意不进一步区分「进了 surface」与
- * 「进了实际请求」：`agent.followup` 路径下二者由核心保证一致（消息成为独立一轮
- * 的唯一条消息）；而 `steer` 路径的丢失发生在**插入后同毫秒被 claim 移除**，
- * 那种情况下连 `user/message` 都不会留下，本判据足以识别。
- */
 export declare function hasMessageInLog(session: Session, messageId: string): boolean;
 /** 等待投递被日志确认；超时返回 false。 */
 export declare function confirmDelivery(session: Session, messageId: string, timeoutMs?: number): Promise<boolean>;

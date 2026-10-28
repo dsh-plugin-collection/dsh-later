@@ -14,6 +14,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type z from '@deepseek-ai/schemastery';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import { name } from './domain.js';
 /** 插件配置 schema（0.1.5 的 schemastery 没有 `.volatile()`，见上面的降级说明）。 */
 export declare const Config: z;
@@ -51,6 +52,14 @@ export interface SchedulerSettings {
 export type UserScheduleSteerDelivery = 'followup' | 'steer';
 /** 投递未确认时的处理。 */
 export type UserScheduleOnUnconfirmed = 'keep' | 'discard';
+/**
+ * 为单个 root agent 注册 `user_schedule_*` 工具。
+ *
+ * 导出仅为可测性：注册半途失败必须拆掉已成注册，这条只能直接驱动本函数才验得到
+ * （走完整 `apply` 要假的 cordis 上下文全套，成本高到没人写，于是这条纪律历史上
+ * 从来没被测过——正是不测的原因）。宿主入口不消费它。
+ */
+export declare function registerUserScheduleTools(rootCtx: Context, toolCtx: Context, agent: Agent, getSettings: () => SchedulerSettings, getLocale: () => string | undefined, onUserChange: (agent: Agent) => boolean): () => void;
 export declare function apply(ctx: Context, config?: {
     maxSchedules?: number;
 }): void;
