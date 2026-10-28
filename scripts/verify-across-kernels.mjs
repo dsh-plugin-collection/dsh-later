@@ -207,8 +207,16 @@ function published(name, version) {
  *
  * 为什么光 pin 关键包不够：`dsh-base` 的补丁会加载一批 dsh-* 插件（本机实测 0.1.5 树里
  * `dsh-session-persistence-jsonl` / `dsh-jobs-local` 等被 caret 带到了 **0.1.5-rc.3**），
- * 于是 rc.1 的启动器 + rc.3 的插件混装，装配直接报 "plugin(s) failed to load" ——
- * 又是 #97 #1 那条"请求的代次 ≠ 装出来的代次"，只是这次发生在传递依赖上。
+ * 于是 rc.1 的启动器 + rc.3 的插件混装——这是 #97 #1 那条"请求的代次 ≠ 装出来的代次"发生在
+ * 传递依赖上。
+ *
+ * ⚠️ 但别把 "plugin(s) failed to load" 归因给这种混装本身。实测：混装树在**补齐 peer** 之后能
+ * mount 成功（0.1.5-rc.1 GREEN，投递 spliced=1 / dispatch=Y / at 5/5）。当时的 RED 有两个是
+ * 本脚本自己造成的根因——① 写死顶层 `dsh-app-boot` 路径，而纯 rc.1 安装会把它嵌到
+ * `dsh/node_modules` 下（`Cannot find module …/app-boot/lib/index.js`）；② `--legacy-peer-deps`
+ * 跳过 peer，而 `ensureBootPeers` 只补 app-boot 一棵线，`dsh-session-persistence-jsonl` 恰是
+ * 靠 **peer** 拿 `dsh-session-persistence`（`Cannot find package`）。这两处该修在脚本里；
+ * 在修好之前，本脚本对 rc.1 的 RED **不构成**「该代不支持」的证据，别照它下调支持范围。
  *
  * 只处理 `@deepseek-ai/dsh*`：`cordis` / `cordis-plugin-*` / `schemastery` 各有自己的次版本线，
  * 跟着内核版本改会把树改坏（实测 ERR_PNPM_NO_MATCHING_VERSION 那一类）。
