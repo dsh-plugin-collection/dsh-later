@@ -1,6 +1,7 @@
 /**
  * 构建脚本：
  *  1. tsc 编译 host 端（src/ → lib/，tsconfig.json 已排除 src/client）
+ * 1b. client 端 tsc --noEmit（不过就中止构建，见下方注释；`npm publish` 也走这里）
  *  2. esbuild 打包 client 端单文件并包进 __ModuleLoader__.load 模板
  *  3. 把 shared 目录（smart-window/time-utils）同步进 lib/shared，供 host 引用
  *
@@ -14,6 +15,7 @@ import {
   FALLBACK_REFUSED_NOTICE,
   FALLBACK_ALLOWED_NOTICE,
 } from './scripts/build-fallback-policy.mjs';
+import { runTypecheck } from './scripts/typecheck-all.mjs';
 
 // 1. host 端：tsc（**默认失败即中止**，issue #56）
 //    `--noEmitOnError` 是关键：tsc 默认即使有类型错误也会照常 emit，那样「非零
@@ -53,13 +55,40 @@ try {
 }
 
 // 1b. client 端类型检查（noEmit；避免类型错误溜进浏览器产物）
-//     这里**不套**兜底闸门：client 产物无论类型检查通过与否都是同一个 esbuild
-//     bundle，不存在 #56 那种「逐文件 tsc → 单文件 bundle」的形态漂移。
-try {
-  execSync('npx tsc -p tsconfig.client.json --noEmit', { stdio: 'inherit' });
-} catch (error) {
-  console.warn('⚠️ client tsc 遇到依赖类型差异，继续用 esbuild 构建…');
+//     **非零退出即中止构建**。原先这里 catch 掉非零退出不外抛，只打一行 ⚠️，然后照常产出
+//     lib/client.js，而 `prepublishOnly` = `npm run build`：类型错误换一行警告就能带着它发布。
+//     比 host 侧 #56 更隐蔽，因为那行是 ⚠️ 而非 ❌，构建末尾还会打 ✅。
+//
+//     这里**仍然不套** #56 的兜底闸门，理由原样成立：client 产物无论类型检查通过与否都是
+//     同一个 esbuild bundle，不存在「逐文件 tsc → 单文件 bundle」的形态漂移。不兜底在这里的
+//     含义就是：失败直接退出，不降到更弱的检查、也不「跳过一个项目继续」。
+//
+//     复用 scripts/typecheck-all.mjs 的 runTypecheck，而不是再写一遍 `npx tsc`：
+//     「什么算红」只能有一处定义（#96 的教训），而且它已经解决了「仓库自带 tsc 优先、PATH
+//     兜底」与 `--pretty false` 计数。跨代次依赖类型差异走 `npm run verify:kernels`
+//     （它 import 同一个 runTypecheck 并按 kernel 版本汇总），不该由 build 放宽标准。
+//
+//     退出码沿用 typecheck-all 的约定：2 = 找不到 tsc（环境/依赖问题），1 = 类型回归。
+const clientCheck = runTypecheck({ projects: ['tsconfig.client.json'] });
+if (clientCheck.tsc === undefined) {
+  console.error('❌ client 类型检查没跑：找不到 tsc（仓库未装 typescript，PATH 上也没有）。');
+  console.error('   这是依赖/环境问题，不是类型错误：先 `pnpm install`。跳过检查就是一条空转的门禁。');
+  process.exit(2);
 }
+if (clientCheck.missing.length > 0) {
+  console.error(`❌ client 类型检查没跑：${clientCheck.missing.join('、')} 不存在。`);
+  console.error('   esbuild 不读 tsconfig 的类型结论，仍会产出 lib/client.js。门禁失明比红更贵。');
+  process.exit(1);
+}
+if (!clientCheck.ok) {
+  const [item] = clientCheck.projects;
+  console.error(`❌ client tsc 失败：${item.errors} 条错误，退出码 ${item.status}。构建中止。`);
+  console.error('   不再「warn 后继续」：lib/client.js 这一步不会被写出。');
+  console.error('   注意 host 产物（lib/）已由上一步 tsc 写出，本次构建只到 client 检查为止。');
+  process.stdout.write(item.output);
+  process.exit(1);
+}
+console.log('✓ client 类型检查通过（tsconfig.client.json, tsc --noEmit）');
 
 // 2. client 端：esbuild 打包（type-only imports 剥离；react 从宿主运行时解析）
 const result = await build({
