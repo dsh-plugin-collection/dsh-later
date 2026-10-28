@@ -194,7 +194,7 @@ export interface FoldedUserSchedules {
 }
 /** fold 当前会话的完整用户调度状态（带缓存；调用方不得变更返回值）。
  *
- * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readOwnEvents /
+ * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readFoldInput /
  * readLogCursor）——新 rc 若再改名只动那一处。
  *
  * 判据为什么从「数组引用 + 长度」换成「游标 + sidecar 代数」：`ownEvents()` 在
