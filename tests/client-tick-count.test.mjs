@@ -26,7 +26,7 @@
  * 运行时由宿主提供）。
  *
  * 两件配套做法：
- *  - **不读 `lib/client.js`**，改用仓库自带的 esbuild 以 `build-client.mjs` 的同一组选项在
+ *  - **不读 `lib/client.js`**，改用仓库自带的 esbuild 以 `build.mjs` 第 2 步（client bundle）的同一组选项在
  *    内存里打一份 bundle（`write:false`，不落盘）。理由：读 `lib/` 的测试拿到的是**上次构建
  *    的产物**，一旦有人改了 `src/` 而没人重建 lib，守护会安静地测旧代码——比「测不到」更糟的
  *    假绿。内存构建保证测的永远是当前 src，也不污染 `lib/`（本测全程不写盘）。
