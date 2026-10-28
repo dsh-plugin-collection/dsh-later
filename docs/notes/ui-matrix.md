@@ -154,3 +154,42 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
 `loading→ready` 翻转路径（真 GUI 首帧即 ready）；悬浮卡片（hover card）的状态行增补；dock 进度条
 CSS 动画相位与暂停/恢复的视觉冻结；插话投递的命令往返结果；`prefers-reduced-motion`、焦点管理、
 键盘导航；en locale；侧栏收起 / 多工作区折叠等布局分支。
+
+## 8. §7.1 两条缺陷的修复与复验（同日，`fix/badge-drift-detection`）
+
+两条分开修，顺序是刻意的：**先让探测器能说话，再修被探测的东西**。反过来的话，选择器一改
+探测器就永远沉默，等于把这次的教训原样留给下一个人。
+
+| 提交 | 改动 |
+|---|---|
+| `5e4c20b` | 漂移判据从「选择器命中数」改成「**排除工作区行后**可标注行数」 |
+| `329289a` | 行选择器去掉 `draggable="true"` 假设（被 0.1.7 证伪的那一个），只押 `aria-expanded` |
+| `5485ce7` | 采集件补上 §7.2 两个缺口：console **warning** 进结论；badge 进判据；HTML / manifest / 退出码统一走同一份 `rowVerdict` |
+
+复验用真 GUI，跑三代而不是只跑红的那两代——`0.1.2-rc.1` 原本是**好的**，放宽选择器必须证明
+没把它弄坏：
+
+```
+0.1.2-rc.1   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.1.7-rc.1   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+0.2.1-rc.2   按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0   matched=12 badgeable=1
+汇总：通过 3 / 不通过 0（exit 0）
+```
+
+对照 §7.1 修复前在 0.1.7 系上量到的 `selectorRows=11 / badgeable=0 / badges=0`：`matched`
+从 11 变 12（会话行重新进入候选集）、`badgeable` 从 0 变 1、badge 实际注入 1 个。
+`driftWarns` 为空是**正确**结果——判据现在只在「有提醒且可标注行为 0」时说话，这次是
+「有提醒且有可标注行」。
+
+证据：`docs/media/ui-matrix-2026-10-28-realgui/*-PASS-badge-after-fix-real-gui.png`（三代各一张
+真 GUI 帧，`0.1.7-rc.1` 那张能直接看到会话行「新会话」上的时钟 badge）与
+`matrix-after-fix.json`。修复前的失败帧仍在同目录（`*-FAIL-badge-missing-real-gui.png`），
+通过/失败成对保留。
+
+`HTTP 401` 是正常输出不是故障：`instance.mjs:192-200` 把 200/401 都算「服务已起」，鉴权 token
+走 URL 查询参数；若真是 401 页，`matched`/`dock`/`badge` 不可能有值。
+
+### 8.1 仍未判定
+0.1.5-rc.3 / 0.1.7-rc.2 / 0.2.0-rc.2 本轮没复跑（修复前红的那两代里 0.1.7-rc.1 已复验，
+同族代次同一形状）；0.2.1-rc.3 / rc.4 仍未进 UI 矩阵（不在 `KERNEL_GENERATIONS`）；§7.5 列的
+其余界面分支不变。
