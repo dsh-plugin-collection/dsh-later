@@ -94,8 +94,19 @@ const FIBER_MAX_DEPTH = 8;
  * 漂移告警兜住——会话行那一条至少有信号，其余各条仍会静默降级。
  */
 const HOST_DOM = Object.freeze({
-  /** 会话行 + 工作区行共同命中的选择器（实测：ui-workspace 的会话行树节点）。 */
-  sessionRow: '[role="treeitem"][draggable="true"]',
+  /**
+   * 侧栏树里的行：会话行与工作区行都会命中，靠下面的 `workspaceRowAttr` 区分。
+   *
+   * ⚠️ 这里原来还要求 `[draggable="true"]`，**那个假设已经被实测证伪**：0.1.7 起宿主把
+   * 会话行改成 `draggable="false"`，于是只剩工作区行命中、再被排除规则剔干净，badge 在
+   * 6 个受支持代次里的 4 个上整块不出现（2026-10-28 真 GUI 矩阵：selectorRows=11 /
+   * badgeable=0 / badges=0，而同轮 indexSize=1 说明数据面根本没漂——纯 DOM 假设过期）。
+   *
+   * 现在只押**一个**假设：`aria-expanded` 区分会话行与工作区行，它在全部 6 代都成立。
+   * 被删掉的 `draggable` 正是断掉的那一个。放宽后可能误命中的其它 treeitem 由
+   * `sessionIdOfRow` 的 fiber 反查自然过滤——拿不到会话 id 就不标注，宁可不标也不误标。
+   */
+  sessionRow: '[role="treeitem"]',
   /**
    * 工作区行带这个属性、会话行不带：用它把工作区行排除掉。
    * ⚠️ 这是**排除**规则，命中即 `continue`，不是筛选条件。
@@ -124,13 +135,14 @@ const STATE_TICK_MS = 30_000;
 let sidebarDriftWarned = false;
 
 /**
- * 侧栏会话行选择器零命中 → 宿主 DOM 漂移告警（每轮漂移只报一次）。
+ * 有提醒却一行都不能标注 → 宿主 DOM 漂移告警（每轮漂移只报一次）。
  *
  * **判据**（两个条件同时成立才报）：
  * 1. `remindedSessions > 0`——摘要索引里确实有带定时提醒的会话，排除「用户就是没有提醒」
  *    这一最常见也最无害的解释；
- * 2. 本次 `HOST_DOM.sessionRow` 命中 **0 行**——不是某些行没映射到会话
- *    （那会命中 ≥1 行、只是 badge 少几个），而是一个可标注的行都找不到。
+ * 2. **排除工作区行之后**可标注行为 0。注意是"排除后"，不是"选择器命中 0"：
+ *    2026-10-28 那次真漂移就是选择器命中 11 行（全是工作区行）、排除后 0 行，
+ *    用"命中 0 行"当判据正好错过它。
  *
  * 两者同时成立几乎只有一种解释：宿主侧栏改版，badge 整块静默消失。这正是本模块
  * 「探测不到就安静跳过」策略唯一的盲区（其余降级仍静默，见 HOST_DOM 块说明）。
@@ -138,30 +150,33 @@ let sidebarDriftWarned = false;
  * **只报一次**：扫描由 60ms 去抖的 MutationObserver 驱动，逐次刷屏会打死控制台，
  * 也会把真问题淹在噪音里（同 `group-status-facet` / `schedule-compat` 的克制法）。
  *
- * **恢复条件**：后续任意一次扫描命中 ≥1 行即把标志置回 false。于是
+ * **恢复条件**：后续任意一次扫描有 ≥1 行可标注即把标志置回 false。于是
  * 「漂移 → 告警 → 修好（或宿主自己回来了） → 再次漂移」这条链上每一轮漂移各告警
  * 一次，而不是整个页面生命周期只告警一次——后者会让第二次改版重新变成静默失效。
  *
- * **已知代价**：侧栏尚未挂载（首屏极早期、侧栏收起）同样命中「有提醒 + 0 行」，
+ * **已知代价**：侧栏尚未挂载（首屏极早期、侧栏收起）同样命中「有提醒 + 可标注 0 行」，
  * 此时会多出一条告警。刻意不加「树容器必须存在」这类额外前置条件：加了就会稀释上面
  * 那条判据、把真漂移也一起吞掉。权衡后接受——它一次只多一行、文案点名的是具体
- * 选择器而不是泛泛的 failed，而 badge 缺失本就是用户需要知道的降级。
+ * 选择器与两个计数，而 badge 缺失本就是用户需要知道的降级。
  *
  * **fail-open**：整段包在 try/catch 里（控制台可能被 stub 或抛错），告警失败绝不影响
  * badge 渲染路径；调用点也在渲染循环之外，不改变任何探测语义。
  *
  * @param remindedSessions - 本次摘要索引的条目数（`index.size`）。
+ * @param matched - 选择器命中的行数（排除前）。
+ * @param badgeable - 排除工作区行后可标注的行数。
  */
-function reportSidebarDrift(remindedSessions: number): void {
+function reportSidebarDrift(remindedSessions: number, matched: number, badgeable: number): void {
   if (sidebarDriftWarned) return;
   sidebarDriftWarned = true;
   try {
     console.warn(
-      `dsh-later: 侧栏 badge 未注入——会话行选择器 \`${HOST_DOM.sessionRow}\` 命中 0 行，`
+      `dsh-later: 侧栏 badge 未注入——选择器 \`${HOST_DOM.sessionRow}\` 命中 ${matched} 行，`
+        + `但排除带 \`${HOST_DOM.workspaceRowAttr}\` 的工作区行后**可标注 0 行**（badgeable=${badgeable}），`
         + `而摘要里有 ${remindedSessions} 个带定时提醒的会话。这不是「用户没有提醒」，`
         + '而是本模块的结构探测对不上宿主 DOM（宿主侧栏很可能已改版）。'
-        + `排查只看 src/client/session-presence.ts 顶部的 HOST_DOM 耦合块：重新确认行选择器与 ${HOST_DOM.workspaceRowAttr} 排除规则。`
-        + '（本轮漂移只提示一次；一旦重新命中行即复位，下次改版会再提示。）',
+        + `排查只看 src/client/session-presence.ts 顶部的 HOST_DOM 耦合块：逐条核对行选择器与 ${HOST_DOM.workspaceRowAttr} 排除规则。`
+        + '（本轮漂移只提示一次；一旦重新有可标注行即复位，下次改版会再提示。）',
     );
   } catch {
     /* 告警出口本身失败不影响渲染；标志保持已置位，不会因此刷屏 */
@@ -324,7 +339,7 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
       // 确实有行可标注 = 结构探测仍然对得上：复位，让下一轮漂移还能告出来。
       sidebarDriftWarned = false;
     } else if (index.size > 0) {
-      reportSidebarDrift(index.size);
+      reportSidebarDrift(index.size, rows.length, badgeable.length);
     }
     for (const row of badgeable) {
       applyBadge(row, now, dict);

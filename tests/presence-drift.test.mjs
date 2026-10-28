@@ -229,7 +229,12 @@ function installHtmlElementGlobal(El) {
 function makeRow(El, sessionId, opts = {}) {
   const row = new El('div');
   row.setAttribute('role', 'treeitem');
-  row.setAttribute('draggable', 'true');
+  /**
+   * `draggable` 默认 true（0.1.2/0.1.5 的会话行形状）；传 false 复刻 **0.1.7 起**的会话行——
+   * 宿主在那一代把会话行改成 `draggable="false"`，正是这次 badge 四代不出现的根因。
+   * 留着这个开关，是为了让"选择器再押 draggable"这类退步能被测出来。
+   */
+  row.setAttribute('draggable', opts.draggable === false ? 'false' : 'true');
   if (opts.workspace === true) row.setAttribute('aria-expanded', 'false');
   const slot = new El('span');
   row.append(slot);
@@ -393,8 +398,9 @@ test('漂移判据：有提醒 + 会话行命中 0 行 → 告警一次，且不
     assert.equal(h.warnings.length, 1, '有提醒却一个会话行都没命中，必须告警一次');
     const text = h.warnings.join('\n');
     // 措辞要能指向根因：点名选择器 + 「宿主 DOM 可能已变」，而不是泛泛的 failed。
-    assert.match(text, /\[role="treeitem"\]\[draggable="true"\]/, '告警应带出行选择器，便于直接核对');
-    assert.match(text, /命中 0 行/, '告警应说明命中 0 行这一观测');
+    assert.match(text, /\[role="treeitem"\]/, '告警应带出行选择器，便于直接核对');
+    assert.match(text, /可标注 0 行/, '告警要说清是"排除后可标注 0 行"，而非只报命中数');
+    assert.match(text, /badgeable=0/, '告警应带上两个计数，便于区分"没命中"与"命中了但全被排除"');
     assert.match(text, /宿主/, '告警应把根因指向宿主 DOM');
     // 判据的可读性关键：告警必须明说「不是用户侧没提醒」，并给出排查落点。
     assert.match(text, /排查/, '告警应给出排查落点');
@@ -491,6 +497,39 @@ test('真漂移形态：只命中工作区行（排除后可标注行为 0）必
     await h.rescan();
     assert.equal(h.warnings.length, 1, '排除后可标注行为 0 却仍不告警 —— 判据又退回排除前了');
     assert.equal(workspaceRow.querySelector('.ss-presence'), null, '工作区行仍然绝不注入');
+  } finally {
+    h.dispose();
+  }
+});
+
+test('0.1.7 起的真实行形状（会话行 draggable=false）：badge 必须挂上且不告警', async () => {
+  const h = await mountPresenceHarness({ schedulesInStore: 1 });
+  try {
+    /**
+     * 复刻 2026-10-28 真 GUI 矩阵在 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-rc.2
+     * 上量到的形状：11 个工作区行（带 aria-expanded）+ 会话行 `draggable="false"`。
+     * 旧选择器 `[role="treeitem"][draggable="true"]` 在这种 DOM 下只剩工作区行命中，
+     * 排除后可标注 0 行 → badge 全代不出现。
+     */
+    for (let i = 0; i < 11; i += 1) {
+      h.doc.body.append(makeRow(h.El, `session-ws-${i}`, { workspace: true }));
+    }
+    const sessionRow = makeRow(h.El, 'session-reminded-0', { draggable: false });
+    h.doc.body.append(sessionRow);
+
+    await h.settle();
+    await h.rescan();
+
+    assert.ok(
+      sessionRow.querySelector('.ss-presence') !== null,
+      '会话行 draggable=false 时 badge 必须仍然挂上（选择器不许再押 draggable）',
+    );
+    assert.equal(h.warnings.length, 0, '有可标注行时不该报漂移');
+    // 工作区行仍然绝不注入——放宽选择器不能把误标换来可见性。
+    const wsInjected = [...h.doc.body.querySelectorAll('.ss-presence')].filter(
+      (node) => node.parentElement?.parentElement?.hasAttribute('aria-expanded'),
+    );
+    assert.equal(wsInjected.length, 0, 'badge 不得出现在工作区行上');
   } finally {
     h.dispose();
   }
