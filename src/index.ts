@@ -262,8 +262,14 @@ function renderText(_args: unknown, value: string): { type: 'text'; text: string
   return [{ type: 'text', text: value }];
 }
 
-/** 为单个 root agent 注册 `user_schedule_*` 工具。 */
-function registerUserScheduleTools(
+/**
+ * 为单个 root agent 注册 `user_schedule_*` 工具。
+ *
+ * 导出仅为可测性：注册半途失败必须拆掉已成注册，这条只能直接驱动本函数才验得到
+ * （走完整 `apply` 要假的 cordis 上下文全套，成本高到没人写，于是这条纪律历史上
+ * 从来没被测过——正是不测的原因）。宿主入口不消费它。
+ */
+export function registerUserScheduleTools(
   rootCtx: Context,
   toolCtx: Context,
   agent: Agent,
@@ -271,7 +277,38 @@ function registerUserScheduleTools(
   getLocale: () => string | undefined,
   onUserChange: (agent: Agent) => boolean,
 ): () => void {
-  const dispose = () => undefined;
+  /**
+   * 已成功注册的工具撤销句柄。
+   *
+   * 为什么要有这个队列：`tools.register` 的返回是「拆掉这一个」的 disposer，而注册
+   * 副作用**先于**返回值生效。原先写成数组字面量
+   * `const disposers = [register(A), register(B), register(C)]`，三个 register 会在
+   * 字面量求值时**全部执行完**才绑定给 `disposers`——于是第 2 个抛错时第 1 个已经进了
+   * 宿主注册表，却没有任何句柄能拆它。catch 里原先调的 `dispose` 又是个
+   * `() => undefined` 占位，等于什么都不做，然后把错误重抛出去。后果是之后每次
+   * attach 都撞 `already registered`，该会话永久拿不到 runtime（正是
+   * `runtime-registry.ts` 模块头警告的那类事故）。
+   *
+   * 现在改成登记「待注册的工厂」再逐个执行、逐个入账，半途失败可拆干净。
+   */
+  const disposers: Array<() => void> = [];
+
+  /** 倒序撤销已成注册；可重复调用，第二次起是空操作。 */
+  const unwind = (): void => {
+    for (const disposeOne of disposers.splice(0, disposers.length).reverse()) {
+      try {
+        disposeOne();
+      } catch {
+        /* 尽力而为：一个拆不掉不该阻断其余拆除，否则漏拆的比拆掉的更多 */
+      }
+    }
+  };
+
+  /** 逐个注册并即时登记句柄（不要在字面量里一次算完，理由见上）。 */
+  const registerAll = (entries: ReadonlyArray<() => () => void>): void => {
+    for (const entry of entries) disposers.push(entry());
+  };
+
   try {
     const t = hostDictFor(getLocale());
     const maxChars = resolveSchedulerPromptLimits(getSettings()).maxChars;
@@ -287,8 +324,8 @@ function registerUserScheduleTools(
         return false;
       }
     };
-    const disposers = [
-      toolCtx.tools.register(
+    registerAll([
+      () => toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_create',
           // description 在每次 register 时按当前 settings + locale 生成：
@@ -346,7 +383,7 @@ function registerUserScheduleTools(
           presentCall: (args) => present(t.presentCreate, 'other', (args as { prompt?: unknown })?.prompt),
         }),
       ),
-      toolCtx.tools.register(
+      () => toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_list',
           description: t.toolListDesc,
@@ -363,7 +400,7 @@ function registerUserScheduleTools(
           presentCall: () => present(t.presentList, 'read'),
         }),
       ),
-      toolCtx.tools.register(
+      () => toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_delete',
           description: t.toolDeleteDesc,
@@ -389,12 +426,10 @@ function registerUserScheduleTools(
           presentCall: (args) => present(t.presentDelete, 'other', (args as { id?: unknown })?.id),
         }),
       ),
-    ];
-    return () => {
-      for (const disposeOne of disposers.reverse()) disposeOne();
-    };
+    ]);
+    return unwind;
   } catch (error) {
-    dispose();
+    unwind();
     rootCtx.logger.warn(`later: user tools 注册失败: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
