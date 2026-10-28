@@ -232,15 +232,88 @@ export interface SchedulerSettingsCardProps {
  *  - 字段为「label 行（覆盖徽章 + 重置）→ 输入控件 → 提示」三段式；
  *  - 非法草稿阻塞保存；保存后清空草稿；写入失败保留草稿并报错。
  *
+ * 分成「外壳 + 表单主体」两层，唯一理由是 **hooks 必须在每次渲染里同序同数**。
+ * 旧实现把 `handleDiscard` / `handleSave` 两个 `useCallback` 写在
+ * `if (snapshot.status === 'unavailable') return <></>` **之后**：早退的那一帧只用 8 个
+ * 槽位，渲染出表单的那一帧用 10 个。只要快照在两帧之间从非 ready 推进到 ready——首帧读到
+ * `loading`、随后由订阅补上 `ready` 就是这条路径——React 就抛
+ * 「Rendered more hooks than during the previous render」。现在外壳只保留**所有早退之前**
+ * 的那几个 hook，表单状态整体搬进 {@link SchedulerSettingsForm}：内层自己没有任何
+ * 早退，它的 hook 集合与外壳走哪条分支再无关系，违规从结构上消失。
+ *
+ * 顺带记一笔（本提交**不动**）：卡片里的 `id` 全是静态串（`ss-show-settings`、
+ * `ss-section-${id}`、`ss-help-${key}`、`ss-gate-${key}`），不是 `useId()`。详情页与控制面
+ * 同时挂载时同名 id 会撞车，`htmlFor` / `aria-controls` 指到别的节点上。改它必然改 DOM，
+ * 需要 GUI 复核，留给单独的议题。
+ */
+export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCardProps): JSX.Element {
+  // 快照与「写入失败」标记归外壳，因为二者都由**订阅回调**驱动，而订阅在 `unavailable`
+  // （渲染空 fragment、根本没有子组件可挂）期间也必须继续挂着：命名空间后来变 ready 时，
+  // 卡片靠这条订阅补出来。`failed` 同属这条回调，留在它被清零的地方，语义与拆分前逐字相同。
+  const [snapshot, setSnapshot] = useState(() => scope.getSnapshot());
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const initial = scope.getSnapshot();
+    setSnapshot(initial);
+    // 原本这里还有 `setPending({})`：pending 已随表单搬进内层，由内层自己的 scope effect 清。
+    if (initial.status === 'ready') setFailed(false);
+  }, [scope]);
+
+  useEffect(() => {
+    return scope.subscribe(() => {
+      const snap = scope.getSnapshot();
+      setSnapshot(snap);
+      if (snap.status === 'ready') {
+        setFailed(false);
+      }
+    });
+  }, [scope]);
+
+  if (snapshot.status === 'unavailable') return <></>; // 命名空间未暴露时不显示卡片
+  if (snapshot.status !== 'ready') {
+    if (snapshot.status === 'loading') return <div className="ss-hint">{t('loading')}</div>;
+    return <div className="ss-hint">{t('unavailable')}</div>;
+  }
+  // 三条早退全部排在上面 4 个 hook 之后，且这里不再有 hook —— 外壳每次渲染恒用同样 4 个槽位。
+  return (
+    <SchedulerSettingsForm
+      scope={scope}
+      t={t}
+      surface={surface}
+      snapshot={snapshot}
+      failed={failed}
+      setFailed={setFailed}
+    />
+  );
+}
+
+/** {@link SchedulerSettingsForm} 的入参：外壳读到的快照 + 仍留在外壳的失败标记。 */
+interface SchedulerSettingsFormProps extends SchedulerSettingsCardProps {
+  snapshot: ScopeSnapshot<SchedulerSettings>;
+  /** 写入失败标记。由外壳持有（订阅回调负责清零），内层只读写它。 */
+  failed: boolean;
+  setFailed: (next: boolean) => void;
+}
+
+/**
+ * 设置卡主体，仅在外层读到 `status === 'ready'` 时挂载。
+ *
  * 状态模型：每个字段维护独立的 `pending` 中间态（待保存的 value + reset 意图）；
  * 保存时按字段批量写。`reset` 表示「点击了 reset 按钮但尚未保存」，实际写入
  * 由 save 统一调用 `unset` 完成。空串视为「回退默认」→ unset。
+ *
+ * 本组件内部**没有早退**：所有 hook 都在渲染主体前依次跑完，这正是拆分要换来的性质。
+ *
+ * 拆分唯一改变的东西是本组件的**挂载生命周期**：快照若从 ready 退回非 ready 再回到 ready，
+ * 这里会整体重挂载一次，`helpOpen` / `showSettings` 这类纯展示态随之归零（`pending` 原本
+ * 也会被清）。拆分前这个归零点观察不到：回到 ready 的那一帧要索取第 9、10 个槽位，而上一帧
+ * 只用了 8 个，React 在渲染主体跑到表单之前就先抛了
+ * 「Rendered more hooks than during the previous render」。
  */
-export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCardProps): JSX.Element {
-  const [snapshot, setSnapshot] = useState(() => scope.getSnapshot());
+function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed }: SchedulerSettingsFormProps): JSX.Element {
   const [pending, setPending] = useState<PendingMap>({});
   const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
   /** 帮助按钮展开态（对齐官方 _helpButton_：aria-expanded 切换） */
   const [helpOpen, setHelpOpen] = useState<Readonly<Record<string, boolean>>>({});
 
@@ -260,28 +333,14 @@ export function SchedulerSettingsCard({ scope, t, surface }: SchedulerSettingsCa
     }
   };
 
+  /**
+   * `scope` 换成另一个对象 → 草稿作废（这条原先和 `setSnapshot` 一起放在外壳的 scope
+   * 同步 effect 里）。两处的可见结果等价：外壳只在 ready 时才挂载本组件，所以「快照变成
+   * 非 ready」时本组件整体卸载，重新挂载时 `pending` 本来就是空的。
+   */
   useEffect(() => {
-    const initial = scope.getSnapshot();
-    setSnapshot(initial);
     setPending({});
-    if (initial.status === 'ready') setFailed(false);
   }, [scope]);
-
-  useEffect(() => {
-    return scope.subscribe(() => {
-      const snap = scope.getSnapshot();
-      setSnapshot(snap);
-      if (snap.status === 'ready') {
-        setFailed(false);
-      }
-    });
-  }, [scope]);
-
-  if (snapshot.status === 'unavailable') return <></>; // 命名空间未暴露时不显示卡片
-  if (snapshot.status !== 'ready') {
-    if (snapshot.status === 'loading') return <div className="ss-hint">{t('loading')}</div>;
-    return <div className="ss-hint">{t('unavailable')}</div>;
-  }
 
   // Partial<SchedulerSettings> 兜底：`?? {}` 让 TS 能以显式类型 narrow 出字段；
   // 索引访问通过 type guard 处理 undefined；运行时仍按 `value[key] ?? default`。
