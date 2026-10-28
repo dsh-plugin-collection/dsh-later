@@ -205,6 +205,12 @@ function apply(ctx: Context): void {
         maxPromptCharsHint: '提醒内容最大字符数（仅在「允许长文本提醒」开启时生效）。',
         maxPromptCharsLockedHint: '开启「允许长文本提醒」后可调。',
         smartWindowHint: '用于「工作时间」芯片与智能模式自动排期。',
+        /**
+         * 五个时段的跨字段序关系被写反时，段尾挂这一句（同时锁住保存）。
+         * 规则本身只有一份，在 `src/smart-window.ts` 的 `SMART_WINDOW_ORDER`；
+         * 这里的顺序措辞必须与那张表同序——改了表要连着改这句。
+         */
+        smartWindowOrderHint: '五个时段需依次递增：工作时间开始 < 午休开始 < 午休结束 < 工作时间结束 < 夜间静默起点。',
         workStartLabel: '工作时间开始',
         workEndLabel: '工作时间结束（晚间开始）',
         lunchStartLabel: '午休开始',
@@ -284,6 +290,8 @@ function apply(ctx: Context): void {
         maxPromptCharsHint: 'Maximum characters per reminder (takes effect only when "Allow long reminder prompts" is on).',
         maxPromptCharsLockedHint: 'Adjustable after enabling "Allow long reminder prompts".',
         smartWindowHint: 'Used by the Work-hours chip and smart auto-scheduling.',
+        // 与 zh 那条同序：措辞就是 `SMART_WINDOW_ORDER` 那张表的读法。
+        smartWindowOrderHint: 'The five windows must increase in order: work start < lunch start < lunch end < work end < night quiet.',
         workStartLabel: 'Work day start',
         workEndLabel: 'Work day end (evening start)',
         lunchStartLabel: 'Lunch break start',

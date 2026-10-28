@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { IconInfo } from '../primitives-compat.js';
-import { isValidHhmm } from '../../smart-window.js';
+import {
+  firstOrderViolation,
+  isValidHhmm,
+  pickSmartWindowFields,
+  type SmartWindowConfig,
+} from '../../smart-window.js';
 import { CLOCK_SVG_CLASSIC, CLOCK_SVG_MODERN } from '../session-presence.js';
 
 /**
@@ -209,6 +214,30 @@ const SECTIONS: readonly SectionDef[] = [
 ] as const;
 
 const FIELDS: readonly FieldDef[] = SECTIONS.flatMap((s) => s.fields);
+
+/**
+ * 卡片渲染出来的**全部** `kind: 'time'` 字段 key（从 SECTIONS 现取，不在这里再抄一份名单）。
+ *
+ * 为什么不写死五个：跨字段的序关系校验要把这五格的当前值凑起来（见
+ * `windowDraft`）。写死名单的话，将来给 `time` 段加第六格（或把某格挪走）时校验会
+ * 静默少查一项——正是本次要修的「卡片能写、下游不认」那类漂移的镜像版本。
+ * 「名单必须与 `SMART_WINDOW_ORDER` 覆盖的字段集合相等」由
+ * `tests/settings-schema-coverage.test.mjs` 钉住。
+ */
+const TIME_KEYS = FIELDS.flatMap((field) => (field.kind === 'time' ? [field.key] : []));
+
+/**
+ * 段尾那句「顺序不成立」说明的 DOM id。
+ *
+ * 命名带连字符是刻意的：卡片里**字段控件**的 id 恒为 `ss-<字段 key>`（字段 key 全是驼峰），
+ * 非字段的元素（`ss-help-*` / `ss-gate-*` / 详情页那个 `ss-show-settings`）一律带连字符。
+ * 门禁（`tests/settings-schema-coverage.test.mjs`）取「可写字段集合」时按「是字段控件
+ * （input / select / button[role=switch]）**且** id 形如 `ss-<驼峰>`」两条一起判，所以这个
+ * id 就算改成驼峰也不会被误认成一项设置（变异实测：改名的后果是让「按 id 找得到段尾说明」
+ * 那条断言变红，字段集合那条照旧绿）。带连字符真正的价值是：一眼看上去就是「一段说明」，
+ * 而不是「又一格设置」。
+ */
+const ORDER_MESSAGE_ID = 'ss-window-order';
 
 /** 单字段的 pending 编辑意图：`{value, reset:true}` 表示点击 reset 等待保存。 */
 type Pending = { readonly value: string; readonly reset: boolean };
@@ -460,8 +489,49 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
   const isGateLocked = (field: FieldDef): boolean =>
     'requiresEnabled' in field && field.requiresEnabled === 'allowLongPrompts' && !allowLongEnabled;
 
+  /**
+   * 五个时段格「草稿优先」凑成的候选配置。
+   *
+   * 用 `pickSmartWindowFields`（只按格式逐项回落）而不是
+   * `sanitizeSmartWindowConfig`（序关系不成立时**整体**回落默认）：卡片要把红框挂到
+   * 被写反的那两格上，而整体回落会先把用户真正填的组合盖掉，红框就没有归属了。
+   * 空串 = 未填 = 回落默认，与保存时「空串走 unset」的口径一致。
+   */
+  const windowDraft = (): SmartWindowConfig => {
+    const raw: Partial<Record<keyof SmartWindowConfig, string>> = {};
+    for (const key of TIME_KEYS) {
+      const text = effectiveOf(key);
+      if (text.trim().length > 0) raw[key as keyof SmartWindowConfig] = text;
+    }
+    return pickSmartWindowFields(raw);
+  };
+
+  /**
+   * 序关系被破坏的那一对相邻边界（全部满足则 null）。
+   * 规则表 `SMART_WINDOW_ORDER` 定义在 smart-window.ts，与消费端的 `isValidWindow`
+   * 同一份 —— 所以「卡片拒绝保存的组合」与「面板整体降级的组合」必然是同一个集合，
+   * 不会出现「卡片放行了、下游算出别的东西」。
+   */
+  const orderViolation = firstOrderViolation(windowDraft());
+
+  /**
+   * 是否因序关系**禁止保存**。
+   *
+   * 只在用户的草稿参与了这个组合时才拦——理由与 §6.3 的联动锁同一条：同一个脏值也可能
+   * 来自 profile yml 或别的代次写入的已保存值，那种情况下把整张卡的保存按钮锁死，用户
+   * 连「显示定时按钮」都改不动，只会以为卡片坏了。不锁的时候红框与说明照旧指出问题在哪
+   * 两格，用户改任一格到合法顺序即可。
+   */
+  const orderBlocked =
+    orderViolation !== null && TIME_KEYS.some((key) => pending[key] !== undefined);
+
+  /** 该字段是否属于被写反的那一对（仅时段格）。 */
+  const isOrderFlagged = (field: FieldDef): boolean =>
+    orderViolation !== null &&
+    (orderViolation[0] === field.key || orderViolation[1] === field.key);
+
   const handleSave = useCallback(async () => {
-    if (!dirty || saving || !writable) return;
+    if (!dirty || saving || !writable || orderBlocked) return;
     setSaving(true);
     setFailed(false);
     try {
@@ -495,7 +565,7 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
     } finally {
       setSaving(false);
     }
-  }, [scope, pending, dirty, saving, writable, allowLongEnabled]);
+  }, [scope, pending, dirty, saving, writable, allowLongEnabled, orderBlocked]);
 
   // 校验所有 pending 字段（已弃 dirty 字段忽略）。
   const invalidField = (field: FieldDef): string | null => {
@@ -508,7 +578,7 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
     return validate(field, p.value);
   };
   const anyInvalid = FIELDS.some((field) => invalidField(field) !== null);
-  const saveDisabled = !dirty || saving || !writable || anyInvalid;
+  const saveDisabled = !dirty || saving || !writable || anyInvalid || orderBlocked;
 
   return (
     <div className="ss-settings-form">
@@ -559,6 +629,8 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
             {section.fields.map((field) => {
               const invalid = invalidField(field);
               const isTime = field.kind === 'time';
+              /** 被写反的那一对：红框挂在这两格上，解释文字在段尾统一给一次。 */
+              const orderFlagged = isOrderFlagged(field);
               const labelKey = field.labelKey;
               const hintKey = field.hintKey;
               const userHas = isUserOverridden(field.key);
@@ -658,12 +730,12 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
                       id={fieldId}
                       type={isTime ? 'time' : 'text'}
                       inputMode={isTime ? undefined : 'numeric'}
-                      className={invalid !== null ? 'ss-input ss-inputInvalid' : 'ss-input'}
-                      aria-invalid={invalid !== null || undefined}
+                      className={invalid !== null || orderFlagged ? 'ss-input ss-inputInvalid' : 'ss-input'}
+                      aria-invalid={invalid !== null || orderFlagged || undefined}
                       value={displayValue(field)}
                       placeholder={field.kind === 'number' ? String(field.defaultValue) : undefined}
                       disabled={!writable || saving || gateLocked}
-                      aria-describedby={gateLocked ? `ss-gate-${field.key}` : undefined}
+                      aria-describedby={gateLocked ? `ss-gate-${field.key}` : orderFlagged ? ORDER_MESSAGE_ID : undefined}
                       onChange={(event) => handleFieldEdit(field, event.target.value)}
                     />
                   )}
@@ -695,6 +767,17 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
               );
             })}
           </div>
+          {/*
+            段级跨字段校验（issue #19）：五格的**组合**必须满足 SMART_WINDOW_ORDER 的序关系。
+            规则表与消费端 `isValidWindow` 同一份，所以卡片拦住不保存的组合，与消费端
+            整体回落默认的组合，是同一个集合——不存在「卡片放行了、面板算出另一套时段」。
+            说明只在段尾给一次（而不是在五格各挂一句），被写反的那两格由红框承担定位。
+          */}
+          {section.fields.some((field) => field.kind === 'time') && orderViolation !== null ? (
+            <p className="ss-card-invalid" id={ORDER_MESSAGE_ID} role="status">
+              {t('smartWindowOrderHint')}
+            </p>
+          ) : null}
         </section>
       ))}
 

@@ -365,6 +365,14 @@ test('0.2.0：Config 标了 volatile 且字段齐全（否则设置页不生成�
     'confirmDelivery',
     'onUnconfirmed',
     'clockIconStyle',
+    // 智能时段的五个 HH:mm 边界（issue #19）：它们**曾经只在这份清单里缺席**，
+    // 卡片却一直写着这五个 key —— 于是改动永远落不进设置层。反向门禁（渲染出来的
+    // 可写字段 ⊆ Config）见 tests/settings-schema-coverage.test.mjs，那条不靠这张手抄表。
+    'workStart',
+    'workEnd',
+    'lunchStart',
+    'lunchEnd',
+    'eveningEnd',
     'advancedSyntax',
   ];
   assert.deepEqual(
@@ -414,8 +422,10 @@ test('0.2.0：host 侧探测 register 缺失后走 describe() 轨道', () => {
  * 为什么需要：0.2.0 的表单由 `Config` 生成，但**渲染哪些行由 SECTIONS 决定**。
  * 只加 Config 字段、忘了加 section 条目时，宿主不会报错——字段就在 schema 里，
  * 却在设置页上无处可点，等于该功能没有开关（本次加 advancedSyntax 时两边都要动，
- * 正是最容易只改一半的组合）。反向不校验：智能时段的 5 个 HH:mm 字段历史上就
- * 只存在于设置卡、不在 Config 里，那是另一件事，不该由这条测试顺带掩盖。
+ * 正是最容易只改一半的组合）。反向（卡片能写、`Config` 没声明）**原先无人校验**，
+ * 智能时段的五个 HH:mm 字段就是这么在设置卡上孤立存在的（issue #19）；现在反向由
+ * `tests/settings-schema-coverage.test.mjs` 用真实渲染 + 真实 schema 钉住，两条合起来
+ * 才是双向闭合。
  */
 test('Config 的每个可编辑字段都在设置卡 SECTIONS 中有对应行', () => {
   const json = Config.toJSON();
