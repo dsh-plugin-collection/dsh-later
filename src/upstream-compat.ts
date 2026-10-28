@@ -249,6 +249,7 @@ export interface SessionLogSurface {
   readonly events?: readonly SessionEvent[] | undefined;
   readonly ownEvents?: (() => readonly SessionEvent[]) | undefined;
   readonly inheritedEventCount?: unknown;
+  readonly seq?: unknown;
 }
 
 /**
@@ -286,6 +287,68 @@ export function readInheritedEventCount(session: SessionLogSurface | Session): n
     return seed;
   }
   return 0;
+}
+
+/**
+ * 会话日志的**廉价游标**：`{ 继承前缀长度, 尾号 }`，用来回答「这条会话变过没有」。
+ *
+ * 为什么需要它，而不是直接拿 `readOwnEvents()` 的返回值做缓存键：
+ * `ownEvents()` 内部是 `snapshotEvents(inheritedEventCount)`，而内核只在
+ * `fromSeq === 0 && toSeqExclusive === log.length` 时才返回 memoized 的整表快照；
+ * fork / 子代理会话的 `inheritedEventCount > 0`，于是每次都走
+ * `Object.freeze(log.slice(...))`——**每次调用都分配一份新数组**。任何「比较数组引用」
+ * 的缓存判据在这类会话上恒不命中：缓存等于不存在，而且每次判定本身还要先拷一份全量
+ * 日志。表内六代（0.1.2-rc.1 起）都同时有 `seq` 与 `inheritedEventCount`，实测一致。
+ *
+ * `seq` 与 `inheritedEventCount` 都是 getter 级读取、零分配；日志 append-only，
+ * 两者不变就不可能意味着内容变过——这比「引用没变」是**更强**的判据（引用比较只是
+ * 它的一个近似，还只在非 fork 会话上成立）。
+ *
+ * 回落面：拿不到 `seq`（不是内核 Session，比如测试里的假 session，或 0.1.1 那代的
+ * `.events`）时退回 `readOwnEvents().length`，语义与旧判据的长度那一条一致。
+ */
+export interface LogCursor {
+  readonly offset: number;
+  readonly tail: number;
+}
+
+export function readLogCursor(session: SessionLogSurface | Session): LogCursor {
+  const surface = session as SessionLogSurface;
+  const offset = readInheritedEventCount(session);
+  const seq = surface.seq;
+  if (typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0) {
+    return { offset, tail: seq };
+  }
+  return { offset, tail: readOwnEvents(session).length };
+}
+
+/**
+ * 按**绝对 seq** 读单条事件（零分配，配合 {@link readLogCursor} 做增量扫描）。
+ *
+ * 表内六代都导出 `eventAt(seq)`，实测一致；它是内核推荐的面（`ownEvents()` 已被标
+ * `@deprecated`，理由正是「同步读整份日志」）。
+ *
+ * 回落面的索引口径要分清，否则会读错一条：
+ * - 内核有 `eventAt` → 参数是绝对 seq，内核自己处理继承前缀
+ * - 只有 `ownEvents()`（假 session）→ 它返回的是**不含前缀**的自有段，所以要
+ *   `seq - offset` 才能对上
+ * - 只有 `.events`（0.1.1 那代）→ 数组含 seed 全长，绝对 seq 直接索引
+ */
+export function readEventAt(
+  session: SessionLogSurface | Session,
+  seq: number,
+): SessionEvent | undefined {
+  const surface = session as SessionLogSurface & {
+    eventAt?: (at: number) => SessionEvent | undefined;
+  };
+  if (typeof surface.eventAt === 'function') {
+    return surface.eventAt(seq);
+  }
+  const events = readOwnEvents(session);
+  const index = typeof surface.ownEvents === 'function'
+    ? seq - readInheritedEventCount(session)
+    : seq;
+  return index >= 0 ? events[index] : undefined;
 }
 
 /** 探测到的 sessionApi 代次（诊断 / 测试用；不参与业务分支）。 */
