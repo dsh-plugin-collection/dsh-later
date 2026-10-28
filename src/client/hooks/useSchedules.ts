@@ -15,7 +15,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientSchedule, CreateCommandPayload } from '../types.js';
 import type { CommandOutcome } from '../../command-outcome.js';
 import { detectTimeZone } from '../../time-utils.js';
-import { useNow } from '../useCountdown.js';
 import {
   appendPending,
   readPending,
@@ -88,8 +87,16 @@ export function useSchedules(inject: UseSchedulesInject): UseSchedulesResult {
   const [anchorBottom, setAnchorBottom] = useState<number>(80);
   const [pendingSync, setPendingSync] = useState<PendingSchedule[]>(() => readPending());
   const rowRef = useRef<HTMLSpanElement | null>(null);
-  // 每秒 tick：让列表里的相对时间/紧急度随时间重渲染；值本身不在此处读取。
-  useNow(1000);
+  /**
+   * 这里原本有一行裸的 `useNow`（间隔 1 秒，返回值不读）：纯粹把「消费本 hook 的组件」
+   * 每秒重渲染一次，注释写的是「让列表里的相对时间/紧急度随时间重渲染」。删掉它，因为那个
+   * 职责已经有两处更准确的落点，而这条是第三条、且相位与它们不同：
+   *  - 面板：`SchedPanel` 自己 tick，`TaskList` 的 `now` 是它传的 prop
+   *    （TaskListProps 上就写着「倒计时刷新由上层驱动」）；
+   *  - dock：`ScheduleDock` 自己 tick，进度条与 `canPause` 都读它。
+   * 唯一的消费方 `SchedButton` 不渲染任何随时间变化的东西——按钮里只有 `IconClock`，
+   * `nextEpoch` 根本没被解构使用。留着它的净效果只是让面板开着时整棵树每秒被渲染两遍。
+   */
 
   // 草稿：优先取 owner 快照；否则回退 useInput hook。
   const draft =
