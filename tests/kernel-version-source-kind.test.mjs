@@ -285,6 +285,7 @@ test('rc.1 已登记进代次矩阵，peer 枚举跟着带上它', () => {
     if (!name.startsWith('@deepseek-ai/dsh-')) continue;
     assert.match(range, /\^0\.1\.7-rc\.1/, `${name} 的 peer 枚举漏了 rc.1（scripts/sync-peer-matrix.mjs 没跑？）`);
   }
-  // engines 早就把 rc.1 圈在支持范围内——本次是把这个既存的宣称变成真的。
-  assert.match(pkg.engines.dsh, /<0\.2\.0-0/, 'engines 仍声明覆盖 0.1.x 全线；代次矩阵与它必须一致');
+  // tuple 收口后，「rc.1 被正式承认」的表达从「engines 里有 <0.2.0-0 兜着」变成
+  // **它自己那条下界恰为 rc.1**——这比原来更强：借更宽的下界蒙混不再可能。
+  assert.match(pkg.engines.dsh, />=0\.1\.7-rc\.1\s/, 'engines 的 0.1.7 条款下界必须是 rc.1，不是 rc.2');
 });

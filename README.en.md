@@ -196,12 +196,17 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.1.7-rc.1` / `0.1.7-rc.2` | Supported |
 | `0.2.0-rc.2` / `0.2.1-rc.2` | Supported |
 
-The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`. Node `^22.19 || >=24`.
+The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`. Node `^22.19 || >=24`.
+
+That line is now derived from the generation table (`node scripts/sync-peer-matrix.mjs`) and is shaped as **per-segment bounded ranges**, not a whitelist: later rcs within the same segment, and that segment's final release, are admitted together (range syntax cannot express "only these verified versions"). It used to be a hand-written string, and `>=0.1.2-rc.1 <0.2.0-0` pulled in prereleases from other segments — measured as supported without ever being run: `0.1.3-alpha.2`, `0.1.6-alpha.1`, `0.1.7-alpha.1`, `0.2.2-alpha.2`. Those are now rejected.
+
+One beneficiary of that rule: `0.2.1-rc.3` and `0.2.1-rc.4` are not in the table above (only assembly and real delivery were verified; cross-generation tsc and the gate face were not), yet the `0.2.1` clause admits them — both measured GREEN, each in its own process, passing the same-source guard. They join the table only once both faces are run, at which point the generation pinned for local compilation moves up with them.
 
 Two boundaries are worth stating, otherwise they look like oversights:
 
 - **`0.1.1-rc.2` is not supported.** Not because the code fails there, but because its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict. Support is moot until upstream publishes it.
-- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`, and an "rc.1 launcher + rc.3 components" mix does not start at all (unrelated to this plugin). What you actually get is a uniform `rc.3`.
+- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3` (measured: 237 of 238 `@deepseek-ai/dsh*` entries were not `rc.1`). **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
+  This section used to claim that an "rc.1 launcher + rc.3 components" mix "does not start at all" — **that was a misjudgement and has been withdrawn**: the same mixed tree mounts and delivers once peers are backfilled. The failures came from two assembly quirks of our own verification script (a hard-coded launcher location, and skipping peer installation), not from a kernel limitation. `rc.1` stays outside the support range for one reason only: that shape has not been verified — not because it cannot work.
 
 Each generation is verified on four faces (baseline `main@28ca1dc`, i.e. 1.8.0, measured 2026-10-26): mount (a cold start on a real kernel loads the plugin), function (a due reminder really delivers, judged on event shapes, not on log text), type (the entire `@deepseek-ai/dsh*` line swapped to that generation, both tsconfig projects compile with zero errors), UI (a real GUI renders the timer button, the dock and the panel, screenshotted per generation). Rerun the first three with `npm run verify:kernels:all`, and the UI face with `npm run verify:ui`. The measurements, per-generation verdicts and method belong to [docs/verification.md](./docs/verification.md) and [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md); this table reports conclusions only.
 
