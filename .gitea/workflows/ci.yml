@@ -21,5 +21,26 @@ jobs:
         # 不用两条 `npx tsc`：Actions 的 `bash -e` 会让第一条一红就跳过第二条，
         # 与本地旧 `&&` 是同一个失明（issue #96）。脚本逐项目跑完再汇总退出码。
         run: node scripts/typecheck-all.mjs
+      - name: 构建（测试跑在刚从 src 产出的 lib/ 上）
+        # 为什么必须有这一步：lib/ 是**纳入版本管理的构建产物**，而 tests/ 下 56 个测试文件里
+        # 有 32 个直接 `import '../lib/...'`（`grep -l "'\.\./lib/" tests/*.test.mjs | wc -l`）。
+        # 缺了 build，CI 测的就是上一次提交里那份 lib/：改了 src/ 忘了重编也照样全绿，
+        # 门禁验的是与本次 diff 无关的旧产物。本地 `npm test` 同构，所以这条也不只是 CI 的规矩。
+        # 为什么不是「把测试改成 import src」：测试要盯的是最终交付形态（lib/ 才是发布物），
+        # 让它绕过构建产物等于把「产物坏了」这类事故留给用户发现。
+        # 用 npm run build（= node build.mjs）而不是裸 `npx tsc`：build 还负责 client 的 esbuild
+        # 打包与 lib/shared 同步，且 client 类型检查不过会**非零退出**，与发布走的是同一条路径。
+        # 这一步不会改写任何运行中的宿主：profile 重链默认关闭，只有 --deploy / DSH_LATER_RELINK=1 才做（issue #46）。
+        #
+        # 为什么配套的是「build 之后再测」，而不是「build 之后再加一道 `git diff --exit-code -- lib`
+        # 的字节新鲜度门禁」：产物字节不是稳定量，那道门禁会随机红。两条实测依据
+        #  (1) 在本 worktree 里跑一次 node build.mjs，lib/client.js 就改了 1 行：esbuild 的分节注释
+        #      从 `node_modules/.pnpm/...` 变成 `../../../../node_modules/.pnpm/...`，只因这里的
+        #      node_modules 是指向主检出的符号链接，esbuild 写的是 realpath。检出深度/布局一变就红。
+        #  (2) devDependencies 里 esbuild 是 ^0.25.0、typescript 是 ^5.9.0（caret），且 .pnpm 目录名带
+        #      peer 解析哈希（`..._@deepseek-ai+cordis@4.0.2`），换个时间装出来的注释与排版都可能不同。
+        # 新鲜度门禁想防的是「src 改了没重编」，而上面那步 build 已经把这个风险消掉了：测试跑的
+        # 就是刚编出来的 lib/。要留字节门禁，只能显式可选（另开 script），前提是先证明产物字节稳定。
+        run: npm run build
       - name: 测试
         run: npm test
