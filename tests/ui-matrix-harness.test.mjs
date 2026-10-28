@@ -54,19 +54,57 @@ test('ensureModuleFallbackManifest：补 `<dsh 包>/node_modules/package.json`�
   assert.equal(ensureModuleFallbackManifest(root0), false, '第二次不应重复写');
 });
 
-test('renderMatrixHtml：成功的行给图 + 三处判据，失败的行说明原因（不假装截到了）', () => {
+test('renderMatrixHtml：成功的行给图 + 四处判据，失败的行说明原因（不假装截到了）', () => {
   const html = renderMatrixHtml([
     {
-      version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, errors: [],
-      shots: { composer: '/tmp/x/0.2.1-rc.2-1-composer.png', dock: '/tmp/x/0.2.1-rc.2-2-dock.png', panel: '/tmp/x/0.2.1-rc.2-3-panel.png' },
+      version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, badges: 2, errors: [],
+      shots: {
+        composer: '/tmp/x/0.2.1-rc.2-1-composer.png',
+        dock: '/tmp/x/0.2.1-rc.2-2-dock.png',
+        panel: '/tmp/x/0.2.1-rc.2-3-panel.png',
+        badge: '/tmp/x/0.2.1-rc.2-4-badge-PASS.png',
+      },
     },
     { version: '0.0.9-rc.1', ok: false, error: '版本树不存在：/x/0.0.9-rc.1' },
   ], { pluginVersion: '1.7.0' });
   assert.match(html, /0\.2\.1-rc\.2-2-dock\.png/, '成功的行必须引用截图');
-  assert.match(html, /按钮：在　dock 行：5　面板：打开　控制台错误：0/);
+  assert.match(html, /0\.2\.1-rc\.2-4-badge-PASS\.png/, 'badge 那张也必须进矩阵页');
+  assert.match(html, /按钮：在　dock 行：5　面板：打开　侧栏 badge：2　控制台错误：0　警告：0/);
   assert.match(html, /未能启动：版本树不存在/);
   assert.match(html, /（未截到）/, '失败的行不能伪造图片格');
   assert.match(html, /1\.7\.0/);
+});
+
+/**
+ * badge 此前**根本不在判据里**：它在 4 个代次整块不出现，矩阵仍然 `exit 0`。
+ * 这条把"badge 为 0 就是不通过"钉死。结论只有一份（rowVerdict），HTML / manifest /
+ * 退出码都走它——同一个结论算两次就一定会漂成两个结论，这次就是退出码那侧漏的。
+ */
+test('rowVerdict：badge 为 0 就是不通过，哪怕其余三面全好', async () => {
+  const { rowVerdict } = await import('../scripts/ui-matrix/run.mjs');
+  const base = { version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, errors: [] };
+
+  assert.equal(rowVerdict({ ...base, badges: 1 }).pass, true, '该有的形状被判成不通过');
+  const noBadge = rowVerdict({ ...base, badges: 0 });
+  assert.equal(noBadge.pass, false, 'badge 缺失必须判红 —— 这就是当初漏掉四代的那个洞');
+  assert.match(noBadge.bits.join(' '), /侧栏 badge：0/);
+  // 自检报过警时结论仍不通过，但要能区分"漂了且说话了"与"无声消失"
+  const drifted = rowVerdict({ ...base, badges: 0, driftWarns: ['badge 未注入'] });
+  assert.equal(drifted.pass, false);
+  assert.match(drifted.bits.join(' '), /自检已报宿主 DOM 漂移/);
+  // 其余三面各自都能单独判红
+  assert.equal(rowVerdict({ ...base, badges: 1, buttonFound: false }).pass, false);
+  assert.equal(rowVerdict({ ...base, badges: 1, dockRows: 0 }).pass, false);
+  assert.equal(rowVerdict({ ...base, badges: 1, errors: ['boom'] }).pass, false);
+});
+
+test('结构：badge 与 warning 必须进采集结论（否则"0 错误"会掩盖漂移告警）', () => {
+  const capture = readFileSync(join(root, 'scripts', 'ui-matrix', 'capture.mjs'), 'utf8');
+  assert.match(capture, /m\.type\(\) === 'warning'/, 'console warning 要收进结果');
+  assert.match(capture, /driftWarns/, 'badge 漂移自检那条要单独挑出来');
+  assert.match(capture, /\.ss-presence/, 'badge 必须被观测');
+  const run = readFileSync(join(root, 'scripts', 'ui-matrix', 'run.mjs'), 'utf8');
+  assert.match(run, /process\.exit\(rows\.every\(\(r\) => rowVerdict\(r\)\.pass\)/, '退出码必须用同一份结论');
 });
 
 test('结构：采集件不许静态依赖 playwright（CI 里没有它，静态 import 会让门禁直接红）', () => {
@@ -103,7 +141,7 @@ test('instanceSummary：能给诊断用的结构摘要（不启动实例）', ()
 
 test('buildEvidenceManifest：清单钉住「哪次运行 / 什么结论 / 哪个文件 / 文件 sha256」', () => {
   const manifest = buildEvidenceManifest([
-    { version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, strictErrors: [], shots: { dock: '/x/0.2.1-rc.2-2-dock.png' } },
+    { version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, badges: 2, strictErrors: [], shots: { dock: '/x/0.2.1-rc.2-2-dock.png' } },
     { version: '0.0.1-rc.1', ok: false, error: '版本树不存在' },
   ], {
     pluginVersion: '1.7.0',
@@ -114,10 +152,13 @@ test('buildEvidenceManifest：清单钉住「哪次运行 / 什么结论 / 哪�
   assert.equal(manifest.commit, 'abc1234');
   assert.equal(manifest.frames.length, 2);
   const ok = manifest.frames[0];
-  assert.equal(ok.verdict, 'CAPTURED');
+  assert.equal(ok.verdict, 'PASS');
+  // badge 与 warning 计数必须进清单：只有"截图存在"的清单会再次把红报成绿。
+  assert.equal(ok.badges, 2);
+  assert.equal(ok.consoleWarnings, 0);
   assert.deepEqual(ok.evidence, { file: '0.2.1-rc.2-dock.png', bytes: 41234, sha256: 'deadbeef' });
   const bad = manifest.frames[1];
-  assert.equal(bad.verdict, 'FAILED');
+  assert.equal(bad.verdict, 'FAIL');
   assert.equal(bad.evidence, null, '没有图就不许编一个文件名');
   assert.match(bad.error, /版本树不存在/);
   assert.match(manifest.howToRegenerate, /--evidence/);
