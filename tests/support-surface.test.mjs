@@ -113,11 +113,29 @@ test('同 tuple 向后放行是**契约**而非漏洞（range 写不出白名单
   assert.equal(admitted('0.1.7', pkg.engines.dsh), true);
 });
 
-test('peer 侧仍是逐代枚举（两种形状各有各的职责，不许互相抄）', () => {
+test('peer 侧逐代枚举且**每枚都带上界**（peer 是老内核唯一有执行力的声明）', () => {
+  for (const [packageName, range] of Object.entries(pkg.peerDependencies ?? {})) {
+    if (!packageName.startsWith('@deepseek-ai/dsh-')) continue;
+    // 上一轮只收紧了 engines，但 0.1.7-rc.1~0.2.0-rc.2 根本不读 engines：peer 是它们唯一的门。
+    // 而 `^0.1.2-rc.1` 展开成 `>=0.1.2-rc.1 <0.2.0-0`，整条 minor 都命中 —— 拿真内核评估器实测，
+    // `0.1.3-alpha.2`/`0.1.6-alpha.1`/`0.1.7-alpha.1`/`0.1.5-rc.1` 在 peer 语义下全 pass。
+    assert.ok(!range.includes('^'), `${packageName} 仍在用 caret：上界会漏整条 minor`);
+    for (const clause of range.split('||')) {
+      assert.match(clause.trim(), /^>=\S+ <\S+$/, `${packageName} 有条款缺排他上界：${clause.trim()}`);
+    }
+  }
   const peer = pkg.peerDependencies['@deepseek-ai/dsh-session'];
   for (const gen of KERNEL_GENERATIONS) {
-    assert.ok(peer.includes(`^${gen.id}`), `peer 少了逐代枚举项 ^${gen.id}`);
+    assert.ok(peer.includes(`>=${gen.id} `), `peer 少了逐代下界 >=${gen.id}（逐代留痕）`);
   }
-  // peer 是「证据台账」，engines 是「收口范围」：把后者的形状抄进前者会丢掉留痕。
-  assert.ok(!peer.includes('<'), 'peer 里出现 tuple 上界写法说明两处被混用了');
+});
+
+test('peer 语义下别的版本段的预发布也必须被拒绝（收紧必须在两侧都成立）', () => {
+  const peer = pkg.peerDependencies['@deepseek-ai/dsh-schedule'];
+  for (const version of ['0.1.3-alpha.2', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.5-rc.1', '0.2.2-alpha.2']) {
+    assert.equal(admitted(version, peer), false, `peer 语义仍放行 ${version} —— 这些运行时只读 peer`);
+  }
+  for (const gen of KERNEL_GENERATIONS) {
+    assert.equal(admitted(gen.id, peer), true, `peer 拒绝了自己的已验证代次 ${gen.id}`);
+  }
 });

@@ -195,12 +195,15 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.1.5-rc.3` | Supported |
 | `0.1.7-rc.1` / `0.1.7-rc.2` | Supported |
 | `0.2.0-rc.2` / `0.2.1-rc.2` | Supported |
+| `0.2.1-rc.3` / `0.2.1-rc.4` | Supported |
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`. Node `^22.19 || >=24`.
 
-That line is now derived from the generation table (`node scripts/sync-peer-matrix.mjs`) and is shaped as **per-segment bounded ranges**, not a whitelist: later rcs within the same segment, and that segment's final release, are admitted together (range syntax cannot express "only these verified versions"). It used to be a hand-written string, and `>=0.1.2-rc.1 <0.2.0-0` pulled in prereleases from other segments — measured as supported without ever being run: `0.1.3-alpha.2`, `0.1.6-alpha.1`, `0.1.7-alpha.1`, `0.2.2-alpha.2`. Those are now rejected.
+Both this line and `peerDependencies` are derived from the generation table (`node scripts/sync-peer-matrix.mjs`) and shaped as **per-segment bounded ranges**, not a whitelist: later rcs within a segment and that segment's final release are admitted together (range syntax cannot express "only these verified versions"). Both sides have to be bounded because the enforcers differ: from 0.2.1 on the kernel reads only `engines.dsh`, while 0.1.7-rc.1 through 0.2.0-rc.2 read only the `dsh-*` peer ranges — and 0.1.2-rc.1 and 0.1.5-rc.3 have no compatibility gate at all, so on those two the lines are documentation, not enforcement.
 
-One beneficiary of that rule: `0.2.1-rc.3` and `0.2.1-rc.4` are not in the table above (only assembly and real delivery were verified; cross-generation tsc and the gate face were not), yet the `0.2.1` clause admits them — both measured GREEN, each in its own process, passing the same-source guard. They join the table only once both faces are run, at which point the generation pinned for local compilation moves up with them.
+Each side leaked once, both measured rather than reasoned: `engines.dsh` was a hand-written wide string (`>=0.1.2-rc.1 <0.2.0-0` admitted `0.1.3-alpha.2`, `0.1.6-alpha.1`, `0.1.7-alpha.1`, `0.2.2-alpha.2`), while the peer side still used per-generation carets — and `^0.1.2-rc.1` expands to `>=0.1.2-rc.1 <0.2.0-0`, i.e. **the whole minor matches**. Tightening only `engines` would therefore have reinforced the door nobody walks through. Both are segment-bounded now.
+
+`0.2.1-rc.3` and `0.2.1-rc.4` were promoted into the table with all four faces measured: assembly and real delivery GREEN each **in its own process** and passing the same-source guard (which refuses to count a run where the plugin resolves kernel modules from a different tree than the one under test), cross-generation tsc green for both projects, and the gate green using **each generation's own** evaluator. Local development still pins `0.2.1-rc.2` (recorded as an explicit constant that must be updated deliberately); newer generations are covered per-generation via `--steps type` rather than by moving the local pin.
 
 Two boundaries are worth stating, otherwise they look like oversights:
 

@@ -283,7 +283,7 @@ test('rc.1 已登记进代次矩阵，peer 枚举跟着带上它', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
     if (!name.startsWith('@deepseek-ai/dsh-')) continue;
-    assert.match(range, /\^0\.1\.7-rc\.1/, `${name} 的 peer 枚举漏了 rc.1（scripts/sync-peer-matrix.mjs 没跑？）`);
+    assert.match(range, />=0\.1\.7-rc\.1/, `${name} 的 peer 枚举漏了 rc.1（scripts/sync-peer-matrix.mjs 没跑？）`);
   }
   // tuple 收口后，「rc.1 被正式承认」的表达从「engines 里有 <0.2.0-0 兜着」变成
   // **它自己那条下界恰为 rc.1**——这比原来更强：借更宽的下界蒙混不再可能。
