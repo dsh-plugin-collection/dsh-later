@@ -534,11 +534,23 @@ export function runUserScheduleTransaction<T>(
     () => undefined,
   );
   tails.set(agent, tail);
-  try {
-    return run;
-  } finally {
+  /**
+   * 清位必须等 tail **落定之后**，而且只在仍是自己时才清。
+   *
+   * 原先写成 `try { return run } finally { …tails.delete(agent) }`：`finally` 紧跟
+   * 在 `return run` 之后**同步**执行，那一刻 `run` 还是个 pending promise，队尾就
+   * 被当场删掉了。下一个并发调用 `tails.get(agent)` 取到 undefined，于是直接起跑
+   * ——模块头承诺的「按 agent 串行化」从未真正生效过。
+   *
+   * 为什么是「落定后 + 比对身份」两条一起：操作在跑的时候 tail 必须留在表里，第三
+   * 个操作才会排到它后面；而自己已经不是队尾时不能清，那等于替后来者抹掉它正在排
+   * 的位置。清早了 = 并发，清晚了 = 白占一条已落定的 promise（WeakMap 以 agent 为
+   * 键不会泄漏，但没必要留着）。
+   */
+  tail.then(() => {
     if (tails.get(agent) === tail) tails.delete(agent);
-  }
+  });
+  return run;
 }
 
 /** 等待一个成功的持久化 barrier。 */
