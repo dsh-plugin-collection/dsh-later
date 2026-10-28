@@ -45,6 +45,7 @@ import {
   findScheduleIdByUid,
   getOwnership,
   getPaused,
+  ownershipGeneration,
   newTaskUid,
   recordOwnership,
   recordPaused,
@@ -60,7 +61,7 @@ import {
   detectTimeZone,
 } from './time-utils.js';
 import { epochFromLocal } from './smart-window.js';
-import { readInheritedEventCount, readOwnEvents } from './upstream-compat.js';
+import { readLogCursor, readOwnEvents } from './upstream-compat.js';
 
 /** 单 session 用户任务上限（PRD：防滥用）。 */
 export const DEFAULT_MAX_SCHEDULES = 100;
@@ -419,9 +420,12 @@ export interface FoldedUserSchedules {
 }
 
 interface FoldCacheEntry {
-  readonly events: readonly SessionEvent[];
-  readonly length: number;
-  readonly inheritedEventCount: number;
+  /** 会话日志的继承前缀长度（fork 点变了必须重算）。 */
+  readonly offset: number;
+  /** 会话日志尾号（append-only，尾号不变即内容不变）。 */
+  readonly tail: number;
+  /** sidecar 变更代数：所有权/留档可以在日志不加事件的情况下被改写。 */
+  readonly generation: number;
   readonly state: UserFoldState;
 }
 
@@ -430,23 +434,38 @@ const foldCache = new WeakMap<object, FoldCacheEntry>();
 /** fold 当前会话的完整用户调度状态（带缓存；调用方不得变更返回值）。
  *
  * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readOwnEvents /
- * readInheritedEventCount）——新 rc 若再改名只动那一处。
+ * readLogCursor）——新 rc 若再改名只动那一处。
+ *
+ * 判据为什么从「数组引用 + 长度」换成「游标 + sidecar 代数」：`ownEvents()` 在
+ * fork / 子代理会话（`inheritedEventCount > 0`）上每次 `log.slice()` 返回**新数组**，
+ * 引用比较恒不命中——缓存对这类会话完全不存在，而且光是判定一次就要先拷一份全量
+ * 日志。本函数在一次派发里被调两次（`runtime.driveOnce` 预算一次、维护事务内再算
+ * 一次），插话路径同样两次，于是每个 fork 会话上的每一轮都白 fold 两遍。
+ * 换成零分配的 `seq` 游标后，命中路径连日志数组都不必读。
+ *
+ * `generation` 那一维是新加的：结果里的 `owned`/`delivery` 有一部分来自 sidecar，
+ * 而 sidecar 不属于会话日志。旧判据在 root 会话上本来就有这个盲区（引用+长度都
+ * 不变时 sidecar 改了读不到），只是 fork 会话上缓存从不命中、反而看不见。既然这次
+ * 让 fork 会话也开始吃缓存，就把这个盲区一并封掉——代价是任一会话写 sidecar 会让
+ * 全部 fold 缓存作废，而写 sidecar 只发生在用户改动提醒时，那一刻本就该重算。
  */
 export function foldUserState(session: Session): UserFoldState {
-  const events = readOwnEvents(session);
-  const inheritedEventCount = readInheritedEventCount(session);
+  const cursor = readLogCursor(session);
+  const generation = ownershipGeneration();
   const cached = foldCache.get(session);
   if (
     cached !== undefined &&
-    cached.events === events &&
-    cached.length === events.length &&
-    cached.inheritedEventCount === inheritedEventCount
+    cached.offset === cursor.offset &&
+    cached.tail === cursor.tail &&
+    cached.generation === generation
   ) {
     return cached.state;
   }
+  // 只有真要重算时才读全量日志：命中路径上一次分配都没有。
+  const events = readOwnEvents(session);
   // number 形式进入 foldScheduleEvents：0.1.2 brandshape 校验接受 safe integer；
   // 0.1.1 直接收 number。
-  const folded = asLegacySchedules(foldScheduleEvents(events, inheritedEventCount as never));
+  const folded = asLegacySchedules(foldScheduleEvents(events, cursor.offset as never));
   // 所有权与投递形态：sidecar 为准（新写入），日志中的历史 OWNED 事件作底
   // （仅对已迁移的历史日志有效，见 #58：未迁移的旧日志会被宿主整份拒读）。
   const sessionId = session.header?.id;
@@ -463,7 +482,7 @@ export function foldUserState(session: Session): UserFoldState {
     owned,
     delivery,
   };
-  foldCache.set(session, { events, length: events.length, inheritedEventCount, state });
+  foldCache.set(session, { offset: cursor.offset, tail: cursor.tail, generation, state });
   return state;
 }
 
