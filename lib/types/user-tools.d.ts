@@ -23,7 +23,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { ScheduleRecord, ScheduleView } from '@deepseek-ai/dsh-schedule';
 import type { UserScheduleDelivery } from './domain.js';
-import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
+import type { ScheduledAttachment } from './ownership-store.js';
 /** 单 session 用户任务上限（PRD：防滥用）。 */
 export declare const DEFAULT_MAX_SCHEDULES = 100;
 /**
@@ -269,6 +269,4 @@ export declare function userSchedulePause(id: unknown, agent: Agent, ctx: Contex
 /** 恢复一条暂停中的 after 提醒：`after_seconds = remaining` 重建；uid 不变。 */
 export declare function userScheduleResume(uid: unknown, agent: Agent, ctx: Context, maxSchedules?: number): Promise<UserScheduleResumeResult>;
 /** 测试/投影辅助：某会话全部暂停留档。 */
-export declare function listPausedForSession(sessionId: string): Readonly<Record<string, PausedEntry>>;
 /** 测试辅助：按 pause 前 schedule id 查留档。 */
-export declare function findPausedEntry(sessionId: string, scheduleId: string): PausedEntry | undefined;
