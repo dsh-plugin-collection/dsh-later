@@ -6,7 +6,10 @@
  *
  *  1. `attachment-blocks`：0.1.2 的 `ContentBlock` 没有 `file` 变体 ⇒ 文件块降级成文本；
  *     ≥0.1.5 原样透传。硬塞的后果是"被宿主拒"或"装配期静默丢弃"，用户到点收到一条没有附件的消息。
- *  2. `workspace-path-compat`：0.1.5/0.1.2 的 `dsh-util-workspace-path` 没有 `fileMediaUrl`。
+ *  2. `media-url` 的 URL 换算：这里**不再有代次分支**——宿主同名的 `fileMediaUrl` 所在包在浏览器
+ *     侧不可解析（8 代皆然），所以本插件那份就是唯一实现，下面这些断言从「只在老代次跑的装饰」
+ *     变成了真正的线上覆盖。曾经的「优先调宿主」探测恒为真，因为构建把 devDependencies 那份
+ *     内联了进来；它已随 `workspace-path-compat.ts` 一并拆除。
  *  3. `primitives-compat`：图标在 0.1.7 之前叫尺寸后缀名 —— 本机只能验证"新名优先"这一侧，
  *     老名兜底由 `resolvedIconNames()` + 跨代 tsc（`--steps type`）共同保证。
  * @module tests/kernel-compat-layers

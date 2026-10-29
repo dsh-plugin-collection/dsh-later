@@ -27,11 +27,29 @@
  *   2. Session API 形状若有变化，只改本模块的 read* 函数
  *
  * 新 rc 落地 checklist：
- *   - 在 KERNEL_GENERATIONS 追加一代（id + peerRange + sessionApi）
- *   - 跑 `node scripts/sync-peer-matrix.mjs` 重写 package.json peer 枚举
- *   - 跑 `npm test`（含 tests/upstream-compat.test.mjs 矩阵护栏）
+ *   - 在 KERNEL_GENERATIONS 追加一代（id + sessionApi；peer 条款形状由 `genPeerRange(id)` 推导，
+ *     **不手抄**）。**这张表是「已完整
+ *     验证」的台账**：`sync-peer-matrix` 会把 devDependencies 固定到表里最新那一代，所以
+ *     只跑过 mount（装配 + 真投递）而没跑过 type/gate 面的版本**不要**急着入表——那会让
+ *     本地编译与回归悄悄换到一代没验过的内核上。
+ *   - 跑 `node scripts/sync-peer-matrix.mjs` 重写 package.json：**peer 逐代枚举** +
+ *     **`engines.dsh` 由本表按 tuple 上界推导**（两者都别再手抄，见 `enginesDshRange`）
+ *   - 跑 `npm test`（含 tests/upstream-compat.test.mjs 矩阵护栏与
+ *     tests/support-surface.test.mjs 的支持面护栏）
  *   - 跨代 tsc + 功能面：`node devkit/matrix.mjs --versions <代次> --steps gate,peer,typecheck`
  *     与 `node scripts/verify-across-kernels.mjs --versions <代次>`
+ *
+ * ## 2026-10-28 补登记：`0.2.1-rc.3` / `0.2.1-rc.4`
+ *
+ * 这两代此前只跑过 mount/function，所以刻意留在表外；现已补齐 type 与 gate 四面并**正式入表**
+ * （逐代实证见对应条目注释）。连带效果：devDependencies 由 sync 固定到表里最新一代，本地
+ * 编译与回归基准随之移到 `0.2.1-rc.4` —— 这正是当初推迟入表的理由，如今已用真换线 tsc 覆盖。
+ *
+ * `0.2.1-rc.3` 与 `0.2.1-rc.4`：各起**一个独立进程**跑 `--steps mount --no-install`，
+ * 两代都 GREEN（`同源=same`、投递 spliced=1、dispatch=Y、at 五形状 5/5）。之所以先不入表：
+ * 只跑了 mount 面，type（跨代 tsc）与 gate（门禁面）没跑。它们**已经被 `engines.dsh`
+ * 放行**——`0.2.1` 那个 tuple 的上界是 `<0.2.2-0`，天然覆盖同 tuple 的更晚 rc。
+ * 补齐 type/gate 两面后再入表，届时 devDependencies 会跟着挪到最新那一代，需要一并复跑回归。
  *
  * ## 为什么这里要读内核版本号（issue #75）
  *
@@ -63,7 +81,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
  * 能力 / 这个符号改了名」——issue #95 就是这么把 0.1.1 / 0.1.2 / 0.1.5 三代请出表的。
  *
  * - `id`：semver 精确版本（发布 tag）
- * - `peerRange`：写入 package.json 的范围（node-semver 预发布需显式枚举）
+ * - peer 条款由 `genPeerRange(id)` 从 id 推导：`>=<id> <该段下一 patch>-0`（逐代枚举 + 各带上界）
  * - `sessionApi`：Session 读日志的形状（见 readOwnEvents / readInheritedEventCount）。
  *   现在表里**没有任何一代用 `legacy-events`**（0.1.1 已出表）；该取值与 read* 的兜底分支
  *   保留为防御——第三方伪造 Session、或未来某代悄悄改形状时，失败要可诊断而不是抛 undefined。
@@ -81,7 +99,6 @@ export const KERNEL_GENERATIONS = [
      * 的兼容层里（见 issue #95 / #101），跨代 tsc 两个项目都是 0 条错误。
      */
     id: '0.1.2-rc.1',
-    peerRange: '^0.1.2-rc.1',
     sessionApi: 'own-events' as const,
   },
   {
@@ -93,9 +110,17 @@ export const KERNEL_GENERATIONS = [
      * 所以**符号判据区分不了这两代**，只能读版本号（issue #75）。
      *
      * 为什么 id 是 rc.3：`@deepseek-ai/dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，
-     * 按默认安装会把整条插件线解析到 **rc.3**；而 rc.1 的启动器 + rc.3 的插件混装**装不起来**
-     * （实测 `verify-across-kernels --steps mount` 报多个 dsh-* 插件 load 失败，与本插件无关）。
-     * 也就是说这一代用户实际拿到的是**统一的 rc.3**，能验证的形态也只有它。
+     * 按默认安装会把整条插件线解析到 **rc.3**（实测 lockfile 里 238 个 `@deepseek-ai/dsh*`
+     * 有 237 个不是 rc.1）——也就是说这一代用户实际拿到的是**统一的 rc.3**，能验证的形态也只有它。
+     *
+     * ⚠️ 早先这里写的是「rc.1 启动器 + rc.3 组件混装**装不起来**」，那是**误判**，别再照着它做
+     * 决定。逐插件补全 peer 后同一棵树能 mount（投递 spliced=1 / dispatch=Y / at 5/5）。当时的
+     * RED 来自 `scripts/verify-across-kernels.mjs` 自己的两个装配口径：① 写死顶层
+     * `dsh-app-boot` 路径，而纯 rc.1 安装会把它嵌到 `dsh/node_modules` 下；② 用
+     * `--legacy-peer-deps` 跳过 peer，而 `ensureBootPeers` 只补 app-boot 一棵线——
+     * `dsh-session-persistence-jsonl` 是靠 **peer** 拿 `dsh-session-persistence` 的，于是报
+     * `Cannot find package`。这两个洞应当修在脚本里；在此之前，脚本对 rc.1 的 RED **不构成**
+     * 「该代不支持」的证据。
      *
      * 该代还有一处 schemastery 差异：`s.object(...).volatile()` 在它装的 **3.18.2** 上不存在
      * （整条插件加载失败，`…volatile is not a function`）—— 已在 `src/index.ts` 里做能力探测降级。
@@ -104,7 +129,6 @@ export const KERNEL_GENERATIONS = [
      * `primitives-compat.ts` / `workspace-path-compat.ts` 兜住；它本身有 `FileTypeIcon`/`fileSizeText`。
      */
     id: '0.1.5-rc.3',
-    peerRange: '^0.1.5-rc.3',
     sessionApi: 'own-events' as const,
   },
   {
@@ -131,7 +155,6 @@ export const KERNEL_GENERATIONS = [
      * `sessionApi` 仍是 `own-events`：Session 形状这一面本代未变，变的只是消息准入。
      */
     id: '0.1.7-rc.1',
-    peerRange: '^0.1.7-rc.1',
     sessionApi: 'own-events' as const,
   },
   {
@@ -152,7 +175,6 @@ export const KERNEL_GENERATIONS = [
      * 不单列 0.1.6-alpha.*：alpha 线无独立兼容面，且 0.1.7 已覆盖其功能面。
      */
     id: '0.1.7-rc.2',
-    peerRange: '^0.1.7-rc.2',
     sessionApi: 'own-events' as const,
   },
   {
@@ -178,7 +200,6 @@ export const KERNEL_GENERATIONS = [
      * 此前只是警告）。故这一代次的缺失曾让插件在 0.2.0 上完全失效。
      */
     id: '0.2.0-rc.2',
-    peerRange: '^0.2.0-rc.2',
     sessionApi: 'own-events' as const,
   },
   {
@@ -204,7 +225,32 @@ export const KERNEL_GENERATIONS = [
      * `tsc --noEmit` 零错误，`npm test` 407 项全绿。
      */
     id: '0.2.1-rc.2',
-    peerRange: '^0.2.1-rc.2',
+    sessionApi: 'own-events' as const,
+  },
+  {
+    /**
+     * `0.2.1-rc.3` / `0.2.1-rc.4` 两代：上游只往前走了 rc 号，实测四个面与 rc.2 无差异。
+     *
+     * 实证（2026-10-28，本机 `~/dsh-versions/<代>` 树，`--no-install` 复用）：
+     * - mount + function：各起**独立进程**跑，GREEN；`同源=same`（同源守卫通过）、真投递
+     *   `agent/inbox/spliced` 命中、`schedule/change dispatch` 在、`at` 五形状 5/5。
+     * - type：换线 19 处后 host + client 两个 tsconfig 均通过。
+     * - gate：用**该代自己的** `evaluatePluginCompatibility` 判 pass，最新语义亦 pass。
+     *
+     * 为什么单独登记而不是"反正 engines 的 `0.2.1` 段上界已经放行"：登记 peer 侧是必需的
+     * ——`0.2.1-rc.3/rc.4` 运行时读 engines，但同段的更晚版本、以及**别的**读 peer 的运行时
+     * 都可能在混合部署里出现；更重要的是这张表是「已完整验证」的台账，跑过就得记，
+     * 否则下一次有人问「rc.4 到底验没验」，答案又只能靠猜。
+     *
+     * ⚠️ 入表的连带后果：`sync-peer-matrix` 把 devDependencies 固定到**表里最后一代**，
+     * 因此本地编译与回归的基准代次随之前移到 `0.2.1-rc.4`。
+     */
+    id: '0.2.1-rc.3',
+    sessionApi: 'own-events' as const,
+  },
+  {
+    /** 见上一条 `0.2.1-rc.3` 的实证说明；同样四面全绿。本代是当前的 dev 固定代次。 */
+    id: '0.2.1-rc.4',
     sessionApi: 'own-events' as const,
   },
 ] as const;
@@ -224,15 +270,39 @@ export const KERNEL_SCOPED_PACKAGES = [
   '@deepseek-ai/dsh-tools',
 ] as const;
 
-/** dsh-commands 在 0.1.1 之前还有一代 rc.0，peer 需额外并上。 */
-const EXTRA_PEER_RANGES: Readonly<Record<string, readonly string[]>> = {
-  '@deepseek-ai/dsh-commands': ['^0.0.1-rc.1'],
+/** dsh-commands 在 0.1.1 之前还有一代 rc.0/0.0.1 线，peer 需额外并上（存**代次 id**，形状统一由 genPeerRange 推导）。 */
+const EXTRA_PEER_GENERATIONS: Readonly<Record<string, readonly string[]>> = {
+  '@deepseek-ai/dsh-commands': ['0.0.1-rc.1'],
 };
+
+/** `0.1.7` → `0.1.8-0`：该版本段的**排他**上界。semver §11 下 `-0` 低于该段任何正式版与预发布。 */
+function segmentCeiling(base: string): string {
+  const [major, minor, patch] = base.split('.').map((part) => Number(part)) as [number, number, number];
+  return `${major}.${minor}.${patch + 1}-0`;
+}
+
+/**
+ * 单代的 peer 条款：`>=<id> <该段下一 patch>-0`。
+ *
+ * **为什么不写成 `^<id>`**（本轮修复点）：caret 带预发布时展开为
+ * `>=0.1.2-rc.1 <0.2.0-0`，即**整条 minor 都命中**。于是六枚逐代 caret 的并集照样放行
+ * `0.1.3-alpha.2` / `0.1.6-alpha.1` / `0.1.7-alpha.1` / `0.1.5-rc.1` —— 拿真内核评估器对
+ * 当前 manifest 实测，四条全 pass。而这几个运行时**恰好只读 peer、不读 `engines.dsh`**
+ * （0.2.1 起才反过来），所以收紧 engines 对它们毫无作用：peer 是它们唯一的门。
+ * 只修 engines 等于把门修在了没人走的那一侧。
+ *
+ * 逐代一条 + 各带上界，既保住「下界恰为该代本身、逐代留痕」这条既有政策（见
+ * `tests/upstream-compat.test.mjs` 的注释），又真的收住。形状由 id **推导**而不是手抄：
+ * 手抄一定会漂，engines 与 peer 上一轮就是这样各说各话的。
+ */
+export function genPeerRange(id: string): string {
+  return `>=${id} <${segmentCeiling(id.split('-')[0]!)}`;
+}
 
 /** 由 KERNEL_GENERATIONS 拼出的 peer 范围串（`a || b`）。 */
 export function peerRangeFor(packageName: string): string {
-  const extras = EXTRA_PEER_RANGES[packageName] ?? [];
-  return [...extras, ...KERNEL_GENERATIONS.map((g) => g.peerRange)].join(' || ');
+  const extras = EXTRA_PEER_GENERATIONS[packageName] ?? [];
+  return [...extras, ...KERNEL_GENERATIONS.map((g) => g.id)].map((id) => genPeerRange(id)).join(' || ');
 }
 
 /** 全部需逐代枚举的 `{ package, range }`（sync-peer-matrix / 矩阵测试共用）。 */
@@ -243,12 +313,57 @@ export function peerMatrixEntries(): ReadonlyArray<{ packageName: string; range:
   }));
 }
 
+/**
+ * 由 KERNEL_GENERATIONS 推导 `engines.dsh` 的范围串（**逐 tuple 上界**写法）。
+ *
+ * ## 为什么 engines 与 peer 用两种形状，而不是照抄 peer 的逐代 `^id`
+ *
+ * peer 侧刻意逐代枚举、且「下界恰为该代本身」（见 `tests/upstream-compat.test.mjs`
+ * 那条「逐代留痕，不借用更早下界」）——那是**证据台账**。engines 侧要解决的是另一个
+ * 问题：node-semver **不把预发布算进普通范围**，所以 `>=0.1.2-rc.1 <0.2.0-0` 这种写法
+ * 会把别的 tuple 上的预发布也放进来（实测 `0.1.3-alpha.2`、`0.1.6-alpha.1`、
+ * `0.1.7-alpha.1`、`0.2.2-alpha.2`、`0.1.5-rc.1/rc.2` 全判「支持」，而这几个我们一次都没跑过）。
+ * 逐代 `^id` 拼进 engines 同样不行：`^0.2.1-rc.2` 本身就吃下整个 0.2.1 tuple。
+ * 所以这里按 tuple 收口：**下界 = 该 tuple 里最早已验证的那一代，上界 = 下一个 patch 的 `-0`**。
+ *
+ * `-0` 这个上界是刻意的：按 semver §11，`X.Y.Z-0` 低于 `X.Y.Z` 的**任何**预发布，
+ * 于是 `<0.2.2-0` 既排除 `0.2.2`，也排除 `0.2.2-alpha.2`；而本仓库自带的
+ * `compareVersions` 就是按 §11 实现的，判定与内核的 `semver.satisfies(..., {includePrerelease:true})`
+ * 一致（实测对照见 `tests/support-surface.test.mjs`）。
+ *
+ * ## 这个写法明确做不到的一件事（别当它做到了）
+ *
+ * range 语法**表达不出「只认这几个已验证版本」**：`0.1.5-rc.1/rc.2` 与已验证的 `0.1.5-rc.3`
+ * 同 tuple，任何范围都会一起放行；同理各 tuple 的正式版也在范围内。要精确只能改成
+ * 逐版本 `\|\|` 列表，代价是每个新 rc 都得重发插件——那条路我们不走，并把代价写在这儿：
+ * **engines 是「同 tuple 内向后放行」，不是「白名单」。**
+ *
+ * 顺带一条真实效力边界（实测逐代 grep 门禁函数得出）：`engines.dsh` **单独决定**判定只在
+ * 0.2.1-rc.2 及以后；0.1.7-rc.1 ~ 0.2.0-rc.2 只看 peerDependencies，**不读 engines**；
+ * 0.1.2-rc.1 与 0.1.5-rc.3 两代根本没有门禁。所以收紧这一行并不等于全线生效——
+ * 另一半靠 peer 范围兜。
+ */
+export function enginesDshRange(): string {
+  /** tuple（`major.minor.patch`）→ 该 tuple 内最早已验证的代次 id。 */
+  const floors = new Map<string, string>();
+  for (const gen of KERNEL_GENERATIONS) {
+    const base = gen.id.split('-')[0]!;
+    const held = floors.get(base);
+    if (held === undefined || (compareVersions(gen.id, held) ?? 0) < 0) floors.set(base, gen.id);
+  }
+  return [...floors.entries()]
+    .sort((a, b) => (compareVersions(`${a[0]}-0`, `${b[0]}-0`) ?? 0))
+    .map(([base, floor]) => `>=${floor} <${segmentCeiling(base)}`)
+    .join(' || ');
+}
+
 /** Session 读日志的最小结构（鸭子类型；两代公有面）。 */
 export interface SessionLogSurface {
   readonly header?: { readonly seedLength?: unknown } | undefined;
   readonly events?: readonly SessionEvent[] | undefined;
   readonly ownEvents?: (() => readonly SessionEvent[]) | undefined;
   readonly inheritedEventCount?: unknown;
+  readonly seq?: unknown;
 }
 
 /**
@@ -286,6 +401,102 @@ export function readInheritedEventCount(session: SessionLogSurface | Session): n
     return seed;
   }
   return 0;
+}
+
+/**
+ * 会话日志的**廉价游标**：`{ 继承前缀长度, 尾号 }`，用来回答「这条会话变过没有」。
+ *
+ * 为什么需要它，而不是直接拿 `readOwnEvents()` 的返回值做缓存键：
+ * `ownEvents()` 内部是 `snapshotEvents(inheritedEventCount)`，而内核只在
+ * `fromSeq === 0 && toSeqExclusive === log.length` 时才返回 memoized 的整表快照；
+ * fork / 子代理会话的 `inheritedEventCount > 0`，于是每次都走
+ * `Object.freeze(log.slice(...))`——**每次调用都分配一份新数组**。任何「比较数组引用」
+ * 的缓存判据在这类会话上恒不命中：缓存等于不存在，而且每次判定本身还要先拷一份全量
+ * 日志。表内六代（0.1.2-rc.1 起）都同时有 `seq` 与 `inheritedEventCount`，实测一致。
+ *
+ * `seq` 与 `inheritedEventCount` 都是 getter 级读取、零分配；日志 append-only，
+ * 两者不变就不可能意味着内容变过——这比「引用没变」是**更强**的判据（引用比较只是
+ * 它的一个近似，还只在非 fork 会话上成立）。
+ *
+ * 回落面：拿不到 `seq`（不是内核 Session，比如测试里的假 session，或 0.1.1 那代的
+ * `.events`）时退回 `readOwnEvents().length`，语义与旧判据的长度那一条一致。
+ */
+export interface LogCursor {
+  readonly offset: number;
+  readonly tail: number;
+}
+
+export function readLogCursor(session: SessionLogSurface | Session): LogCursor {
+  const surface = session as SessionLogSurface;
+  const offset = readInheritedEventCount(session);
+  const seq = surface.seq;
+  if (typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0) {
+    return { offset, tail: seq };
+  }
+  return { offset, tail: readOwnEvents(session).length };
+}
+
+/**
+ * 给 `foldScheduleEvents` 备一份**成对**的输入：日志数组 + 该传的前缀长度。
+ *
+ * 为什么这两者必须一起决定、不能各查各的：
+ *
+ * 上游契约写的是 `@param events - Complete ordered session log`，第二参数是
+ * 「继承前缀长度」，函数体里就是 `events.slice(inheritedEventCount)`，并且
+ * `inheritedEventCount > events.length` 直接抛 `ScheduleLogError`
+ * （dsh-schedule/lib/index.js:918-926）。内核自己唯一的调用是
+ * `foldScheduleEvents(session.ownEvents())`——**不带第二参数**
+ * （dsh-schedule/lib/index.js:2034）。
+ *
+ * 而 `ownEvents()` 返回的**已经是去掉继承前缀的自有段**
+ * （`snapshotEvents(inheritedEventCount)` → `log.slice(inheritedEventCount)`）。
+ * 所以「自有段 + 非零 offset」= 前缀被排除两次：
+ *  - 自有段比前缀短 → 上游抛错 → 该会话每个 `user_schedule_*` 都变
+ *    `internal_error`，调度器每次 drive 都在 fold 处 return，**一条提醒都不触发**；
+ *  - 自有段比前缀长 → 静默跳过最早的那几条自有事件，用户建好的提醒既不出现也不响。
+ *
+ * 这里把配对规则收成一处：走 `ownEvents()` 就传 0，走旧代含 seed 的 `.events`
+ * 整表才传前缀长度。调用方不再自己拼这两个值，也就没法再拼错。
+ */
+export function readFoldInput(
+  session: SessionLogSurface | Session,
+): { events: readonly SessionEvent[]; inheritedEventCount: number } {
+  const surface = session as SessionLogSurface;
+  if (typeof surface.ownEvents === 'function') {
+    // 自有段：前缀已经被内核切掉，再切一次就是双重排除。
+    return { events: surface.ownEvents(), inheritedEventCount: 0 };
+  }
+  // 旧代 `.events` 含 seed 全长，前缀由 fold 自己切。
+  return { events: surface.events ?? [], inheritedEventCount: readInheritedEventCount(session) };
+}
+
+/**
+ * 按**绝对 seq** 读单条事件（零分配，配合 {@link readLogCursor} 做增量扫描）。
+ *
+ * 表内六代都导出 `eventAt(seq)`，实测一致；它是内核推荐的面（`ownEvents()` 已被标
+ * `@deprecated`，理由正是「同步读整份日志」）。
+ *
+ * 回落面的索引口径要分清，否则会读错一条：
+ * - 内核有 `eventAt` → 参数是绝对 seq，内核自己处理继承前缀
+ * - 只有 `ownEvents()`（假 session）→ 它返回的是**不含前缀**的自有段，所以要
+ *   `seq - offset` 才能对上
+ * - 只有 `.events`（0.1.1 那代）→ 数组含 seed 全长，绝对 seq 直接索引
+ */
+export function readEventAt(
+  session: SessionLogSurface | Session,
+  seq: number,
+): SessionEvent | undefined {
+  const surface = session as SessionLogSurface & {
+    eventAt?: (at: number) => SessionEvent | undefined;
+  };
+  if (typeof surface.eventAt === 'function') {
+    return surface.eventAt(seq);
+  }
+  const events = readOwnEvents(session);
+  const index = typeof surface.ownEvents === 'function'
+    ? seq - readInheritedEventCount(session)
+    : seq;
+  return index >= 0 ? events[index] : undefined;
 }
 
 /** 探测到的 sessionApi 代次（诊断 / 测试用；不参与业务分支）。 */

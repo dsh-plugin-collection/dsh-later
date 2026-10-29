@@ -17,11 +17,14 @@ import { createAfterRecord as createAfterScheduleRecord } from '../lib/schedule-
 import {
   KERNEL_GENERATIONS,
   KERNEL_SCOPED_PACKAGES,
+  compareVersions,
   detectSessionApi,
+  genPeerRange,
   peerMatrixEntries,
   peerRangeFor,
   readInheritedEventCount,
   readOwnEvents,
+  versionAtLeast,
 } from '../lib/upstream-compat.js';
 import { foldUserState, toInputError } from '../lib/user-tools.js';
 import { Config } from '../lib/index.js';
@@ -111,6 +114,22 @@ function caretCovers(range, version) {
   return v.pre >= lo.pre;
 }
 
+/**
+ * 独立重算某代的排他上界。**故意不复用实现里的同名逻辑** —— 测试拿实现算期望值，
+ * 实现写错时测试会跟着一起错（这类"自我确认的守卫"本仓已经吃过一次教训）。
+ */
+function expectedCeiling(id) {
+  const [major, minor, patch] = id.split('-')[0].split('.').map((part) => Number(part));
+  return `${major}.${minor}.${patch + 1}-0`;
+}
+
+/** `>=<floor> <ceiling>` 单条款判定，含预发布（semver §11，用本仓比较器）。 */
+function clauseSatisfied(clause, version) {
+  const m = /^>=(\S+) <(\S+)$/.exec(clause.trim());
+  if (m === null) return false;
+  return (versionAtLeast(version, m[1]) ?? false) && (compareVersions(version, m[2]) ?? 1) < 0;
+}
+
 test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，范围自洽）', () => {
   assert.ok(KERNEL_GENERATIONS.length >= 2, '至少覆盖两代');
   // issue #95（2026-10-26）先用跨代 tsc 量了一遍：0.1.1 / 0.1.2 / 0.1.5 三代都红，于是先把下界
@@ -124,21 +143,30 @@ test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，�
   for (const gen of KERNEL_GENERATIONS) {
     // 0.1.1 出表后表里不应再有 legacy-events 的一代；read* 的兜底分支保留为防御。
     assert.equal(gen.sessionApi, 'own-events', `${gen.id} 应为 own-events（0.1.2 起形状未变，0.1.1 已出表）`);
-    // 范围必须覆盖自身 id —— 否则等于声明了一个自己都不满足的区间
+    // 条款必须**自满足**：范围的下界高于自身 id 就等于声明了一个自己都不满足的区间。
+    const clause = genPeerRange(gen.id);
     assert.ok(
-      caretCovers(gen.peerRange, gen.id),
-      `${gen.id} 不满足自己的 peerRange ${gen.peerRange}`,
+      clauseSatisfied(clause, gen.id),
+      `${gen.id} 不满足自己的 peer 条款 ${clause}`,
     );
-    // peerRange 的下界必须**恰为**该代次本身，不能借更早的 range 蒙混。
-    // 例：给 `0.1.5-rc.1` 写 `^0.1.2-rc.1` 虽然 semver 上"覆盖"了它（同 minor），
-    // 但那等于声明插件从 0.1.2 起就支持这一代次 —— 两代是**分别验证**过的（兼容面不同：
-    // 0.1.2 缺 FileTypeIcon/fileSizeText，见 #95/#101），代次表的意义正是逐代留痕，
-    // 故下界必须与 id 一致。
-    assert.equal(
-      gen.peerRange,
-      `^${gen.id}`,
-      `${gen.id} 的 peerRange 应为 ^${gen.id}（逐代留痕，不借用更早下界）`,
+    /**
+     * 下界必须**恰为**该代次本身，不能借更早的 range 蒙混。
+     * 例：给 `0.1.5-rc.1` 写 `^0.1.2-rc.1` 在 semver 上"覆盖"了它（同 minor），但那等于
+     * 声明插件从 0.1.2 起就支持这一代次 —— 两代是**分别验证**过的（兼容面不同：0.1.2 缺
+     * FileTypeIcon/fileSizeText，见 #95/#101），代次表的意义正是逐代留痕。
+     */
+    assert.ok(clause.startsWith(`>=${gen.id} `), `${gen.id} 的条款下界必须恰为该代：${clause}`);
+    /**
+     * 且**必须带上界**。这条是 2026-10-28 补的：此前写成 `^<id>`，而 caret 在 0.x 上锁的是
+     * minor（`^0.1.2-rc.1` = `>=0.1.2-rc.1 <0.2.0-0`），于是六枚逐代 caret 的并集照样放行
+     * `0.1.3-alpha.2`/`0.1.6-alpha.1`/`0.1.7-alpha.1`/`0.1.5-rc.1`（真内核评估器实测全 pass）。
+     * 这些运行时只读 peer、不读 engines —— 少了这条断言，"收紧支持面"会只在没人走的那侧生效。
+     */
+    assert.ok(
+      clause.endsWith(` <${expectedCeiling(gen.id)}`),
+      `${gen.id} 的条款缺该段排他上界（应为 <${expectedCeiling(gen.id)}）：${clause}`,
     );
+    assert.ok(!clause.includes('^'), `${gen.id} 的条款不应再用 caret（上界会漏整条 minor）`);
   }
 
   // 有序（递增）
@@ -171,10 +199,22 @@ test('verGt / caretCovers 自身行为正确（防护栏本身失效）', () => 
   assert.equal(caretCovers('^0.1.5-rc.3', '0.1.5-rc.1'), false);
 });
 
-test('peerRangeFor：commands 额外并上 0.0.1-rc.1，其余仅内核代次', () => {
-  const kernelRanges = KERNEL_GENERATIONS.map((g) => g.peerRange).join(' || ');
-  assert.equal(peerRangeFor('@deepseek-ai/dsh-commands'), `^0.0.1-rc.1 || ${kernelRanges}`);
+test('peerRangeFor：commands 额外并上 0.0.1 线，其余仅内核代次（逐代 + 各带上界）', () => {
+  const kernelRanges = KERNEL_GENERATIONS.map((g) => genPeerRange(g.id)).join(' || ');
+  assert.equal(
+    peerRangeFor('@deepseek-ai/dsh-commands'),
+    `>=0.0.1-rc.1 <0.0.2-0 || ${kernelRanges}`,
+  );
   assert.equal(peerRangeFor('@deepseek-ai/dsh-session'), kernelRanges);
+  // 整串里不该再有 caret：那会把上界漏到整条 minor（本轮修复的正是这个）。
+  for (const { packageName, range } of peerMatrixEntries()) {
+    assert.ok(!range.includes('^'), `${packageName} 的 peer 串里仍有 caret`);
+    assert.equal(
+      range.split('||').length,
+      KERNEL_GENERATIONS.length + (packageName === '@deepseek-ai/dsh-commands' ? 1 : 0),
+      `${packageName} 的逐代条款数不对`,
+    );
+  }
   // 反例保护：非 commands 的包不得混入 0.0.1
   for (const { packageName, range } of peerMatrixEntries()) {
     if (packageName === '@deepseek-ai/dsh-commands') continue;
@@ -234,8 +274,24 @@ test('devDependencies 固定到某个已验证代次（不与 peer 范围混同�
     1,
     `devDependencies 代次不一致：${JSON.stringify(pinned)}`,
   );
-  // 且应是最新已验证代次 —— 让本地尽可能贴近运行时
-  assert.equal(pinned[0], latest, `devDependencies 应固定到最新已验证代次 ${latest}（当前 ${pinned[0]}）`);
+  /**
+   * dev 固定代次**允许落后于**表里最新一代，但落后必须是显式的。
+   *
+   * 这里原先断言「必须是最新已验证代次」，与下方那条把 dev 代次硬记成常量的断言相冲：
+   * 一旦代次表新增一代（本轮就加了 `0.2.1-rc.3/rc.4`），两条就会同时失败 —— 一条要 dev 跟上，
+   * 一条把 dev 钉在旧值上。这不是「哪条写错了」，而是它们在假装同一件事：
+   * 「表里有几代验过」和「本地开发装的是哪一代」是两回事，混成一条就会互相打脸。
+   *
+   * 真正的覆盖面在别处：比 dev 更新的代次由 `verify-across-kernels --steps type` 逐代换线跑
+   * tsc（本轮 rc.3/rc.4 即如此，两代都绿），不依赖本地装的是哪一代。所以这里的正确要求是
+   * **dev 必须属于表内某一代**（上面已断言）+ **落后必须被显式记下**（下面那条常量断言）。
+   */
+  if (pinned[0] !== latest) {
+    console.log(
+      `ℹ️ dev 固定代次 ${pinned[0]} 落后于最新已验证代次 ${latest}：` +
+        '更新的代次由 `verify-across-kernels --steps type` 覆盖；落后的事实由下方常量断言显式记录。',
+    );
+  }
 });
 
 test('dev 与运行时代次的对齐说明（防止再次悄悄脱节）', () => {
@@ -365,6 +421,14 @@ test('0.2.0：Config 标了 volatile 且字段齐全（否则设置页不生成�
     'confirmDelivery',
     'onUnconfirmed',
     'clockIconStyle',
+    // 智能时段的五个 HH:mm 边界（issue #19）：它们**曾经只在这份清单里缺席**，
+    // 卡片却一直写着这五个 key —— 于是改动永远落不进设置层。反向门禁（渲染出来的
+    // 可写字段 ⊆ Config）见 tests/settings-schema-coverage.test.mjs，那条不靠这张手抄表。
+    'workStart',
+    'workEnd',
+    'lunchStart',
+    'lunchEnd',
+    'eveningEnd',
     'advancedSyntax',
   ];
   assert.deepEqual(
@@ -414,8 +478,10 @@ test('0.2.0：host 侧探测 register 缺失后走 describe() 轨道', () => {
  * 为什么需要：0.2.0 的表单由 `Config` 生成，但**渲染哪些行由 SECTIONS 决定**。
  * 只加 Config 字段、忘了加 section 条目时，宿主不会报错——字段就在 schema 里，
  * 却在设置页上无处可点，等于该功能没有开关（本次加 advancedSyntax 时两边都要动，
- * 正是最容易只改一半的组合）。反向不校验：智能时段的 5 个 HH:mm 字段历史上就
- * 只存在于设置卡、不在 Config 里，那是另一件事，不该由这条测试顺带掩盖。
+ * 正是最容易只改一半的组合）。反向（卡片能写、`Config` 没声明）**原先无人校验**，
+ * 智能时段的五个 HH:mm 字段就是这么在设置卡上孤立存在的（issue #19）；现在反向由
+ * `tests/settings-schema-coverage.test.mjs` 用真实渲染 + 真实 schema 钉住，两条合起来
+ * 才是双向闭合。
  */
 test('Config 的每个可编辑字段都在设置卡 SECTIONS 中有对应行', () => {
   const json = Config.toJSON();

@@ -15,7 +15,7 @@
 **`/later` delayed send** — no panel needed: type one line in the input box and it is sent later as yourself (demo: typing `/later +5s`, `+3m`, `+1h20m` character by character, then Enter to start the countdowns; the `+5s` one really lands when due):
 
 <p align="center">
-<img src="docs/media/docs-later-full.gif" width="760" alt="/later demo: type /later +5s 检查部署结果 → Enter → dock countdown → delivered as yourself when due"/>
+<img src="docs/media/docs-later-full.webp" width="760" alt="/later demo: type /later +5s 检查部署结果 → Enter → dock countdown → delivered as yourself when due"/>
 </p>
 
 ---
@@ -150,11 +150,11 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 | Creating a reminder (type → panel → add → dock) | Firing when due (countdown → message arrives) |
 |---|---|
-| <img src="docs/media/docs-scheduler-create.gif" width="380" alt="Create reminder demo"/> | <img src="docs/media/docs-scheduler-fired.gif" width="380" alt="Due firing demo"/> |
+| <img src="docs/media/docs-scheduler-create.webp" width="380" alt="Create reminder demo"/> | <img src="docs/media/docs-scheduler-fired.webp" width="380" alt="Due firing demo"/> |
 
 **`/later` shortcut** — skip the panel and type one line in the composer to send as yourself later:
 
-<img src="docs/media/docs-later.gif" width="760" alt="/later command demo: type /later +60m text, press Enter, dock shows the countdown"/>
+<img src="docs/media/docs-later.webp" width="760" alt="/later command demo: type /later +60m text, press Enter, dock shows the countdown"/>
 
 ---
 
@@ -195,13 +195,21 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.1.5-rc.3` | Supported |
 | `0.1.7-rc.1` / `0.1.7-rc.2` | Supported |
 | `0.2.0-rc.2` / `0.2.1-rc.2` | Supported |
+| `0.2.1-rc.3` / `0.2.1-rc.4` | Supported |
 
-The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`. Node `^22.19 || >=24`.
+The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`. Node `^22.19 || >=24`.
+
+Both this line and `peerDependencies` are derived from the generation table (`node scripts/sync-peer-matrix.mjs`) and shaped as **per-segment bounded ranges**, not a whitelist: later rcs within a segment and that segment's final release are admitted together (range syntax cannot express "only these verified versions"). Both sides have to be bounded because the enforcers differ: from 0.2.1 on the kernel reads only `engines.dsh`, while 0.1.7-rc.1 through 0.2.0-rc.2 read only the `dsh-*` peer ranges — and 0.1.2-rc.1 and 0.1.5-rc.3 have no compatibility gate at all, so on those two the lines are documentation, not enforcement.
+
+Each side leaked once, both measured rather than reasoned: `engines.dsh` was a hand-written wide string (`>=0.1.2-rc.1 <0.2.0-0` admitted `0.1.3-alpha.2`, `0.1.6-alpha.1`, `0.1.7-alpha.1`, `0.2.2-alpha.2`), while the peer side still used per-generation carets — and `^0.1.2-rc.1` expands to `>=0.1.2-rc.1 <0.2.0-0`, i.e. **the whole minor matches**. Tightening only `engines` would therefore have reinforced the door nobody walks through. Both are segment-bounded now.
+
+`0.2.1-rc.3` and `0.2.1-rc.4` were promoted into the table with all four faces measured: assembly and real delivery GREEN each **in its own process** and passing the same-source guard (which refuses to count a run where the plugin resolves kernel modules from a different tree than the one under test), cross-generation tsc green for both projects, and the gate green using **each generation's own** evaluator. Local development still pins `0.2.1-rc.2` (recorded as an explicit constant that must be updated deliberately); newer generations are covered per-generation via `--steps type` rather than by moving the local pin.
 
 Two boundaries are worth stating, otherwise they look like oversights:
 
 - **`0.1.1-rc.2` is not supported.** Not because the code fails there, but because its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict. Support is moot until upstream publishes it.
-- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`, and an "rc.1 launcher + rc.3 components" mix does not start at all (unrelated to this plugin). What you actually get is a uniform `rc.3`.
+- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3` (measured: 237 of 238 `@deepseek-ai/dsh*` entries were not `rc.1`). **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
+  This section used to claim that an "rc.1 launcher + rc.3 components" mix "does not start at all" — **that was a misjudgement and has been withdrawn**: the same mixed tree mounts and delivers once peers are backfilled. The failures came from two assembly quirks of our own verification script (a hard-coded launcher location, and skipping peer installation), not from a kernel limitation. `rc.1` stays outside the support range for one reason only: that shape has not been verified — not because it cannot work.
 
 Each generation is verified on four faces (baseline `main@28ca1dc`, i.e. 1.8.0, measured 2026-10-26): mount (a cold start on a real kernel loads the plugin), function (a due reminder really delivers, judged on event shapes, not on log text), type (the entire `@deepseek-ai/dsh*` line swapped to that generation, both tsconfig projects compile with zero errors), UI (a real GUI renders the timer button, the dock and the panel, screenshotted per generation). Rerun the first three with `npm run verify:kernels:all`, and the UI face with `npm run verify:ui`. The measurements, per-generation verdicts and method belong to [docs/verification.md](./docs/verification.md) and [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md); this table reports conclusions only.
 

@@ -15,7 +15,7 @@
 **`/later` 延迟发送** —— 不开面板，在输入框敲一行就以你的身份稍后发出（演示：逐字输入 `/later +5s` / `+3m` / `+1h20m`，回车后进入倒计时；`+5s` 那条到点真实送达）：
 
 <p align="center">
-<img src="docs/media/docs-later-full.gif" width="760" alt="/later 命令演示：输入 /later +5s 检查部署结果 → 回车 → dock 倒计时 → 到点以你的身份送达"/>
+<img src="docs/media/docs-later-full.webp" width="760" alt="/later 命令演示：输入 /later +5s 检查部署结果 → 回车 → dock 倒计时 → 到点以你的身份送达"/>
 </p>
 
 ---
@@ -150,11 +150,11 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 
 | 创建定时提醒（输入 → 面板 → 加入 → dock） | 到期触发（倒计时 → 收到消息） |
 |---|---|
-| <img src="docs/media/docs-scheduler-create.gif" width="380" alt="创建定时提醒演示"/> | <img src="docs/media/docs-scheduler-fired.gif" width="380" alt="到期触发演示"/> |
+| <img src="docs/media/docs-scheduler-create.webp" width="380" alt="创建定时提醒演示"/> | <img src="docs/media/docs-scheduler-fired.webp" width="380" alt="到期触发演示"/> |
 
 **`/later` 快捷命令** —— 不打面板，直接在输入框敲一行就以你的身份延迟发送：
 
-<img src="docs/media/docs-later.gif" width="760" alt="/later 命令演示：输入 /later +60m 内容 → 回车 → dock 出现倒计时"/>
+<img src="docs/media/docs-later.webp" width="760" alt="/later 命令演示：输入 /later +60m 内容 → 回车 → dock 出现倒计时"/>
 
 ---
 
@@ -195,13 +195,21 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 | `0.1.5-rc.3` | 支持 |
 | `0.1.7-rc.1` / `0.1.7-rc.2` | 支持 |
 | `0.2.0-rc.2` / `0.2.1-rc.2` | 支持 |
+| `0.2.1-rc.3` / `0.2.1-rc.4` | 支持 |
 
-声明在 `package.json` 的 `engines.dsh`：`>=0.1.2-rc.1 <0.2.0-0 || >=0.2.0-rc.2 <0.3.0-0`；Node 需要 `^22.19 || >=24`。
+声明在 `package.json` 的 `engines.dsh`：`>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0`；Node 需要 `^22.19 || >=24`。
+
+这行声明与 `peerDependencies` 都由代次表推导（`node scripts/sync-peer-matrix.mjs`），形状是**按版本段收口的范围**，不是白名单：同一版本段内更晚的 rc 与该段正式版会一并放行（range 语法写不出「只认已验证的那几个」）。**两侧都必须收**，因为执行者不同：0.2.1 起内核只看 `engines.dsh`，而 0.1.7-rc.1～0.2.0-rc.2 只看 `dsh-*` peer，0.1.2-rc.1 与 0.1.5-rc.3 两代根本没有兼容门禁（那两代上这两行是说明，不是拦截）。
+
+两处此前各漏过一次，都是实测出来的：`engines.dsh` 曾是手写宽串（`>=0.1.2-rc.1 <0.2.0-0` 放行 `0.1.3-alpha.2`、`0.1.6-alpha.1`、`0.1.7-alpha.1`、`0.2.2-alpha.2`）；而 peer 那侧当时仍是逐代 caret，`^0.1.2-rc.1` 展开为 `>=0.1.2-rc.1 <0.2.0-0`、**整条 minor 都命中**，所以只改 engines 等于把门修在了没人走的那一侧。现在两侧都是逐段收口。
+
+`0.2.1-rc.3` / `0.2.1-rc.4` 于本轮补齐四个面并正式入表：装配与真投递各自起**独立进程**实测 GREEN 且通过同源守卫（该守卫要求插件解析到的内核模块与被测树同源，否则结论不作数），跨代 tsc 两项目通过，门禁用**各代自己的**评估器判 pass。本地开发固定的代次仍停在 `0.2.1-rc.2`（`devDependencies` 由一条显式常量记录，升级时要同步改它），更新的代次靠 `--steps type` 逐代覆盖。
 
 两条边界说明白，免得被当成「漏支持」：
 
 - **`0.1.1-rc.2` 不支持。** 不是代码跑不通，而是它那条依赖线在 registry 里装不出来（`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` 未发布），任何工具都给不出结论；上游补发之前谈不上支持。
-- **`0.1.5` 按 `rc.3` 验证，不覆盖 `rc.1`。** `dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，默认安装会把整条插件线解析到 `rc.3`，而「`rc.1` 启动器 + `rc.3` 组件」这种混装根本起不来（与本插件无关）。你实际拿到的就是统一的 `rc.3`。
+- **`0.1.5` 按 `rc.3` 验证，不覆盖 `rc.1`。** `dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，默认安装会把整条插件线解析到 `rc.3`（实测 238 个 `@deepseek-ai/dsh*` 里 237 个不是 `rc.1`），所以**你实际拿到的就是统一的 `rc.3`**，我们只按它验证。
+  早先这里写过「`rc.1` 启动器 + `rc.3` 组件根本起不来」——那是**误判并已撤回**：同一棵混装树在补齐 peer 之后能正常装配并投递；当时的失败来自验证脚本自己的两处装配口径（写死启动器位置、跳过 peer 安装），不是内核限制。把 `rc.1` 排除在支持范围外，理由始终是「未按该形态验证」，不是「它不能用」。
 
 六代逐代验过四个面（基线 `main@28ca1dc`，即 1.8.0，2026-10-26 实测）：装配（真内核冷启动挂上插件）、功能（到点真实投递的事件形状）、类型（整条 `@deepseek-ai/dsh*` 依赖线换成该代次后两个 tsconfig 零错误）、UI（真 GUI 里定时按钮 / dock / 面板逐代截图留档）。前三个面复跑 `npm run verify:kernels:all`，UI 面复跑 `npm run verify:ui`。实测口径、逐代结论与方法归 [docs/verification.md](./docs/verification.md) 和 [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md)，本表只报结论。
 

@@ -111,8 +111,16 @@ export declare class UserScheduleRuntime {
      * 时直接 throw（`agent "..." already has active work`），会让插话在唯一可见的场景里
      * 必然失败（曾以 `internal_error: 插话执行失败` 落日志）。`agent.steer` 是为「in-flight
      * 也要在下一个 step boundary 立即消费」设计的原语：空闲则开 turn、忙碌则排到边界，
-     * 不需要空闲。dispatch 事件在同一同步块内 append，与 auto-driver 的 fold 无并发窗口
-     * （JS 单线程；两者要么整块先执行要么整块后执行，后执行者 fold 即见 dispatch 而跳过）。
+     * 不需要空闲。
+     *
+     * ⚠️ **`deliver` 与 `append(dispatch)` 之间永远不能插 await。** 这句话曾经只是注释、
+     * 代码并不成立（中间隔着 `await verifyDelivery`，最长 2s），后果是窗口里记录仍 active，
+     * 而共用同一份日志的另一个读者（dsh-schedule 自己的调度器、以及本插件到点的 timer）
+     * 会把它再派发一次——去重契约从来是「日志里有没有 dispatch」，进程内的 in-flight 集合
+     * 拦不住另一个插件。这条由 `tests/delivery.test.mjs`「确认窗口里记录必须已经出列」守着。
+     *
+     * 正因为出列挪到了确认之前，「未确认 + 保留可重试」不能再靠「不写 dispatch」实现，
+     * 改为补偿重挂一条，见 {@link rearmOneShot}。
      */
     steerById(id: string): Promise<{
         ok: true;
@@ -123,6 +131,32 @@ export declare class UserScheduleRuntime {
         code: string;
         message: string;
     }>;
+    /**
+     * 投递未确认且策略为 `keep` 时，把这条**已经出列**的一次性提醒重新挂回。
+     *
+     * 为什么必须新建而不能撤销那条 dispatch：上游 `applyScheduleChanges`
+     * （dsh-schedule/lib/index.js:918 起）对 `create` 复用 id 直接抛
+     * `schedule id ... was reused`，对已 dispatch 的 id 再 `delete` 也抛
+     * `delete targets inactive id`——一条一次性记录派发过就是派发过，日志面无法回退。
+     * 所以沿用编辑路径的做法：**换新日志 id、uid 保持不变**（wire 面以 uid 优先，
+     * GUI 看不出这条换过 id；`findScheduleIdByUid` 也仍能按 uid 命中新 id）。
+     *
+     * 时刻按原 `scheduledAt` 落成 `at` 记录：编辑路径已确认 `createAtRecord` 接受过去
+     * 的时刻（注释原话「保留原时刻（不重置到未来）」），这样端态与旧行为「留在 active、
+     * 已 overdue、下次 drive 再派发」等价。代价是这条补偿项的 `kind` 由 `after` 变成
+     * `at`，而 GUI 的暂停只收 `after`（`canPause`）——补偿本来就在异常路径上，宁可少
+     * 一个「可暂停」能力，也不要在「可能丢提醒」上让步。进度窗口沿用 sidecar 里的
+     * `windowSeconds`，不受 kind 变化影响。
+     *
+     * 顺序沿用 create/edit 两处：**新所有权先写 sidecar，再写 create 事件**（投影 fold
+     * 在事件到达时按 sidecar 判定归属，反过来会冒出一条无人认领的记录）；旧条目只在
+     * flush 成功之后才撤销（否则新旧两条都归本插件，面板上会同时出现两行——那正是
+     * 「同一个 uid 出现两条」的已知成因）。
+     *
+     * @returns 新日志 id；任何一步失败返回 `undefined`，调用方保留原错误码并明确告诉
+     *   用户「重挂失败、需人工确认」，绝不假装成功。
+     */
+    private rearmOneShot;
     /**
      * 按配置把消息投进队列。
      *

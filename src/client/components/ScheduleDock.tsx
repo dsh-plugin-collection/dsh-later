@@ -198,7 +198,6 @@ function canPause(item: ClientSchedule, now: number): boolean {
 }
 
 export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl, sessionId, useProjection, renderFactorySlot, t: seatT }: ScheduleDockProps): JSX.Element | null {
-  const now = useNow(1000);
   // seat 优先取词。第一个参数传 undefined：dock 不再注入原始 locale face，所以兜底
   // 路径按 v1 行为取中文——它只在「宿主压根不给 seat」或「key 没进字典」时才走到。
   const { tr: t } = useSchedT(undefined, seatT);
@@ -268,6 +267,18 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
         ) as ClientSchedule[],
     [projection, dismissedPaused, promptOverrides],
   );
+
+  /**
+   * 秒级 tick。位置有硬性要求：**必须排在 `schedules` 之后**——门控要读它的条数，而
+   * `const` 处在 TDZ 里，把本行放回组件第一行去读 `schedules` 会直接 ReferenceError。
+   *
+   * 没有提醒可显示时不注册定时器。门控条件与下面那条「整体返回 null」的早退**同条件**
+   * （`schedules.length === 0 || sessionId === undefined`），两者必须一起改：本组件渲染
+   * 不出任何东西时 `now` 没有任何读者，此时每秒建一个 interval、每秒重渲染一棵恒为 null
+   * 的树纯属白烧。停摆是 `useNow` 内部的行为（它的 hook 槽位数不随之变化），不是条件调用
+   * hook——那会制造第二次「分支改变 hook 序列」的违规。
+   */
+  const now = useNow(schedules.length === 0 || sessionId === undefined ? 0 : 1000);
 
   const [collapsed, setCollapsed] = useState(true);
   /** 折叠头与列表的关联 id（`aria-controls` ↔ `id`），宿主同款做法。 */

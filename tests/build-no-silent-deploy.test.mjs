@@ -10,10 +10,10 @@
  * 本文件两层都要钉住：纯策略（快、穷举）+ 端到端（真的用假 HOME 跑一次构建，
  * 证明默认路径碰不到 profile）。
  */
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { shouldRelink, RELINK_SKIP_NOTICE } from '../scripts/relink-policy.mjs';
@@ -82,9 +82,17 @@ test('package.json 提供显式 deploy 入口', () => {
 
 /* ---------------- 3. 端到端：默认构建真的碰不到 profile ---------------- */
 
+/**
+ * 本文件建出来的假 HOME。用文件级 `after()` 统一删（见文件末尾）——不是每个用例
+ * 自己删，因为**断言失败时用例自己的清理不会跑**，而那正是最容易攒下垃圾的分支：
+ * 实测 `/tmp/fake-dsh-home-*` 已积到 200 个，每跑一次 `npm test` 漏 8 个。
+ */
+const pendingHomes = new Set();
+
 /** 造一个假 HOME，里面放一个装了本插件的 profile。 */
 function fakeProfile() {
   const home = mkdtempSync(join(tmpdir(), 'fake-dsh-home-'));
+  pendingHomes.add(home);
   const lib = join(home, '.dsh/profiles/web/node_modules/dsh-later/lib');
   mkdirSync(lib, { recursive: true });
   writeFileSync(join(lib, 'index.js'), '// SENTINEL 旧产物，不该被覆盖\n');
@@ -121,4 +129,28 @@ test('端到端：默认 npm run build 不改写 profile；--deploy 才改', { s
     false,
     '--deploy 应把产物同步进 profile',
   );
+});
+
+/**
+ * 收尾：删掉本文件建出来的假 HOME。
+ *
+ * 删之前有一道**自检**：路径必须在 `os.tmpdir()` 下、且 basename 以 `fake-dsh-home-` 开头。
+ * 少写这道判断的 `rmSync(..., {recursive:true})` 一旦收到被污染的路径就是不可逆的递归删除，
+ * 而这个清理恰恰跑在"用例已经失败"的路上——那时最不该再制造第二个破坏。
+ * 不合格的路径跳过并打一行，让问题可见，而不是静默或动手。
+ */
+after(() => {
+  const base = realpathSync(tmpdir());
+  for (const home of pendingHomes) {
+    const rel = `fake-dsh-home-`;
+    const underTmp = home.startsWith(base + '/');
+    const namedLikeOurs = home.slice(base.length + 1).split('/')[0] === rel ||
+      home.slice(base.length + 1).startsWith(rel);
+    if (!underTmp || !namedLikeOurs) {
+      console.log(`ℹ️ 跳过非本文件形状的临时目录，不删：${home}`);
+      continue;
+    }
+    rmSync(home, { recursive: true, force: true });
+    pendingHomes.delete(home);
+  }
 });

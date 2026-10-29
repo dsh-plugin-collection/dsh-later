@@ -194,8 +194,21 @@ export interface FoldedUserSchedules {
 }
 /** fold 当前会话的完整用户调度状态（带缓存；调用方不得变更返回值）。
  *
- * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readOwnEvents /
- * readInheritedEventCount）——新 rc 若再改名只动那一处。
+ * 跨代 Session API 探测已收敛到 `upstream-compat.ts`（readFoldInput /
+ * readLogCursor）——新 rc 若再改名只动那一处。
+ *
+ * 判据为什么从「数组引用 + 长度」换成「游标 + sidecar 代数」：`ownEvents()` 在
+ * fork / 子代理会话（`inheritedEventCount > 0`）上每次 `log.slice()` 返回**新数组**，
+ * 引用比较恒不命中——缓存对这类会话完全不存在，而且光是判定一次就要先拷一份全量
+ * 日志。本函数在一次派发里被调两次（`runtime.driveOnce` 预算一次、维护事务内再算
+ * 一次），插话路径同样两次，于是每个 fork 会话上的每一轮都白 fold 两遍。
+ * 换成零分配的 `seq` 游标后，命中路径连日志数组都不必读。
+ *
+ * `generation` 那一维是新加的：结果里的 `owned`/`delivery` 有一部分来自 sidecar，
+ * 而 sidecar 不属于会话日志。旧判据在 root 会话上本来就有这个盲区（引用+长度都
+ * 不变时 sidecar 改了读不到），只是 fork 会话上缓存从不命中、反而看不见。既然这次
+ * 让 fork 会话也开始吃缓存，就把这个盲区一并封掉——代价是任一会话写 sidecar 会让
+ * 全部 fold 缓存作废，而写 sidecar 只发生在用户改动提醒时，那一刻本就该重算。
  */
 export declare function foldUserState(session: Session): UserFoldState;
 /** 稳定内部错误（不透出异常细节）。 */

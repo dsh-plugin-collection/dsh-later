@@ -71,6 +71,8 @@ export interface PausedEntry {
     /** 暂停时随条目冻结的附件（resume/插话投递时原样带回）。 */
     readonly attachments?: readonly ScheduledAttachment[];
 }
+/** 当前 sidecar 变更代数；与上一次读取不同，说明所有权/留档可能已变。 */
+export declare function ownershipGeneration(): number;
 /** 读取某会话的全部所有权记录（缓存优先；返回副本语义，调用方不得变更）。 */
 export declare function allOwnership(sessionId: string): Readonly<Record<string, OwnedEntry>>;
 /** 某 schedule id 是否由用户工具创建。 */
