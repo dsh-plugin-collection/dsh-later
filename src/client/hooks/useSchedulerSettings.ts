@@ -124,9 +124,3 @@ export function useSchedulerSettings(
 }
 
 /** 让无设置时面板仍能拿到稳定默认（仅供内部测试或特殊兜底）。 */
-export const DEFAULT_RESOLVED_SETTINGS: ResolvedSchedulerSettings = {
-  ready: false,
-  showButton: true,
-  smartWindow: DEFAULT_SMART_WINDOW,
-  promptLimits: FALLBACK_PROMPT,
-};

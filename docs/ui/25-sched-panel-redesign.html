@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 定时面板改版对照 Demo</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --stage: #e9ebef;
+    --card: #ffffff;
+    --text: #1b1d21;
+    --text-2: #5f6570;
+    --text-3: #8b909a;
+    --text-4: #adb2b8;
+    --line: #e5e7eb;
+    --line-2: #d8dbe0;
+    --brand: #4d6bfe;
+    --brand-soft: #eef1ff;
+    --warn: #b45309;
+    --warn-soft: #fff7ed;
+    --ok: #15803d;
+    --danger: #c0392b;
+    --danger-soft: #fdf1f0;
+    --hover: rgba(0, 0, 0, .05);
+    --active-bg: rgba(0, 0, 0, .07);
+    /* 面板材质（对照宿主 --dsw-menu-surface-fill / --dsw-elevation-prominent） */
+    --panel-bg: rgba(255, 255, 255, .86);
+    --panel-line: rgba(0, 0, 0, .08);
+    --panel-shadow: 0 12px 32px rgba(15, 23, 42, .14), 0 0 0 .5px rgba(0, 0, 0, .08);
+    --chip-bg: transparent;
+    --cta-bg: #1b1d21;
+    --cta-fg: #ffffff;
+    --cta-dis: rgba(27, 29, 33, .35);
+  }
+  [data-theme="dark"] {
+    --bg: #121316;
+    --stage: #17181b;
+    --card: #1f2126;
+    --text: #e8e9ec;
+    --text-2: #b6bac2;
+    --text-3: #8b909a;
+    --text-4: #6b7078;
+    --line: #2c2f35;
+    --line-2: #3a3e46;
+    --brand: #93aaff;
+    --brand-soft: #232a44;
+    --warn: #f0b26b;
+    --warn-soft: #33291c;
+    --ok: #6ee7a0;
+    --danger: #f08a8a;
+    --danger-soft: #34211f;
+    --hover: rgba(255, 255, 255, .07);
+    --active-bg: rgba(255, 255, 255, .10);
+    --panel-bg: rgba(32, 34, 39, .82);
+    --panel-line: rgba(255, 255, 255, .09);
+    --panel-shadow: 0 16px 40px rgba(0, 0, 0, .5), 0 0 0 .5px rgba(255, 255, 255, .09);
+    --chip-bg: transparent;
+    --cta-bg: #f2f3f5;
+    --cta-fg: #1b1d21;
+    --cta-dis: rgba(242, 243, 245, .32);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 22px 80px;
+    background: var(--bg); color: var(--text);
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .page { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .lede { color: var(--text-3); margin: 0 0 22px; font-size: 13px; }
+  h2 { font-size: 15px; margin: 38px 0 12px; }
+  h2 .n {
+    display: inline-grid; place-items: center; width: 19px; height: 19px; margin-right: 8px;
+    border-radius: 6px; background: var(--brand-soft); color: var(--brand);
+    font-size: 11px; font-weight: 700; vertical-align: -3px;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .kbd {
+    display: inline-block; padding: 0 5px; border: 1px solid var(--line-2); border-bottom-width: 2px;
+    border-radius: 5px; font-size: 11px; font-family: inherit; color: var(--text-2); background: var(--card);
+  }
+
+  /* ==================== 控制条 ==================== */
+  .bar {
+    position: sticky; top: 0; z-index: 20; margin-bottom: 20px;
+    display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center;
+    padding: 12px 16px; border-radius: 12px;
+    background: var(--card); border: 1px solid var(--line);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .06);
+  }
+  .bar label { font-size: 12px; color: var(--text-3); }
+  .bar .grp { display: flex; align-items: center; gap: 8px; }
+  input[type="range"] { width: 210px; accent-color: var(--brand); }
+  .clock {
+    font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px;
+    min-width: 116px; text-align: center; padding: 2px 8px; border-radius: 7px;
+    background: var(--brand-soft); color: var(--brand);
+  }
+  .btn {
+    appearance: none; border: 1px solid var(--line-2); background: var(--card); color: var(--text-2);
+    border-radius: 8px; padding: 4px 11px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { color: var(--text); border-color: var(--text-4); }
+  .btn[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: transparent; }
+
+  /* ==================== 对照舞台 ==================== */
+  .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .stage { grid-template-columns: 1fr; } }
+  .col { }
+  .col-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 10px; }
+  .col-head .name { font-size: 13px; font-weight: 600; }
+  .tag {
+    font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+    background: var(--danger-soft); color: var(--danger);
+  }
+  .tag.good { background: var(--brand-soft); color: var(--brand); }
+  .scene {
+    position: relative; border-radius: 14px; padding: 18px 18px 14px;
+    background: var(--stage); border: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  }
+  .chatline {
+    width: 100%; font-size: 11.5px; color: var(--text-4); text-align: right; padding-right: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 假 composer：给面板一个「锚在输入框上方」的真实语境 */
+  .composer {
+    width: 100%; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); padding: 8px 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .composer .draft { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .composer .draft.empty { color: var(--text-4); }
+  .composer .ico { width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center;
+    color: var(--text-3); border: 1px solid var(--line); font-size: 13px; flex: none; }
+  .composer .ico.on { color: var(--text); border-color: var(--text-4); }
+  .composer .send { width: 26px; height: 26px; border-radius: 999px; background: var(--brand);
+    color: #fff; display: grid; place-items: center; font-size: 13px; flex: none; }
+
+  /* ==================== 面板（两版共用外壳） ==================== */
+  .panel {
+    width: 340px; max-width: 100%; border-radius: 16px; padding: 12px;
+    background: var(--panel-bg); backdrop-filter: blur(40px) saturate(1.5);
+    -webkit-backdrop-filter: blur(40px) saturate(1.5);
+    box-shadow: var(--panel-shadow); color: var(--text-2);
+    font-size: 12px; line-height: 20px; position: relative;
+  }
+  .p-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .p-title { font-size: 13px; font-weight: 500; color: var(--text); }
+  .p-close { width: 22px; height: 22px; border: 0; background: transparent; color: var(--text-3);
+    border-radius: 999px; display: grid; place-items: center; cursor: pointer; font-size: 13px; }
+  .p-close:hover { background: var(--hover); color: var(--text-2); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .chip {
+    height: 30px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 8px;
+    background: var(--chip-bg); color: var(--text-2); cursor: pointer; font-size: 12px;
+    font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 5px;
+    transition: color .12s ease, border-color .12s ease, background .12s ease;
+  }
+  .chip:hover { color: var(--text); border-color: var(--text-4); }
+  .chip.on { background: var(--active-bg); color: var(--brand); border-color: var(--brand); }
+
+  .hint { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .err { color: var(--danger); font-size: 12px; }
+  .sec-h { margin-top: 10px; }
+  .empty { color: var(--text-3); text-align: center; padding: 10px 0; font-size: 12px; }
+  .foot { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .cta {
+    flex: 1; appearance: none; border: 1px solid transparent; border-radius: 8px; padding: 5px 14px;
+    cursor: pointer; background: var(--cta-bg); color: var(--cta-fg);
+    font-size: 13px; line-height: 1.5; font-weight: 500; font-family: inherit;
+    font-variant-numeric: tabular-nums;
+  }
+  .cta:disabled { background: var(--cta-dis); color: var(--text-3); cursor: default; }
+  [data-theme="dark"] .cta:disabled { color: #2a2c30; }
+
+  /* ---------- 新版专属 ---------- */
+  .lbl {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-4);
+    margin: 0 0 5px;
+  }
+  .preview {
+    border: 1px solid var(--panel-line); border-radius: 9px; padding: 7px 9px; margin-bottom: 10px;
+    background: var(--hover);
+  }
+  .preview .txt {
+    font-size: 12.5px; line-height: 17px; color: var(--text);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .preview .txt.ph { color: var(--text-4); font-style: normal; }
+  .preview .meta { display: flex; gap: 8px; align-items: center; font-size: 10.5px; color: var(--text-4);
+    font-variant-numeric: tabular-nums; margin-top: 3px; }
+  .chip2 { position: relative; }
+  .chip2 .sub { font-size: 10.5px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+  .chip2.on .sub { color: var(--brand); opacity: .85; }
+  .chip2.on::after {
+    content: ""; position: absolute; top: 4px; right: 5px; width: 4px; height: 4px;
+    border-radius: 999px; background: var(--brand);
+  }
+  .chip2.past { opacity: .5; cursor: not-allowed; border-style: dashed; }
+  .chip2.past .sub { color: var(--danger); }
+  .due {
+    display: flex; align-items: baseline; gap: 7px; margin-top: 9px; padding-top: 9px;
+    border-top: 1px solid var(--panel-line);
+  }
+  .due .abs { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .due .rel { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .due .rel b { color: var(--brand); font-weight: 600; }
+  .sem { font-size: 10.5px; color: var(--text-4); margin-top: 4px; line-height: 15px; }
+  .tasks { list-style: none; margin: 0; padding: 0; max-height: 118px; overflow-y: auto; }
+  .task { display: flex; align-items: center; gap: 7px; padding: 4px 5px; border-radius: 6px; font-size: 11.5px; }
+  .task:hover { background: var(--hover); }
+  .dot { width: 5px; height: 5px; border-radius: 999px; flex: none; background: var(--brand); }
+  .dot.warn { background: var(--warn); }
+  .t-time { color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
+  .t-txt { flex: 1; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-del { opacity: 0; border: 0; background: transparent; color: var(--text-4); cursor: pointer; font-size: 11px; }
+  .task:hover .t-del { opacity: 1; }
+  .task:hover .t-del:hover { color: var(--danger); }
+  .keys {
+    display: flex; gap: 10px; justify-content: center; margin-top: 7px;
+    font-size: 10.5px; color: var(--text-4);
+  }
+  .linked {
+    display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 6px 8px;
+    border: 1px solid var(--panel-line); border-radius: 8px;
+    font-size: 11.5px; color: var(--text-3); cursor: pointer; font-variant-numeric: tabular-nums;
+  }
+  .linked:hover { background: var(--hover); color: var(--text-2); }
+  .linked .go { margin-left: auto; color: var(--brand); font-size: 11px; }
+  .custom { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+  .custom input {
+    flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px;
+    border: 1px solid var(--line-2); background: var(--card); color: var(--text);
+    font: inherit; font-size: 12px; color-scheme: inherit;
+  }
+  .custom .who { font-size: 10.5px; color: var(--text-4); flex: none; }
+
+  /* ==================== 说明 ==================== */
+  .notes { margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+  .note {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line-2);
+    border-radius: 9px; padding: 8px 12px; font-size: 12.5px; color: var(--text-2);
+  }
+  .note.bad { border-left-color: var(--danger); }
+  .note.good { border-left-color: var(--brand); }
+  .note b { color: var(--text); font-weight: 600; }
+  .note .src { color: var(--text-4); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 7px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; color: var(--text-3); font-weight: 600; letter-spacing: .04em; background: var(--stage); }
+  tr:last-child td { border-bottom: 0; }
+  td.now { color: var(--danger); font-variant-numeric: tabular-nums; }
+  td.new { color: var(--ok); font-variant-numeric: tabular-nums; }
+  .ask { border: 1px dashed var(--warn); background: var(--warn-soft); color: var(--text-2);
+    border-radius: 10px; padding: 10px 14px; font-size: 12.5px; }
+  .ask b { color: var(--warn); }
+</style>
+</head>
+<body data-theme="dark">
+<div class="page">
+  <h1>定时面板 · 现状 vs 优化后</h1>
+  <p class="lede">
+    两栏共用同一个模拟时钟与同一份草稿。拖时间轴、或按 <b>▶ 播放</b>（60×，1 秒 = 1 分钟）就能亲眼看到
+    左栏的三个 P0：芯片消失、时刻漂移、「工作时间」撒谎。
+  </p>
+
+  <div class="bar">
+    <div class="grp">
+      <label>模拟时刻</label>
+      <input id="slider" type="range" min="0" max="1439" step="1" value="935" />
+      <span class="clock" id="clock">15:35:00</span>
+    </div>
+    <div class="grp">
+      <button class="btn" id="play" aria-pressed="false">▶ 播放 60×</button>
+      <button class="btn" id="reset">↺ 回到 15:35</button>
+    </div>
+    <div class="grp">
+      <label>草稿</label>
+      <button class="btn" id="d1" aria-pressed="true">有内容</button>
+      <button class="btn" id="d0" aria-pressed="false">空</button>
+    </div>
+    <div class="grp">
+      <label>已排定</label>
+      <button class="btn" id="t0" aria-pressed="false">0 条</button>
+      <button class="btn" id="t2" aria-pressed="true">2 条</button>
+    </div>
+    <div class="grp">
+      <label>面板内任务列表</label>
+      <button class="btn" id="lp0" aria-pressed="true">收进 dock（提案）</button>
+      <button class="btn" id="lp1" aria-pressed="false">留在面板</button>
+    </div>
+    <div class="grp">
+      <button class="btn" id="theme">深色 / 浅色</button>
+    </div>
+  </div>
+
+  <div class="stage">
+    <!-- ==================== 左：现状 ==================== -->
+    <div class="col">
+      <div class="col-head">
+        <span class="name">现状</span>
+        <span class="tag">复刻 src/client/components/SchedPanel.tsx</span>
+      </div>
+      <div class="scene">
+        <div class="chatline" id="chatA">—</div>
+        <div class="panel" id="panelA"></div>
+        <div class="composer">
+          <div class="draft" id="draftA">—</div>
+          <div class="ico on">🕐</div>
+          <div class="send">↑</div>
+        </div>
+      </div>
+      <div class="notes" id="notesA"></div>
+    </div>
+
+    <!-- ==================== 右：优化后 ==================== -->
+    <div class="col">
+      <div class="col-head">
+        <span class="name">优化后</span>
+        <span class="tag good">本 demo 提案</span>
+      </div>
+      <div class="scene">
+        <div class="chatline" id="chatB">—</div>
+        <div class="panel" id="panelB"></div>
+        <div class="composer">
+          <div class="draft" id="draftB">—</div>
+          <div class="ico on">🕐</div>
+          <div class="send">↑</div>
+        </div>
+      </div>
+      <div class="notes" id="notesB"></div>
+    </div>
+  </div>
+
+  <h2><span class="n">1</span>「工作时间」芯片到底定了什么（实测，不是猜）</h2>
+  <p class="lede">把时间轴拖到下面几个点，看左栏「工作时间」的落点。规则来自 <code>src/smart-window.ts:244-274</code>。</p>
+  <table id="smartTable"></table>
+
+  <h2><span class="n">2</span>需要你拍板的两处</h2>
+  <div class="ask">
+    <b>A. 午休段语义。</b>现状 <code>nextSmartTarget</code> 在 12:00–14:00 返回 <code>now + 2min</code>——一个叫「工作时间」的芯片意味着「两分钟后」。
+    demo 里我改成「午休后 14:00」。这会改<b>宿主侧共享函数</b>的行为（<code>/later 智能</code> 命令与 dock 都吃它），不是纯 UI 改动，所以标出来请你确认。
+  </div>
+  <div class="ask" style="margin-top:10px">
+    <b>B. 相对时长改为「选中即钉住」。</b>现状提交 <code>after_seconds</code>，目标时刻 = 按下发送按钮那一刻 + 600s，所以面板开着打字时显示的绝对时刻每秒前滑。
+    demo 改成<b>点芯片时钉住目标瞬间</b>；提交时仍换算成 <code>after_seconds = (钉住值 − 按下时刻)</code>，
+    这样既让「看到的就是发送的」，又保住 dock 的<b>暂停能力</b>（<code>pauseUnsupportedKind</code>：只有 after 类可暂停）——不能图省事直接改发 <code>at</code>。
+  </div>
+</div>
+
+<script>
+/* ==================== 时钟 ==================== */
+const BASE = new Date(2026, 9, 27, 0, 0, 0).getTime();
+const W = { workStart: '09:00', workEnd: '18:00', lunchStart: '12:00', lunchEnd: '14:00', eveningEnd: '22:00' };
+const state = {
+  now: BASE + 935 * 60000,
+  draft: '记得检查构建结果，顺便把 PR 描述补一下再合并',
+  attach: 2,
+  tasks: [
+    { id: 'a', epoch: BASE + 950 * 60000, prompt: '检查 CI 是否绿了' },
+    { id: 'b', epoch: BASE + 1080 * 60000, prompt: '写今天的日报' },
+  ],
+  selA: 'after-600', selB: 'after-600',
+  pinB: null,          // 优化后：选中瞬间钉住的目标 epoch
+  customA: false, customB: false,
+  playing: false,
+  listInPanel: false,   // 提案：列表交给 composer 下方的 dock，面板只管创建
+  kbd: false,           // 键盘提示行：按过键才出现（不占日常高度）
+};
+
+const pad = n => String(n).padStart(2, '0');
+const hhmm = ms => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const secOf = ms => { const d = new Date(ms); return pad(d.getSeconds()); };
+const minOfDay = ms => { const d = new Date(ms); return d.getHours() * 60 + d.getMinutes(); };
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function dayOffset(ms) { return Math.round((new Date(ms).setHours(0, 0, 0, 0) - BASE) / 86400000); }
+/** 绝对时刻文案：10/27 周二 15:44 */
+function abs(ms) { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${WEEK[d.getDay()]} ${hhmm(ms)}`; }
+function absShort(ms) {
+  const off = dayOffset(ms);
+  const p = off === 0 ? '今天' : off === 1 ? '明天' : `${new Date(ms).getMonth() + 1}/${new Date(ms).getDate()}`;
+  return `${p} ${hhmm(ms)}`;
+}
+/** 与 src/time-utils.ts:50-76 逐字一致的中文相对文案（含已到期/即将发送两个特例） */
+function rel(ms, now) {
+  const diff = ms - now;
+  if (diff < 0) return '已到期';
+  if (diff < 60000) return '即将发送';
+  const minutes = Math.round(diff / 60000);
+  if (minutes < 60) return `约 ${minutes} 分钟后`;
+  const h = Math.floor(minutes / 60), r = minutes % 60;
+  if (h < 24) return r === 0 ? `约 ${h} 小时后` : `约 ${h} 小时 ${r} 分后`;
+  return `约 ${Math.floor(h / 24)} 天后`;
+}
+function countdown(ms, now) {
+  const s = Math.max(0, Math.floor((ms - now) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h > 0 ? `${h}:${pad(m)}:${pad(x)}` : `${m}:${pad(x)}`;
+}
+/** 今天/明天某时刻 */
+function atOnDay(off, hhmmStr, now) {
+  const [h, m] = hhmmStr.split(':').map(Number);
+  return new Date(now).setHours(h, m, 0, 0) + off * 86400000;
+}
+/** 移植 nextSmartTarget（smart-window.ts:244）——只演示默认时段 */
+function smartNow(now) {
+  const mins = minOfDay(now);
+  const [ls, le] = [W.lunchStart, W.lunchEnd].map(v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; });
+  if (mins >= ls && mins < le) return now + 2 * 60000;           // ← 午休段：2 分钟后
+  const next = (v, off = 0) => { const e = atOnDay(off, v, now); return e > now + 2 * 60000 ? e : atOnDay(off + 1, v, now); };
+  return Math.min(next(W.workStart), next(W.lunchEnd), next(W.workEnd));
+}
+/** 提案版：午休段不再「2 分钟后」，而是「午休结束后」；并告诉调用它命中了哪个边界 */
+function smartProp(now) {
+  const mins = minOfDay(now);
+  const [ls, le] = [W.lunchStart, W.lunchEnd].map(v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; });
+  if (mins >= ls && mins < le) return { epoch: atOnDay(0, W.lunchEnd, now), why: '午休后' };
+  const next = (v) => { const e = atOnDay(0, v, now); return e > now + 2 * 60000 ? e : atOnDay(1, v, now); };
+  const c = [[next(W.workStart), '上班'], [next(W.lunchEnd), '午休后'], [next(W.workEnd), '下班']];
+  c.sort((x, y) => x[0] - y[0]);
+  return { epoch: c[0][0], why: c[0][1] };
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ==================== 现状面板 ==================== */
+function renderA() {
+  const now = state.now;
+  const opts = [
+    { key: 'after-600', label: '10分钟后', sec: 600 },
+    { key: 'after-3600', label: '1小时后', sec: 3600 },
+  ];
+  const eve = atOnDay(0, W.workEnd, now);
+  if (eve > now) opts.push({ key: `at-0-${W.workEnd}`, label: `今天 ${W.workEnd}`, epoch: eve });
+  const morn = atOnDay(1, W.workStart, now);
+  if (morn > now) opts.push({ key: `at-1-${W.workStart}`, label: `明天 ${W.workStart}`, epoch: morn });
+  const sm = smartNow(now);
+  if (sm > now) opts.push({ key: 'smart', label: '工作时间', epoch: sm });
+  opts.push({ key: 'custom', label: '自定义…' });
+
+  const cur = opts.find(o => o.key === state.selA);
+  let target = null;
+  if (cur && cur.key !== 'custom') target = cur.sec ? now + cur.sec * 1000 : cur.epoch;   // ← after 用 now 重算 = 漂移
+  if (cur && cur.key === 'custom') target = atOnDay(1, '18:00', now);
+
+  const emptyDraft = state.draft.trim().length === 0;
+  const can = !emptyDraft && target !== null;
+
+  document.getElementById('panelA').innerHTML = `
+    <div class="p-head"><span class="p-title">定时提醒</span><button class="p-close">✕</button></div>
+    <div class="grid">
+      ${opts.map(o => `<button class="chip${o.key === state.selA ? ' on' : ''}" data-k="${o.key}" data-side="A">${esc(o.label)}</button>`).join('')}
+    </div>
+    ${state.customA ? `<div class="custom"><input value="2026-10-28" readonly /><input value="18:00" readonly /></div>` : ''}
+    ${target !== null ? `<div class="hint" style="margin-top:6px">${abs(target)} · ${rel(target, now)}</div>` : ''}
+    <div class="hint sec-h">已设定${state.tasks.length ? ` (${state.tasks.length})` : ''}</div>
+    ${state.tasks.length === 0 ? `<div class="empty">暂无定时任务</div>` :
+      `<div style="max-height:118px;overflow-y:auto;margin:2px -5px">${state.tasks.map(t => `
+        <div style="display:flex;gap:8px;align-items:flex-start;padding:4px 5px">
+          <span class="dot" style="margin-top:7px"></span>
+          <div style="flex:1;min-width:0">
+            <div class="hint" style="font-size:11px">${abs(t.epoch)} · ${rel(t.epoch, now)}</div>
+            <div style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.prompt)}</div>
+          </div>
+          <button class="t-del" style="opacity:1">✕</button>
+        </div>`).join('')}</div>`}
+    <div class="foot"><button class="cta" ${can ? '' : 'disabled'}>${
+      emptyDraft ? '加入 · ' + (target ? absShort(target) : '') + ' 发送' :
+      target ? `加入 · ${abs(target)} 发送` : '选择发送时间'}</button></div>
+    ${emptyDraft ? `<div class="hint" style="margin-top:6px">将以输入框内容作为提醒内容</div>` : ''}
+  `;
+  const bugs = [];
+  if (!cur) bugs.push(`<div class="note bad"><b>选中项凭空消失</b>　「${esc(state.selA === 'custom' ? '自定义…' : (state.selA || ''))}」对应的时刻已过 → 芯片不再渲染 → 按钮静默变成「选择发送时间」并禁用，无任何解释。<div class="src">SchedPanel.tsx:189-196 按 epoch &gt; now 过滤 · :221-225 找不到即 null</div></div>`);
+  if (cur && cur.sec) bugs.push(`<div class="note bad"><b>时刻在漂</b>　目标 = <code>now + ${cur.sec}s</code> 每秒重算，绝对时刻每分钟跳一格，可后半句永远写「约 ${cur.sec / 60} 分钟后」——同一行两半互相矛盾。按 ▶播放 看它走。<div class="src">useNow(1000) → SchedPanel.tsx:223</div></div>`);
+  if (sm > now && (Math.abs(sm - eve) < 1000 && eve > now)) bugs.push(`<div class="note bad"><b>两个芯片同一个落点</b>　「工作时间」此刻 = <code>${hhmm(sm)}</code>，和「今天 ${W.workEnd}」是<b>同一个瞬间</b>。六选一里有一项是重复项。<div class="src">smart-window.ts:260-273 候选就是 workStart / lunchEnd / workEnd 三个边界</div></div>`);
+  if (sm > now && Math.abs(sm - now) < 3 * 60000) bugs.push(`<div class="note bad"><b>名字在撒谎</b>　此刻处于午休段，「工作时间」实际定到 <code>${hhmm(sm)}</code>——两分钟后。把时间轴拖到 12:00–14:00 看。<div class="src">smart-window.ts:255-257 <code>return now + SMART_MIN_DELAY_MS</code></div></div>`);
+  bugs.push(`<div class="note bad"><b>面板从不回显内容</b>　草稿只参与校验，界面上一个字都没有；附件更是零提示。规格 <code>docs/ui/01 §2.2</code> 要的「预览卡片」被砍了。<div class="src">SchedPanel.tsx:5-6 注释「无预览块」· defaultPrompt 仅用于 :233</div></div>`);
+  bugs.push(`<div class="note bad"><b>层级塌了</b>　值、分区标题、空态三种角色全是 12px 同一灰度；「已设定」紧跟在时刻下面，读起来像「（这个选择）已设定」的回执而不是列表标题。<div class="src">styles.ts:497 · strings.ts:36</div></div>`);
+  document.getElementById('notesA').innerHTML = bugs.slice(0, 3).join('');
+  document.getElementById('chatA').textContent = `模拟时钟 ${hhmm(now)}:${secOf(now)}`;
+  document.getElementById('draftA').className = 'draft' + (emptyDraft ? ' empty' : '');
+  document.getElementById('draftA').textContent = emptyDraft ? '（输入框为空）' : state.draft;
+}
+
+/* ==================== 优化后面板 ==================== */
+function renderB() {
+  const now = state.now;
+  const emptyDraft = state.draft.trim().length === 0;
+  // 面板一打开就把相对时长的落点钉住（现状是每秒重算 → 漂移）
+  if (state.pinB === null && (state.selB === 'after-600' || state.selB === 'after-3600')) {
+    state.pinB = now + (state.selB === 'after-600' ? 600000 : 3600000);
+  }
+  const eve = atOnDay(0, W.workEnd, now);
+  const morn = atOnDay(1, W.workStart, now);
+  const sm = smartProp(now);
+
+  const opts = [
+    { key: 'after-600', label: '10 分钟', sec: 600 },
+    { key: 'after-3600', label: '1 小时', sec: 3600 },
+  ];
+  const seen = new Set();
+  const push = (o) => { if (!seen.has(Math.floor(o.epoch / 1000))) { seen.add(Math.floor(o.epoch / 1000)); opts.push(o); } };
+  if (sm.epoch > now) push({ key: 'smart', label: sm.why, epoch: sm.epoch });
+  if (eve > now) push({ key: 'at-eve', label: '今天', epoch: eve });
+  if (morn > now) push({ key: 'at-morn', label: '明天', epoch: morn });
+  opts.push({ key: 'custom', label: '自定义…' });
+
+  // 选中的身份 = 钉住的那个瞬间，而不是选项 key：
+  // 选项重新解析成别的时刻时不算「还选中着」，否则就是静默改判（现状也犯这个错）。
+  const epochOf = (o) => o.sec ? (state.selB === o.key && state.pinB ? state.pinB : now + o.sec * 1000) : o.epoch;
+  const same = (a, b) => a !== null && b !== undefined && Math.floor(a / 1000) === Math.floor(b / 1000);
+  const cur = opts.find(o => o.key === state.selB);
+  let target = state.selB === 'custom' ? atOnDay(1, '18:00', now)
+    : state.pinB !== null ? state.pinB : (cur && cur.key !== 'custom' ? epochOf(cur) : null);
+  // 已过期 → 保留成虚线「已过」，不消失、不悄悄跳到别的时刻
+  if (target !== null && !opts.some(o => o.key !== 'custom' && same(epochOf(o), target))) {
+    opts.splice(opts.length - 1, 0, { key: state.selB, label: absShort(target), epoch: target, past: true });
+  }
+  const isOn = (o) => o.key !== 'custom' && same(epochOf(o), target);
+  const expired = target !== null && target <= now;
+  const can = !emptyDraft && target !== null && !expired;
+
+  document.getElementById('panelB').innerHTML = `
+    <div class="p-head"><span class="p-title">定时提醒</span><button class="p-close">✕</button></div>
+
+    <div class="preview">
+      <div class="txt${emptyDraft ? ' ph' : ''}">${emptyDraft ? '在输入框写点什么，这里会回显' : esc(state.draft)}</div>
+      <div class="meta"><span>提醒内容</span><span>·</span><span>${emptyDraft ? 0 : state.draft.length} 字</span>${state.attach ? `<span>· 📎 ${state.attach} 个附件</span>` : ''}</div>
+    </div>
+
+    <div class="lbl">何时</div>
+    <div class="grid">
+      ${opts.map(o => {
+        const on = isOn(o);
+        const e = o.past ? o.epoch : epochOf(o);
+        const sub = o.key === 'custom' ? '' : `<span class="sub">${o.past ? '已过' : hhmm(e)}</span>`;
+        return `<button class="chip chip2${on ? ' on' : ''}${o.past ? ' past' : ''}" data-k="${o.key}" data-side="B" ${o.past ? 'disabled' : ''}>${esc(o.label)} ${sub}</button>`;
+      }).join('')}
+    </div>
+    ${state.customB ? `<div class="custom"><span class="who">日期</span><input type="date" value="2026-10-28" /><span class="who">时间</span><input type="time" value="18:00" /></div>` : ''}
+
+    ${state.tasks.length ? (state.listInPanel ? `
+      <div class="lbl sec-h">已排定 ${state.tasks.length}</div>
+      <ul class="tasks">${state.tasks.map(t => `
+        <li class="task"><span class="dot${t.epoch <= now ? ' warn' : ''}"></span>
+          <span class="t-time">${absShort(t.epoch)}</span>
+          <span class="t-txt">${esc(t.prompt)}</span>
+          <span class="t-time">${t.epoch <= now ? '待发' : countdown(t.epoch, now)}</span>
+          <button class="t-del">✕</button></li>`).join('')}
+      </ul>` : `
+      <div class="linked sec-h"><span class="dot"></span> 已排定 ${state.tasks.length} 条 · 最近 ${absShort(Math.min(...state.tasks.map(t => t.epoch)))}
+        <span class="go">在下方 dock 管理 →</span></div>`) : ''}
+
+    <div class="due">
+      <span class="abs">${target ? absShort(target) : '未选择时间'}</span>
+      <span class="rel">${target ? (expired ? '<b style="color:var(--danger)">该时刻已过</b>' : `剩 <b>${countdown(target, now)}</b>`) : '点上方任一项'}</span>
+      <span class="rel" style="margin-left:auto">到点注入提醒，不替你发言</span>
+    </div>
+    <div class="foot"><button class="cta" ${can ? '' : 'disabled'}>定时提醒</button></div>
+    ${emptyDraft ? `<div class="err" style="margin-top:5px">先在输入框写内容</div>` : ''}
+    ${state.kbd ? `<div class="keys"><span><span class="kbd">↑</span><span class="kbd">↓</span> 选择</span><span><span class="kbd">Enter</span> 发送</span><span><span class="kbd">Esc</span> 关闭</span></div>` : ''}
+  `;
+
+  const notes = [];
+  notes.push(`<div class="note good"><b>内容回显 + 附件计数 + 字数</b>　把最高风险的那件事（到底发什么）摆在第一眼的位置。空草稿时占位文案直接说明去哪写，错误提示也贴着按钮给，不再藏在面板底下。</div>`);
+  notes.push(`<div class="note good"><b>芯片自带落点，且去重</b>　「工作时间」改叫 <code>${esc(cur && cur.key === 'smart' ? cur.label : smartProp(now).why)}</code> 并显示解析出的时刻；与「今天/明天」芯片 epoch 相同就不渲染。此刻六选一变成 ${opts.length} 项。</div>`);
+  notes.push(`<div class="note good"><b>时刻钉住，倒计时才走表</b>　点芯片那一秒锁定目标，绝对时刻不再漂移，只有「剩 9:32」在跳（<code>tabular-nums</code> 不抖宽）。过期项保留成虚线「已过」而不是消失。</div>`);
+  notes.push(`<div class="note good"><b>一处时刻，一处动词</b>　「已设定 / 暂无定时任务」空态整块隐藏；标题与按钮统一叫<b>「定时提醒」</b>；时刻只在紧贴按钮上方的摘要行出现一次。<div class="src">为什么不是「定时发送」见下方红色条目</div></div>`);
+  notes.push(`<div class="note bad"><b>撤回我上一版的一条建议</b>　我上次说「统一叫定时发送」——<b>方向反了</b>。GUI 面板走 <code>/user-schedule-create</code>，delivery 恒为 <code>context</code>（notice 注入），<b>不会</b>以你的身份发言；「代发」只有人类手输 <code>/later</code> 才拿得到。所以标题「定时提醒」是对的，该改的是输入框按钮 tooltip「定时发送」和 CTA 里的「发送」。<div class="src">user-tools.ts:567-572 · commands.ts:1108 <code>delivery==='user' ? '将于' : '已设定提醒：'</code></div></div>`);
+  notes.push(`<div class="note good"><b>列表不再抄第二遍</b>　面板是<b>创建面</b>，dock 才是<b>管理面</b>（暂停/插话/编辑/附件缩略图都在那儿，插件自己的设置文案也写着「stay visible in the dock below the composer」）。面板里只留一行「已排定 N 条 · 最近 …」作指针。</div>`);
+  notes.push(`<div class="note"><b>代价：高度（实测）</b>　0 条排定 <code>292 → 327px</code>（+35），2 条排定 <code>350 → 371px</code>（+21）。多出来的内容预览被「空态不再显示两行灰字」和「列表收进 dock」抵掉了大半。若把列表留在面板里则 <code>408px</code>——上方控制条可切换对比。<div class="src">面板锚在输入框上方（side:'top', margin:12），408px 在 720px 视口会盖掉大半聊天区</div></div>`);
+  document.getElementById('notesB').innerHTML = notes.join('');
+  document.getElementById('chatB').textContent = `模拟时钟 ${hhmm(now)}:${secOf(now)}`;
+  document.getElementById('draftB').className = 'draft' + (emptyDraft ? ' empty' : '');
+  document.getElementById('draftB').textContent = emptyDraft ? '（输入框为空）' : state.draft;
+}
+
+/* ==================== 交互 ==================== */
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (chip) {
+    const k = chip.dataset.k, side = chip.dataset.side;
+    if (side === 'A') { state.selA = k; if (k === 'custom') state.customA = true; }
+    else {
+      state.selB = k;
+      if (k === 'custom') { state.customB = true; state.pinB = null; }
+      else {
+        state.customB = false;
+        // 选中即钉住：此刻锁定目标 epoch
+        const now = state.now;
+        state.pinB = k === 'after-600' ? now + 600000 : k === 'after-3600' ? now + 3600000
+          : k === 'at-eve' ? atOnDay(0, W.workEnd, now) : k === 'at-morn' ? atOnDay(1, W.workStart, now)
+          : smartProp(now).epoch;
+      }
+    }
+    draw();
+  }
+});
+const slider = document.getElementById('slider');
+slider.addEventListener('input', () => {
+  state.now = BASE + slider.value * 60000;
+  // 拖时间轴＝重新打开面板：相对时长按新的「打开时刻」重钉；绝对时刻本来就是绝对的，保持钉住
+  if (state.selB === 'after-600') state.pinB = state.now + 600000;
+  else if (state.selB === 'after-3600') state.pinB = state.now + 3600000;
+  draw();
+});
+document.getElementById('reset').onclick = () => { state.now = BASE + 935 * 60000; slider.value = 935; state.pinB = null; draw(); };
+document.getElementById('play').onclick = function () {
+  state.playing = !state.playing;
+  this.setAttribute('aria-pressed', String(state.playing));
+  this.textContent = state.playing ? '⏸ 暂停' : '▶ 播放 60×';
+};
+const press = (id, on) => document.getElementById(id).setAttribute('aria-pressed', String(on));
+d1.onclick = () => { state.draft = '记得检查构建结果，顺便把 PR 描述补一下再合并'; press('d1', 1); press('d0', 0); draw(); };
+d0.onclick = () => { state.draft = ''; press('d1', 0); press('d0', 1); draw(); };
+t0.onclick = () => { state.tasks = []; press('t0', 1); press('t2', 0); draw(); };
+t2.onclick = () => { state.tasks = [{ id: 'a', epoch: BASE + 950 * 60000, prompt: '检查 CI 是否绿了' }, { id: 'b', epoch: BASE + 1080 * 60000, prompt: '写今天的日报' }]; press('t0', 0); press('t2', 1); draw(); };
+theme.onclick = () => { document.body.dataset.theme = document.body.dataset.theme === 'dark' ? 'light' : 'dark'; };
+lp0.onclick = () => { state.listInPanel = false; press('lp0', 1); press('lp1', 0); draw(); };
+lp1.onclick = () => { state.listInPanel = true; press('lp0', 0); press('lp1', 1); draw(); };
+document.addEventListener('keydown', e => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Tab'].includes(e.key) && !state.kbd) { state.kbd = true; draw(); }
+});
+
+setInterval(() => {
+  if (state.playing) { state.now += 60000; slider.value = Math.round((state.now - BASE) / 60000); draw(); }
+  else draw();          // 每秒重绘：让倒计时/漂移都活起来
+}, 1000);
+
+/* 智能落点对照表 */
+(function table() {
+  const rows = [[510, '08:30'], [570, '09:30'], [750, '12:30'], [810, '13:30'], [935, '15:35'], [1070, '17:50'], [1110, '18:30'], [1380, '23:00']];
+  document.getElementById('smartTable').innerHTML =
+    `<tr><th>此刻</th><th>现状「工作时间」定到</th><th>同时存在的芯片</th><th>优化后</th></tr>` +
+    rows.map(([mm, label]) => {
+      const now = BASE + mm * 60000;
+      const sm = smartNow(now), sp = smartProp(now);
+      const eve = atOnDay(0, W.workEnd, now), morn = atOnDay(1, W.workStart, now);
+      const dup = [eve > now ? `今天 ${hhmm(eve)}` : null, morn > now ? `明天 ${hhmm(morn)}` : null].filter(Boolean);
+      const clash = (eve > now && Math.abs(sm - eve) < 1000) || (morn > now && Math.abs(sm - morn) < 1000);
+      const near = Math.abs(sm - now) < 3 * 60000;
+      return `<tr><td><b>${label}</b></td>
+        <td class="now">${hhmm(sm)}${clash ? ' ← 与芯片重复' : ''}${near ? ' ← 撒谎（名字是时段，值是 2 分钟后）' : ''}</td>
+        <td>${dup.join(' / ') || '—'}</td>
+        <td class="new">${sp.why} ${hhmm(sp.epoch)}${clash ? '（去重后不出现）' : ''}</td></tr>`;
+    }).join('');
+})();
+
+function draw() { document.getElementById('clock').textContent = `${hhmm(state.now)}:${secOf(state.now)}`; renderA(); renderB(); }
+draw();
+</script>
+</body>
+</html>

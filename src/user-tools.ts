@@ -40,8 +40,6 @@ import { OWNED_EVENT } from './domain.js';
 import type { UserScheduleOwnedChange, UserScheduleDelivery } from './domain.js';
 import {
   allOwnership,
-  allPaused,
-  findPausedByScheduleId,
   findScheduleIdByUid,
   getOwnership,
   getPaused,
@@ -1115,11 +1113,5 @@ export async function userScheduleResume(
 }
 
 /** 测试/投影辅助：某会话全部暂停留档。 */
-export function listPausedForSession(sessionId: string): Readonly<Record<string, PausedEntry>> {
-  return allPaused(sessionId);
-}
 
 /** 测试辅助：按 pause 前 schedule id 查留档。 */
-export function findPausedEntry(sessionId: string, scheduleId: string): PausedEntry | undefined {
-  return findPausedByScheduleId(sessionId, scheduleId);
-}

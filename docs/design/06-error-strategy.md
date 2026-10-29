@@ -46,7 +46,7 @@ if (!trimmed) return err('invalid_prompt');
 if (trimmed.length > 1000) return err('invalid_prompt', '提醒内容不能超过 1000 字符');
 
 // 3. 时区强制选择（不自动推断）
-if (!isValidTimeZone(time_zone)) return err('invalid_time_zone');
+if (!isValidIanaZone(time_zone)) return err('invalid_time_zone');   // src/user-tools.ts，实际生效的那个
 
 // 4. 时间合法性（不接受过去时间）
 if (target.getTime() <= Date.now()) return err('not_future');
