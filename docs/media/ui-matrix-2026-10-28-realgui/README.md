@@ -1,5 +1,16 @@
 # UI 面证据 · 2026-10-28（真 GUI）
 
+> [!IMPORTANT]
+> **本目录只入库 JSON 与这份 README，图片不入库。**
+> 31 张 PNG（4.2 MB）曾随 `release/1.9.0` 一起提交，后在合入前用 `git-filter-repo` 从历史中
+> 摘除——PNG 在 git 里不可压缩、永不 dedup，追加一个"删除提交"并不能把体积从历史里拿掉，
+> 所以必须改写引入它们的那几个提交。
+>
+> 原始图片仍在跑验证的那台机器的 `.verify/ui-matrix*/`（已被 `.gitignore` 排除）下，
+> 文件名与判据见下表；**下表描述的是那些帧各自证明了什么**，不是仓库里存在的文件链接。
+> 逐代结论以本目录的 `matrix.json` / `matrix-full-8gen.json` / `badge-probe.json` 为准——
+> 它们是文本、可 diff、可复核，也正是这些结论的真正载体。
+
 **来源全部是 `real-gui`**：真内核版本树（`~/dsh-versions/<代次>`）+ 隔离实例（`DSH_HOME` 指向
 `.verify/…`）+ headless Chromium 真点击真回合。**没有**任何一张是复刻 DOM 的预览或示意图。
 

@@ -181,10 +181,10 @@ CSS 动画相位与暂停/恢复的视觉冻结；插话投递的命令往返结
 `driftWarns` 为空是**正确**结果——判据现在只在「有提醒且可标注行为 0」时说话，这次是
 「有提醒且有可标注行」。
 
-证据：`docs/media/ui-matrix-2026-10-28-realgui/*-PASS-badge-after-fix-real-gui.png`（三代各一张
-真 GUI 帧，`0.1.7-rc.1` 那张能直接看到会话行「新会话」上的时钟 badge）与
-`matrix-after-fix.json`。修复前的失败帧仍在同目录（`*-FAIL-badge-missing-real-gui.png`），
-通过/失败成对保留。
+证据：逐代结论在 `docs/media/ui-matrix-2026-10-28-realgui/matrix-after-fix.json`。真 GUI 帧
+（三代各一张 PASS + 修复前四张 FAIL，成对保留）**不入库**，留在跑验证的机器
+`.verify/ui-matrix/` 下；`0.1.7-rc.1` 那张能直接看到会话行「新会话」上的时钟 badge。
+图片为何不入库见该目录 README 开头的说明。
 
 `HTTP 401` 是正常输出不是故障：`instance.mjs:192-200` 把 200/401 都算「服务已起」，鉴权 token
 走 URL 查询参数；若真是 401 页，`matched`/`dock`/`badge` 不可能有值。
@@ -232,8 +232,8 @@ CSS 动画相位与暂停/恢复的视觉冻结；插话投递的命令往返结
   同时在（0.2.0-rc.2 修复前是 FAIL 图）。
 - 遗留 `/tmp/fake-dsh-home-*` = 0（§8 之外，`5485ce7` 之后测试不再攒垃圾，这里再次确认）。
 
-证据：`matrix-full-8gen.json` 与 5 张新增 `*-PASS-badge-after-fix-real-gui.png`；修复前的
-4 张 `*-FAIL-badge-missing-real-gui.png` 仍在同目录，通过/失败成对。
+证据：`docs/media/ui-matrix-2026-10-28-realgui/matrix-full-8gen.json`（入库）。截图不入库，
+PASS/FAIL 成对留在 `.verify/ui-matrix/`；人工核对过的两帧为 `0.1.7-rc.1` 与 `0.2.0-rc.2`。
 
 ### 9.1 仍未判定（诚实的剩余部分）
 `HTTP 401` 是正常输出（`instance.mjs` 把 200/401 都算服务已起，token 走 URL 参数），但它
