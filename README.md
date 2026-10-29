@@ -15,7 +15,7 @@
 **`/later` 延迟发送** —— 不开面板，在输入框敲一行就以你的身份稍后发出（演示：逐字输入 `/later +5s` / `+3m` / `+1h20m`，回车后进入倒计时；`+5s` 那条到点真实送达）：
 
 <p align="center">
-<img src="docs/media/docs-later-full.gif" width="760" alt="/later 命令演示：输入 /later +5s 检查部署结果 → 回车 → dock 倒计时 → 到点以你的身份送达"/>
+<img src="docs/media/docs-later-full.webp" width="760" alt="/later 命令演示：输入 /later +5s 检查部署结果 → 回车 → dock 倒计时 → 到点以你的身份送达"/>
 </p>
 
 ---
@@ -150,11 +150,11 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 
 | 创建定时提醒（输入 → 面板 → 加入 → dock） | 到期触发（倒计时 → 收到消息） |
 |---|---|
-| <img src="docs/media/docs-scheduler-create.gif" width="380" alt="创建定时提醒演示"/> | <img src="docs/media/docs-scheduler-fired.gif" width="380" alt="到期触发演示"/> |
+| <img src="docs/media/docs-scheduler-create.webp" width="380" alt="创建定时提醒演示"/> | <img src="docs/media/docs-scheduler-fired.webp" width="380" alt="到期触发演示"/> |
 
 **`/later` 快捷命令** —— 不打面板，直接在输入框敲一行就以你的身份延迟发送：
 
-<img src="docs/media/docs-later.gif" width="760" alt="/later 命令演示：输入 /later +60m 内容 → 回车 → dock 出现倒计时"/>
+<img src="docs/media/docs-later.webp" width="760" alt="/later 命令演示：输入 /later +60m 内容 → 回车 → dock 出现倒计时"/>
 
 ---
 

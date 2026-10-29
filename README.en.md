@@ -15,7 +15,7 @@
 **`/later` delayed send** — no panel needed: type one line in the input box and it is sent later as yourself (demo: typing `/later +5s`, `+3m`, `+1h20m` character by character, then Enter to start the countdowns; the `+5s` one really lands when due):
 
 <p align="center">
-<img src="docs/media/docs-later-full.gif" width="760" alt="/later demo: type /later +5s 检查部署结果 → Enter → dock countdown → delivered as yourself when due"/>
+<img src="docs/media/docs-later-full.webp" width="760" alt="/later demo: type /later +5s 检查部署结果 → Enter → dock countdown → delivered as yourself when due"/>
 </p>
 
 ---
@@ -150,11 +150,11 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 | Creating a reminder (type → panel → add → dock) | Firing when due (countdown → message arrives) |
 |---|---|
-| <img src="docs/media/docs-scheduler-create.gif" width="380" alt="Create reminder demo"/> | <img src="docs/media/docs-scheduler-fired.gif" width="380" alt="Due firing demo"/> |
+| <img src="docs/media/docs-scheduler-create.webp" width="380" alt="Create reminder demo"/> | <img src="docs/media/docs-scheduler-fired.webp" width="380" alt="Due firing demo"/> |
 
 **`/later` shortcut** — skip the panel and type one line in the composer to send as yourself later:
 
-<img src="docs/media/docs-later.gif" width="760" alt="/later command demo: type /later +60m text, press Enter, dock shows the countdown"/>
+<img src="docs/media/docs-later.webp" width="760" alt="/later command demo: type /later +60m text, press Enter, dock shows the countdown"/>
 
 ---
 
