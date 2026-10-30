@@ -18,3 +18,6 @@ docs/media/tube-live-seam-3x.png
 
 # 跨内核回归的产物（JSON 明细），不入库
 .verify/
+
+# docs/promo 渲染中间态（snapshot/snapshot 缓存/chrome 状态），随时由 scripts/hf.sh 重建
+docs/promo/.hyperframes/
