@@ -380,14 +380,26 @@ module augmentation 允许**新增**一个不存在的 interface，所以 `tsc` 
 （一段没人读的死声明），而不是编译失败。静默无效比报错更危险，这也正是 issue 前提里
 "类型层破坏 tsc"一条实测不成立的原因。
 
-**`register()` 的返回形状是"可调用 + thenable"。** `0.2.2-alpha.2` 的实现返回
+**`register()` 的返回形状是"可调用 + thenable"，而且**两代都是**。** `0.2.2-alpha.2` 的实现返回
 `Object.assign(dispose, { then, catch, finally, [Symbol.toStringTag]: 'Promise' })`
 （`~/dsh-versions/0.2.2-alpha.2/node_modules/@deepseek-ai/dsh-session-projection/lib/index.js:80-109`），
-即**不 await 也照样 `typeof === 'function'`**。因此收敛点必须按 **thenable 优先**判定：
-先看 `typeof value?.then === 'function'` 并 `await`，再退到函数形态。反过来（先判函数）
-会静默走老分支、跳过 await，时序从此丢失且**不报错**；上游同时把 callable 形态标了
-deprecated，方向一致。`tests/projection-registration.test.mjs` 里"可调用且 thenable"那条
-就是专门抓这个回归的 —— 它是本仓唯一能观测到"时序没了"的判据。
+即**不 await 也照样 `typeof === 'function'`**。老代次也不是裸函数：`0.2.1-rc.4` 的 `register()`
+直接 `return this.ctx.effect(...)`（`…/dsh-session-projection/lib/index.js:68`），而 cordis 的 effect
+返回带 `.then` 的 AsyncDisposable（`cordis/lib/index.js:1239/1274`）。所以收敛点必须**两步判**：
+
+1. **thenable 优先** —— 先看 `typeof value?.then === 'function'` 并 `await`。先判函数会静默走
+   老分支、跳过 await 且**不报错**（上游同时把 callable 形态标了 deprecated，方向一致）。
+2. **按 await 的解析值分岔** —— 两代是"同一种形状、两种解析值"，这一步不能省：
+
+| 代次 | `typeof`（await 前） | thenable | **await 解析值** | 正确处置 |
+|---|---|---|---|---|
+| ≤0.2.1（代次表里其余 8 条） | `function` | 是 | **函数**（disposer 本身），`.dispose` 为 `undefined` | 当老代次 disposer 用 |
+| `0.2.2-alpha.2` | `function` | 是 | **对象** `{dispose, stateOf, readerFor}` | 用 `handle.dispose()` |
+
+只写第一步（"thenable 就当 handle"）会在**全部老代次**上静默回归：解析出的函数被当成"缺 dispose
+的 handle"，于是每次加载 warn 一次、且**注册永不被释放**（泄漏一个 registration）。这个错在装配面
+看不出来，只有 `tests/projection-registration.test.mjs` 里"thenable 解析为函数（rc.2/rc.4 真实形状）"
+那条能判红 —— 变异验证：把实现换成"只判 thenable、不判解析值"后，9 条里只红这一条。
 
 **`stateOf` 已 `@deprecated`。** 这一代起 `registry.stateOf(session, key)` 每个 key 首次读会 warn 一次，
 推荐改用 awaited registration 的 `handle.stateOf(session)`（或所属领域服务）；本插件没有直接调用
@@ -416,10 +428,17 @@ deprecated，方向一致。`tests/projection-registration.test.mjs` 里"可调�
 - 本 issue 在装配/投递面上**不是"坏了"，而是"被门禁关在门外"** —— 真正的阻断只有声明面
   （`engines.dsh` 上界原为 `<0.2.2-0`，按 semver §11 排除 `alpha.2`；0.2.1 起内核**单独按
   `engines` 判定**，peer 不再兜底）；
-- 因此 `register()` 的 await 改动是**契约正确性**问题（注册完成前不得对外发布消费方），
-  不是"修一个已经炸掉的 bug"；
-- mount 面 GREEN **不能**证明 await 与否无差别：它根本没观测 client 读投影的先后。
-  时序判据只能在 `tests/projection-registration.test.mjs` 里造（deferred + 宏任务边界）。
+- 因此 `register()` 的 await 改动是**契约对齐**，不是"修一个已经炸掉的 bug"；
+- 而且**不 await 在这一代上实测也没有可观测差异**：注册表写入发生在 `acquire()` 的**同步段**
+  （`dsh-session-projection/lib/index.js:127-151`，由 `ctx.effect` 同步执行），唯一的 `await` 在
+  :153，其后只剩 `fiber.assertActive()` 与 handle 构造；消费者读面（`summaryKeys()` /
+  `snapshot()`）全是同步读注册表，注册过程中**没有任何"发布消费方"点**。同 turn 探针实测：
+  `register()` 返回后立刻 `summaryKeys()` 就已包含 `userSchedules`；端到端连「只改 engines、
+  lib 仍是不 await 的 HEAD 代码」也是 mount+function GREEN、投递 5/5、首读即见。
+- 所以本文档与 CHANGELOG、PR 描述里**都不许**写"不 await 会读不到投影 / 会掉 dock" —— 那是
+  虚假因果，一句"你复现了吗"就能打穿。这条改动真正的价值是：照上游契约做（callable 形态已
+  deprecated），上门取掉兜底时不被动；`tests/projection-registration.test.mjs` 钉住的是
+  **"我们真的在 await"** 这个实现事实，而不是"修了一个可观测 bug"。
 
 #### 实测结论
 
