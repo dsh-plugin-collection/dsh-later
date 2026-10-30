@@ -194,6 +194,8 @@ export function useEscapeToClose(open: boolean, setOpen: (open: boolean) => void
  */
 export const ICON_EXPORT_NAMES: readonly string[] = [
   'IconClockOutlineRegular', 'IconClockOutline16',
+  'IconCopyOutlineRegular', 'IconCopyOutline16',
+  'IconCheckOutlineRegular', 'IconCheckOutline16',
   'IconCloseOutlineRegular', 'IconCloseOutline16',
   'IconChevronDownOutlineRegular', 'IconChevronDownOutline14',
   'IconEditOutlineRegular', 'IconEditOutline16',
@@ -215,6 +217,14 @@ function firstIcon(...candidates: readonly (IconComponent | undefined)[]): IconC
 export const IconClock = firstIcon(
   pick<IconComponent>('IconClockOutlineRegular'),
   pick<IconComponent>('IconClockOutline16'),
+);
+export const IconCopy = firstIcon(
+  pick<IconComponent>('IconCopyOutlineRegular'),
+  pick<IconComponent>('IconCopyOutline16'),
+);
+export const IconCheck = firstIcon(
+  pick<IconComponent>('IconCheckOutlineRegular'),
+  pick<IconComponent>('IconCheckOutline16'),
 );
 export const IconClose = firstIcon(
   pick<IconComponent>('IconCloseOutlineRegular'),
@@ -300,6 +310,52 @@ export function fileSizeTextCompat(bytes: number): string {
 }
 
 /**
+ * 复制到剪贴板：优先宿主的 `writeClipboard`，缺失时退到 `navigator.clipboard`，
+ * 再退到隐藏 textarea + `execCommand('copy')`（旧宿主 / 非安全上下文）。
+ *
+ * 为什么不用具名 import：`writeClipboard` 在部分代次的 primitives 里不存在，
+ * 具名 import 是链接期硬失败，会让整条插件加载不了。用 `pick()` 探测后逐级降级。
+ * @param text - 要复制的纯文本。
+ * @returns 是否成功（失败由调用方决定要不要反馈）。
+ */
+export async function writeClipboardCompat(text: string): Promise<boolean> {
+  const host = pick<(value: string) => Promise<boolean>>('writeClipboard');
+  if (host !== undefined) {
+    try {
+      return await host(text);
+    } catch {
+      /* 宿主实现失败时继续走本地降级 */
+    }
+  }
+  try {
+    const nav = (globalThis as { navigator?: { clipboard?: { writeText?: (value: string) => Promise<void> } } })
+      .navigator;
+    if (nav?.clipboard?.writeText !== undefined) {
+      await nav.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 权限/非安全上下文，继续降级 */
+  }
+  try {
+    if (typeof document === 'undefined') return false;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 本代次解析到的图标名（别名 → 实际用的宿主导出名）。
  *
  * 诊断与测试用：能核对"这一代到底用了哪一套名字"，而不是读代码猜。
@@ -307,6 +363,8 @@ export function fileSizeTextCompat(bytes: number): string {
 export function resolvedIconNames(): Record<string, string | undefined> {
   const table: Record<string, readonly (readonly [string, IconComponent | undefined])[]> = {
     clock: [['IconClockOutlineRegular', pick<IconComponent>('IconClockOutlineRegular')], ['IconClockOutline16', pick<IconComponent>('IconClockOutline16')]],
+    copy: [['IconCopyOutlineRegular', pick<IconComponent>('IconCopyOutlineRegular')], ['IconCopyOutline16', pick<IconComponent>('IconCopyOutline16')]],
+    check: [['IconCheckOutlineRegular', pick<IconComponent>('IconCheckOutlineRegular')], ['IconCheckOutline16', pick<IconComponent>('IconCheckOutline16')]],
     close: [['IconCloseOutlineRegular', pick<IconComponent>('IconCloseOutlineRegular')], ['IconCloseOutline16', pick<IconComponent>('IconCloseOutline16')]],
     chevronDown: [['IconChevronDownOutlineRegular', pick<IconComponent>('IconChevronDownOutlineRegular')], ['IconChevronDownOutline14', pick<IconComponent>('IconChevronDownOutline14')]],
     edit: [['IconEditOutlineRegular', pick<IconComponent>('IconEditOutlineRegular')], ['IconEditOutline16', pick<IconComponent>('IconEditOutline16')]],

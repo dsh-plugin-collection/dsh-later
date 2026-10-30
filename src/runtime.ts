@@ -41,6 +41,7 @@ import { foldUserState } from './user-tools.js';
 import { confirmDelivery, messageIdOf } from './delivery.js';
 import type { DeliveryMode } from './delivery.js';
 import { detectTimeZone, formatHhmm } from './time-utils.js';
+import { laterUserSource } from './later-message-source.js';
 
 /** runtime 关心的设置子集（插话投递策略）。 */
 export interface SteerDeliverySettings {
@@ -693,7 +694,7 @@ export class UserScheduleRuntime {
     const message = asUser
       ? createUserMessage({
           content: contentWithAttachmentBlocks({ type: 'text', text: paused.prompt }, attachmentBlocks),
-          source: { kind: 'user' },
+          source: laterUserSource({ delivery: 'one-shot', count: 1 }),
         })
       : createUserMessage({
           content: [{ type: 'text', text: renderReminderFraming({
@@ -758,7 +759,7 @@ export class UserScheduleRuntime {
         for (const record of records) appendAttachmentBlocks(content, this.attachmentsOf(record.id));
         return createUserMessage({
           content,
-          source: { kind: 'user' },
+          source: laterUserSource({ delivery: 'one-shot', count: records.length }),
         });
       }
       const text =
@@ -779,7 +780,7 @@ export class UserScheduleRuntime {
       for (const record of records) appendAttachmentBlocks(content, this.attachmentsOf(record.id));
       return createUserMessage({
         content,
-        source: { kind: 'user' },
+        source: laterUserSource({ delivery: 'every', count: records.length }),
       });
     }
     return createUserMessage({

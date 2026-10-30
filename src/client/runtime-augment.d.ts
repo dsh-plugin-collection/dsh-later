@@ -30,6 +30,11 @@ export interface ClientSlotDeclaration {
   readonly id?: string;
   readonly key?: string;
   readonly order?: number;
+  /**
+   * 影子优先级：同一 cell 的条目按 priority 升序，**最低者渲染**；同 key 同 priority
+   * 的第二条注册会抛错。官方 `user` / `steering` 都在默认 0，本插件用 -10。
+   */
+  readonly priority?: number;
   readonly locale?: string;
   readonly inject?: () => object;
 }
@@ -49,6 +54,8 @@ export interface ClientSlotRegistry {
     declaration: ClientSlotDeclaration,
     component: ComponentType<T>,
   ): () => void;
+  /** 读某个插槽的声明（未声明/宿主无该服务时 undefined）。能力门禁用。 */
+  spec?(key: string): { readonly kind: string } | undefined;
 }
 
 /** 客户端会话面：足够 callCommand 链路使用；不暴露全部 ISessions。 */

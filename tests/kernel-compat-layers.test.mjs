@@ -123,7 +123,11 @@ const iconExportNames = (() => {
 
 test('图标兼容层：每个别名都有"新名优先、老名兜底"两条候选，且候选都在导出清单里', () => {
   const aliases = [...compatSource.matchAll(/export const (Icon[A-Za-z]+) = firstIcon\(([\s\S]*?)\);/g)];
-  assert.equal(aliases.length, 9, '应导出 9 个别名图标（时钟/叉/下箭头/编辑/暂停/播放/发送/删除/信息）');
+  assert.equal(
+    aliases.length,
+    11,
+    '应导出 11 个别名图标（时钟/叉/下箭头/编辑/暂停/播放/发送/删除/信息 + 复制/对勾）',
+  );
   for (const [, alias, body] of aliases) {
     const picked = [...body.matchAll(/pick<IconComponent>\('([A-Za-z0-9]+)'\)/g)].map((m) => m[1]);
     assert.equal(picked.length, 2, `${alias} 必须有两个候选（新名 + 老代次兜底名）`);

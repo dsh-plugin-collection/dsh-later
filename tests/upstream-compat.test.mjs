@@ -421,6 +421,8 @@ test('0.2.0：Config 标了 volatile 且字段齐全（否则设置页不生成�
     'confirmDelivery',
     'onUnconfirmed',
     'clockIconStyle',
+    // 定时消息气泡标记（issue #112）：四档 + off。
+    'bubbleMarker',
     // 智能时段的五个 HH:mm 边界（issue #19）：它们**曾经只在这份清单里缺席**，
     // 卡片却一直写着这五个 key —— 于是改动永远落不进设置层。反向门禁（渲染出来的
     // 可写字段 ⊆ Config）见 tests/settings-schema-coverage.test.mjs，那条不靠这张手抄表。
@@ -515,10 +517,15 @@ test('Config 的每个可编辑字段都在设置卡 SECTIONS 中有对应行', 
 
   // 双语字典也必须覆盖每个渲染字段的 label/hint key，否则界面上直接显示 key 名
   const client = readFileSync(join(root, 'src', 'client', 'index.tsx'), 'utf8');
+  // 文案有两个合法来源：入口里内联的 zh/en 两段（历史写法），或共享字典
+  // `src/client/strings.ts`（`schedDicts` 的 zh/en 映射，键集由类型强制一致）。
+  // 新 UI 词条走后者，所以两处都要认，否则「换了存放位置」会被误判成缺翻译。
+  const dict = readFileSync(join(root, 'src', 'client', 'strings.ts'), 'utf8');
   const labelKeys = [...card.matchAll(/(?:labelKey|hintKey|titleKey|ariaKey):\s*'([A-Za-z]+)'/g)].map((m) => m[1]);
   const absent = [...new Set(labelKeys)].filter((key) => {
     const re = new RegExp(`\\b${key}:`, 'g');
-    return (client.match(re) ?? []).length < 2; // zh 与 en 各一次
+    const hits = (client.match(re) ?? []).length + (dict.match(re) ?? []).length;
+    return hits < 2; // zh 与 en 各一次（可以分布在两个文件里）
   });
   assert.deepEqual(absent, [], `这些文案 key 缺少 zh/en 之一：${absent.join(', ')}`);
 });
