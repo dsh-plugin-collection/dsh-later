@@ -31,6 +31,24 @@
 - **compat** `0.2.1-rc.3` / `0.2.1-rc.4` 补齐四个面后**正式入表**：装配与真投递各起独立进程实测 GREEN 且通过同源守卫（该守卫拒绝统计「插件解析到的内核模块与被测树不同源」的运行），跨代 tsc 两个项目通过，门禁用**各代自己的**评估器判 pass。本地 `devDependencies` 仍显式钉在 `0.2.1-rc.2`（由一条常量断言记录，挪代次必须显式改它），更新代次靠 `--steps type` 逐代覆盖，不靠悄悄挪本地依赖。
 - **compat** 支持面表述的更正：撤回「`0.1.5-rc.1` 装不起来」这条误判（那是门禁脚本自身装配口径造成的）。矩阵仍列 `rc.3`、**决定不变**，理由换成「默认安装会漂到 rc.3，用户实际拿到的就是 rc.3」——**这不是新增支持 `0.1.5-rc.1`**。
 
+- **fix** `later-reminders` 在子 agent 会话里会指挥一个不存在的工具；顺带修掉隔离实例不带 `SKILL.md` 的装配缺口。
+  - 现象是实测出来的：在本机派一个子 agent 只做自述，它回报「catalog 里有 `later-reminders`，描述与
+    `SKILL.md` 逐字一致；但我含 `schedule` 的工具只有官方那 4 个」。根因是两面不对称 —— provider
+    注进 skills registry 的**全局层**（所有 agent 可见），而 `user_schedule_*` 由 `runtime-registry`
+    **只给 root agent** 挂。于是子会话收到一条「用 `user_schedule_create`」的常驻指令却没有该工具，
+    最坏是谎称自己排好了提醒。
+  - 修法是在两份文件的**第一段**（排在路由表之前）加一条适用性护栏：手上没有 `user_schedule_create`
+    就什么都不排，把「要不要设提醒」留给发起你的那个会话。没走 provider 侧按 scope 过滤那条路：
+    内核文档写明 provider 只应读 `SkillLookupOptions`，`scope` 是 registry 用来选层的，不该被 provider 消费。
+  - 另一个缺口同批修：`scripts/ui-matrix/instance.mjs` 的插件副本清单是**手写的第二条**
+    （`package.json` / `cordis.patch.yml` / `icon.svg` + 三个目录），`files` 白名单加了 `SKILL.md`
+    之后副本里并没有它，provider 每次读盘必失败，skill 在 UI 矩阵与所有隔离实例里静默缺席。
+    现在副本直接跟着 `package.json` 的 `files` 走（外加两个非发布、运行期要用的目录），并用一条
+    行为测试在假版本树上跑真 `createInstance`，判据落在「副本里到底有没有那份文件」。
+  - 新增测试：护栏在两版各三条判据 + 位置必须在路由表之前；副本白名单一致性。
+  - 已知边界（本条不改，记录下来）：`locale` 是 client 侧服务，host 平面拿不到，所以生产上双语
+    实际恒走中文那份；catalog 的重建节奏由内核按 revision 决定，改文件不等于实时热更。
+
 - **feat** 随插件分发 `SKILL.md`（技能名 `later-reminders`，issue #104）：模型有了一处「何时主动排程」的常驻位点。
   - 动机是可见面的差别：工具 description 只在模型**已经**考虑调用该工具时才进上下文，而 skill catalog
     每一行常驻模型每轮。于是「我吃完饭回来继续」这类没明说「设个提醒」的场景，第一次有了能让模型主动

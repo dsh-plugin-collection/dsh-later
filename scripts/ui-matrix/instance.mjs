@@ -118,13 +118,17 @@ export function createInstance({ version, versionsRoot, pluginDir, home, profile
   }
 
   // ② 插件用**实体副本**：挂仓库目录会让它 import 到自己 node_modules 里那份宿主包，矩阵当场失真。
+  //    复制清单**以 package.json 的 `files` 白名单为准**，不再手写第二份。这里原来是手写的
+  //    四条，于是往 `files` 里加了 `SKILL.md` / `SKILL.en.md` 之后，副本里根本没有它们：
+  //    provider 每次读盘都失败，skill 在所有实例里静默缺席（退化是安全的，但矩阵与任何
+  //    隔离实例都测不到这一面）。`files` 之外只补两个非发布、运行期要用的目录。
   const copy = join(nm, pkg.name);
   mkdirSync(copy, { recursive: true });
-  for (const f of ['package.json', 'cordis.patch.yml', 'icon.svg']) {
-    if (existsSync(join(pluginDir, f))) cpSync(join(pluginDir, f), join(copy, f));
-  }
-  for (const d of ['lib', 'locale', 'assets']) {
-    if (existsSync(join(pluginDir, d))) cpSync(join(pluginDir, d), join(copy, d), { recursive: true });
+  const RUNTIME_ONLY_DIRS = ['locale', 'assets'];
+  for (const entry of [...(Array.isArray(pkg.files) ? pkg.files : []), ...RUNTIME_ONLY_DIRS]) {
+    const src = join(pluginDir, entry);
+    if (!existsSync(src)) continue;
+    cpSync(src, join(copy, entry), lstatSync(src).isDirectory() ? { recursive: true } : undefined);
   }
 
   // ③ profile 组合：与宿主自带 web profile 同构（base + web-app + 被测插件）。

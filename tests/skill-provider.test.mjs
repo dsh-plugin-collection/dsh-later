@@ -425,6 +425,7 @@ test('中英两版承载同一组路由事实（不是互相意译丢信息）',
     ['官方工具名（要区分的那个）', /schedule_create/, /schedule_create/],
     ['主动触发场景', /还在跑/, /still running/],
     ['日历式重复交回官方（本插件只有固定间隔）', /每天九点/, /every day at 9/],
+    ['不适用时先看工具在不在', /就别按这份走/, /do not follow this skill/],
     ['不该建重复的', /已经挂过同一条/, /duplicates already pending/],
     ['建完要告知', /一句话/, /one line/],
     ['可在面板取消', /面板/, /panel/],
@@ -433,6 +434,34 @@ test('中英两版承载同一组路由事实（不是互相意译丢信息）',
     assert.match(SKILL_ZH, zhRe, `中文版缺「${label}」`);
     assert.match(SKILL_EN, enRe, `英文版缺「${label}」`);
   }
+});
+
+test('两版都带「工具不在就不适用」的护栏（skill 全局可见，工具只给 root 挂）', () => {
+  // 这条护栏是实测出来的，不是设想出来的：在本机上派一个子 agent 只做自述，它回报
+  // 「catalog 里有 later-reminders，描述与 SKILL.md 逐字一致；但我含 schedule 的工具只有
+  // 官方那 4 个」。原因是注册面不对称：provider 进的是 registry 的**全局层**（所有 agent
+  // 可见），而 user_schedule_* 由 runtime-registry **只给 root agent** 挂。子会话于是收到
+  // 一条「用 user_schedule_create」的常驻指令却没有那个工具，最坏会谎称自己排好了。
+  // provider 侧按 scope 过滤不是合法出路（内核文档写明 provider 只该读 SkillLookupOptions），
+  // 所以把判定交给读它的人：先确认工具在不在。
+  const guards = [
+    ['点出要看哪个工具', /user_schedule_create/, /user_schedule_create/],
+    ['点出子会话这一类', /子 agent/, /subagent/],
+    ['给出正确动作：什么都不排', /什么都不排/, /schedule nothing/],
+  ];
+  for (const [label, zhRe, enRe] of guards) {
+    assert.match(SKILL_ZH, zhRe, `中文版缺护栏「${label}」`);
+    assert.match(SKILL_EN, enRe, `英文版缺护栏「${label}」`);
+  }
+  // 护栏要在开头，不能压在最后一节：读到第一段就该知道自己是否适用。
+  assert.ok(
+    SKILL_ZH.search(/就别按这份走/) < SKILL_ZH.search(/## 先分清两个调度工具/),
+    '中文护栏必须排在路由表之前',
+  );
+  assert.ok(
+    SKILL_EN.search(/do not follow this skill/) < SKILL_EN.search(/## Pick the right scheduler/),
+    '英文护栏必须排在路由表之前',
+  );
 });
 
 test('正文与 description 都不许出现破折号族（项目文风硬规）', () => {
