@@ -362,6 +362,84 @@
     这也补上了 #54 交接里"0.2.1 内核下的最终 typecheck 未验"那一项 —— 该错误码是在真实 0.2.1
     类型面下编译通过的，不是在 0.2.0 上"看起来没问题"。
 
+### 0.2.2-alpha.2：投影注册契约变更（issue #118）
+
+这一代对本插件是**两条契约变更**：一条在类型层"静默失效"，一条在运行时要求 await 时序。
+装配面本身没坏（见下面的对照组），所以改法的形状不是"修一个炸掉的 bug"。
+
+代次表因此从 **8 条变 9 条**。本文档上面各处写的「六代」是 **1.8.0 那轮基线实际跑过的数量**，
+属于历史记录，不随本轮改写；本节给的是这一代的新数字。
+
+| 变更 | `0.2.2-alpha.2` 的形状 | 本仓落点 |
+|---|---|---|
+| `SessionProjectionStateMap` 移除 | 类型包里已无该接口（`grep -c SessionProjectionStateMap lib/types/*.d.ts` 两个文件都是 0）；状态类型改由单元自身的 `stateSchema` 泛型承载 | `src/domain.ts`（删掉死的 `declare module` StateMap 块，**保留**同块里的 `SessionProjectionMap`）、`src/upstream-compat.ts` 的代次注释 |
+| `register()` 返回 `Promise<ProjectionHandle<S>>` | 附一条时序要求 *Callers must await registration before publishing consumers*；handle 提供 `stateOf` / `readerFor` / `dispose` | `src/projection-registration.ts`（唯一的跨代收敛点，含 `as never` 边界转换）+ `src/index.ts`（注册包进 async `ctx.effect`） |
+
+**先别把它读成"修编译错误"。** 类型包里 `SessionProjectionStateMap` 确实被删了，但 TypeScript 的
+module augmentation 允许**新增**一个不存在的 interface，所以 `tsc` 不报错 —— 它是**静默无效**
+（一段没人读的死声明），而不是编译失败。静默无效比报错更危险，这也正是 issue 前提里
+"类型层破坏 tsc"一条实测不成立的原因。
+
+**`register()` 的返回形状是"可调用 + thenable"。** `0.2.2-alpha.2` 的实现返回
+`Object.assign(dispose, { then, catch, finally, [Symbol.toStringTag]: 'Promise' })`
+（`~/dsh-versions/0.2.2-alpha.2/node_modules/@deepseek-ai/dsh-session-projection/lib/index.js:80-109`），
+即**不 await 也照样 `typeof === 'function'`**。因此收敛点必须按 **thenable 优先**判定：
+先看 `typeof value?.then === 'function'` 并 `await`，再退到函数形态。反过来（先判函数）
+会静默走老分支、跳过 await，时序从此丢失且**不报错**；上游同时把 callable 形态标了
+deprecated，方向一致。`tests/projection-registration.test.mjs` 里"可调用且 thenable"那条
+就是专门抓这个回归的 —— 它是本仓唯一能观测到"时序没了"的判据。
+
+**`stateOf` 已 `@deprecated`。** 这一代起 `registry.stateOf(session, key)` 每个 key 首次读会 warn 一次，
+推荐改用 awaited registration 的 `handle.stateOf(session)`（或所属领域服务）；本插件没有直接调用
+（`grep stateOf src/` 无命中），知悉即可。
+
+**`wire.summary` / `SessionProjectionSummaryExcluded<T>` 本次不采纳。** 佐证不是"它是可选参数所以不做"：
+这一代的擦除层在 `wire.summary !== false` 时**默认按 true** 落进 registration
+（`lib/index.js` 的 `acquire()`：`summary: wire.summary !== false`），也就是本插件现状（根本不声明
+`summary`）在该代已经是"参与摘要"的语义，运行时行为不变。而把 map 条目包成
+`SessionProjectionSummaryExcluded<T>` 会让其余老代次的跨代 tsc 报"找不到名字"（类型层没有
+"某代次没有就退化成 T"的写法，除非在 `upstream-shims.ts` 里造条件类型），而运行时 `summary:false`
+又会被老代次当未知字段忽略 —— 两边语义不对等。这是一个有意识的"不做"，记在这里免得后人以为漏了。
+
+#### 对照组：只放开声明面就 GREEN（2026-10-30 实测）
+
+只把 `engines.dsh` 与 8 个 kernel-scoped peer **临时**各加一条 `>=0.2.2-alpha.2 <0.2.3-0`，
+**不改任何代码**，同一个脚本立刻变成：
+
+```
+### 0.2.2-alpha.2 … GREEN
+    内核=0.2.2-alpha.2 · 同源=same · 投递 spliced=1 dispatch=Y · at 形状 5/5 · gate 本代=pass 最新=pass
+```
+
+（`/tmp/repro-118c`；package.json 已还原。）结论要这么读：
+
+- 本 issue 在装配/投递面上**不是"坏了"，而是"被门禁关在门外"** —— 真正的阻断只有声明面
+  （`engines.dsh` 上界原为 `<0.2.2-0`，按 semver §11 排除 `alpha.2`；0.2.1 起内核**单独按
+  `engines` 判定**，peer 不再兜底）；
+- 因此 `register()` 的 await 改动是**契约正确性**问题（注册完成前不得对外发布消费方），
+  不是"修一个已经炸掉的 bug"；
+- mount 面 GREEN **不能**证明 await 与否无差别：它根本没观测 client 读投影的先后。
+  时序判据只能在 `tests/projection-registration.test.mjs` 里造（deferred + 宏任务边界）。
+
+#### 实测结论
+
+| 面 | 结论 |
+|---|---|
+| type（整条 `@deepseek-ai/dsh*` 换成 `0.2.2-alpha.2`，两个 tsconfig） | 0 错误（2026-10-30 实测，产物 `/tmp/repro-118`） |
+| 四面（mount + function + type + gate，真内核） | （待 verify-kernels 回填） |
+| 全量测试用例数 | （待 verify-kernels 回填） |
+
+复跑命令（合并后由 verify-kernels 执行，逐条落 JSON 到 `.verify/`）：
+
+```
+node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install
+node scripts/verify-across-kernels.mjs --versions 0.2.2-alpha.2 --steps mount,function,type,gate --no-install
+```
+
+**devDependencies 不动**（仍固定 `0.2.1-rc.2`）：alpha 不进本地编译基线，新代次靠 `--steps type`
+与真内核四面覆盖。`0.2.2-alpha.2` 在本仓算"支持"要**两侧声明**（`engines.dsh` + kernel-scoped
+peer 各追加 `>=0.2.2-alpha.2 <0.2.3-0`）**与**四面实测共同成立，缺一不算。
+
 ## 会话日志兼容：`session-scheduler/user-schedule`（#58，2026-10-20 定案）
 
 插件在 1.4.0 之前把「定时任务所有权」写进会话日志（自定义事件类型），之后改存 sidecar。
