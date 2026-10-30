@@ -423,7 +423,8 @@ module augmentation 允许**新增**一个不存在的 interface，所以 `tsc` 
     内核=0.2.2-alpha.2 · 同源=same · 投递 spliced=1 dispatch=Y · at 形状 5/5 · gate 本代=pass 最新=pass
 ```
 
-（`/tmp/repro-118c`；package.json 已还原。）结论要这么读：
+（合并前的对照组在 `/tmp/repro-118c` 跑过、package.json 已还原。那是一次性临时目录，复查不要
+指望它还在 —— 用本节的复跑命令重新生成 `.verify/` 产物。）结论要这么读：
 
 - 本 issue 在装配/投递面上**不是"坏了"，而是"被门禁关在门外"** —— 真正的阻断只有声明面
   （`engines.dsh` 上界原为 `<0.2.2-0`，按 semver §11 排除 `alpha.2`；0.2.1 起内核**单独按
@@ -442,17 +443,27 @@ module augmentation 允许**新增**一个不存在的 interface，所以 `tsc` 
 
 #### 实测结论
 
+2026-10-30 测，插件基线 `ffb322d`，由 verify-kernels 在 `verify/118-integration` 上跑。原始产物：
+`.verify/task4-full/across-kernels-2026-10-30T09-34-49-655Z.json`（9 代次全量）与
+`.verify/task4-alpha2/across-kernels-2026-10-30T09-36-09-882Z.json`（`0.2.2-alpha.2` 单独一轮）。
+两者都在 gitignore 的 `.verify/` 下，**不存在于仓库**，复查请用本节末尾的命令重新生成。
+
 | 面 | 结论 |
 |---|---|
-| type（整条 `@deepseek-ai/dsh*` 换成 `0.2.2-alpha.2`，两个 tsconfig） | 0 错误（2026-10-30 实测，产物 `/tmp/repro-118`） |
-| 四面（mount + function + type + gate，真内核） | （待 verify-kernels 回填） |
-| 全量测试用例数 | （待 verify-kernels 回填） |
+| mount + function（9 代次，各自独立进程） | **9/9 GREEN**；`同源=same` 9/9、`投递 spliced=1 dispatch=Y`、`at 形状 5/5`；总退出码 **0**（单代 17–19s，9 代共 161s，全程 `--no-install`） |
+| type（9 代次，两个 tsconfig） | **9/9 绿、0 错误** |
+| gate（该代自己的 `evaluatePluginCompatibility`） | 7 代 **pass**；`0.1.2-rc.1` / `0.1.5-rc.3` 是**结构性未判定** —— 那两代的 `dsh-app-boot` 根本不导出该函数，**不是**插件被判过，不许记成绿 |
+| gate（最新语义） | **9/9 pass** |
+| UI（真 GUI，官方入口 `npm run verify:ui -- --versions 0.2.2-alpha.2`） | 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0，exit **0**；`0.2.2-alpha.2` 单独一轮同样 exit 0、GREEN。截图入库：[`docs/media/ui-matrix-2026-10-30-realgui/`](./media/ui-matrix-2026-10-30-realgui/README.md) |
+| 投影物化探针（本 issue 要求的判据，见 §1.0） | `summaryKeys()` 含 `userSchedules`；`snapshot().values.userSchedules` 存在（`schedules=0, asOfSeq=2`）；建一条 `after_seconds=2` 后 `schedules 0→1` 且含该 prompt（`asOfSeq=5`）；到点投递后回 0（`asOfSeq=10`）；显式 `snapshot(['userSchedules'])` 正常；`pluginWarns=[]` |
+| 全量单测 | **747 tests / 743 pass / 0 fail / 4 skipped**（71 文件）。4 条 skip 是 `dsh-group-status` 可选对端缺席的老 skip，与本轮无关 |
 
-复跑命令（合并后由 verify-kernels 执行，逐条落 JSON 到 `.verify/`）：
+复跑命令（逐条落 JSON 到 `.verify/`）：
 
 ```
 node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install
 node scripts/verify-across-kernels.mjs --versions 0.2.2-alpha.2 --steps mount,function,type,gate --no-install
+PLAYWRIGHT_MODULE=<playwright 模块目录> npm run verify:ui -- --versions 0.2.2-alpha.2
 ```
 
 **devDependencies 不动**（仍固定 `0.2.1-rc.2`）：alpha 不进本地编译基线，新代次靠 `--steps type`
