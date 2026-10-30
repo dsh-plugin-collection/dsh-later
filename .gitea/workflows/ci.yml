@@ -18,8 +18,13 @@ jobs:
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
       - name: 类型检查（host + client）
-        # 不用两条 `npx tsc`：Actions 的 `bash -e` 会让第一条一红就跳过第二条，
-        # 与本地旧 `&&` 是同一个失明（issue #96）。脚本逐项目跑完再汇总退出码。
+        # 两条裸 `npx tsc` 用 && 串会第一条一红就跳过第二条（issue #96）；脚本跑完再汇总退出码。
         run: node scripts/typecheck-all.mjs
+      - name: 构建（测试跑在刚从 src 产出的 lib/ 上）
+        # lib/ 是被跟踪的构建产物、tests 直接 import 它；不 build 就等于测上次提交里的旧产物。
+        # 别在这后面补 `git diff --exit-code -- lib` 当新鲜度门禁：esbuild 的分节注释会随检出
+        # 布局与依赖解析变（符号链接 node_modules 下实测每次差 1 行），那道门禁只会随机红。
+        run: npm run build
       - name: 测试
+        # 走 scripts/run-tests.mjs 而非裸 node --test：glob 零匹配时 node 仍以 0 退出（绿色空步骤）。
         run: npm test

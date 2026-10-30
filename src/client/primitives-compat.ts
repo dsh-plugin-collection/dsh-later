@@ -1,20 +1,20 @@
 /**
- * 官方 `dsh-client-ui-primitives` 的特性探测层：优先用官方 hook，缺失则本地兜底。
+ * 官方 `dsh-client-ui-primitives` 的特性探测层：只用官方实现，缺失时响亮降级。
  *
  * 背景：面板的「抬升面 + 锚定 + 外部点击关闭」在官方 `PickerPopover` 里由
  * primitives 的 `useAnchoredPosition` / `useDismissOnOutsidePointer` 提供
- * （见 `@deepseek-ai/dsh-client-ui-schedule` 的 `PickerPopover.js`）。但本插件的
- * peer 覆盖 0.1.1 → 0.2.0 五个内核代次，早代次宿主提供的 primitives 版本尚无这两个导出。
+ * （见 `@deepseek-ai/dsh-client-ui-schedule` 的 `PickerPopover.js`）。
  *
- * 为什么能安全地「有就用、没有就自己写」：
- *  - primitives 是宿主 seed 模块表基线（PLATFORM_MODULES），bundle 里保持 external，
- *    由 `require()` 直取宿主同一份模块实例，探测结果在**整页生命周期内恒定**；
- *  - 因此下面的 `anchorImpl` / `dismissImpl` 在模块初始化时就定型，之后每次渲染
- *    调用的都是同一个函数 → React 的 hook 调用序列稳定，不会因条件分支跳变。
+ * ⚠️ 本文件头此前写着「本插件 peer 覆盖 0.1.1 → 0.2.0，**早代次宿主尚无这两个导出**」，
+ * 并据此维护了一份手写锚定实现。**那句前提是错的**：2026-10-29 逐代实测，8 个已登记
+ * 代次全都导出这两个 hook（证据与逐代核对方式见下方 `usePanelAnchorPosition` 上方注释）。
+ * 保留 namespace + 属性访问的**加载安全**（具名 import 在导出缺失时是链接期硬失败，
+ * 会让插件整条加载不了），但缺失时不再切换到一份没人验证过的几何实现——改为告警一次
+ * 并退到调用方已有的静态定位与遮罩关闭。
  *
- * 与 `schedule-compat.ts` 的 `pick()` 同一套理由：**不能用具名 import**——ESM 具名
- * import 在目标导出缺失时是链接期硬失败（`SyntaxError: does not provide an export
- * named …`），会让插件在旧代次宿主上直接加载不了。这里走 namespace + 属性访问。
+ * 探测结果在**整页生命周期内恒定**：primitives 是宿主 seed 模块表基线
+ * （PLATFORM_MODULES），bundle 里保持 external，由 `require()` 直取宿主同一份实例。
+ * 因此下面两个 hook 的分支选择不会随渲染跳变，React 的 hook 调用序列稳定。
  *
  * ## 第二组：图标与两个工具（issue #95 方案 B，0.1.5 / 0.1.2 兼容）
  *
@@ -31,7 +31,7 @@
  *
  * @module dsh-later/client/primitives-compat
  */
-import { createElement, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createElement, useEffect, useRef } from 'react';
 import type { CSSProperties, JSX, RefObject } from 'react';
 import type { IconProps } from '@deepseek-ai/dsh-client-ui-primitives';
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives';
@@ -73,97 +73,45 @@ function pick<T>(name: string): T | undefined {
 /** 图标组件的形状（两代一致：`({ size, className }) => JSX.Element`）。 */
 export type IconComponent = (props: IconProps) => JSX.Element | null;
 
-/** 官方锚定 hook；旧代次 primitives 未导出时为 undefined。 */
+/** 官方锚定 hook；宿主未导出时为 undefined（8 个已验证代次都有）。 */
 const hostUseAnchoredPosition = pick<UseAnchoredPosition>('useAnchoredPosition');
 
-/** 官方外部点击关闭 hook；旧代次 primitives 未导出时为 undefined。 */
+/** 官方外部点击关闭 hook；宿主未导出时为 undefined（8 个已验证代次都有）。 */
 const hostUseDismissOnOutsidePointer = pick<UseDismissOnOutsidePointer>('useDismissOnOutsidePointer');
 
 /**
- * 本地兜底锚定：测量锚点 → 放上/下沿 → 夹取进视口。
+ * 锚定与外部点击关闭：**只用宿主官方实现**，不再自带手写几何兜底。
  *
- * 行为对齐官方 `useAnchoredPosition`：capture 阶段监听 scroll（能盖住页面内嵌套的
- * 滚动容器）、监听 resize，并用 ResizeObserver 跟随面板自身尺寸变化。仅在旧代次
- * 宿主上启用——新代次走官方实现。
+ * 原来这里有一份 69 行的 `useLegacyAnchoredPosition`（测量 + 视口夹取 + 翻转 +
+ * ResizeObserver）和一个 `noopDismiss`，条件是"旧代次 primitives 没导出这两个 hook"。
+ * 2026-10-29 逐代实测：该条件**在全部 8 个已登记代次上都不成立**——
+ *   · 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.2：树内 `dsh-client-ui-primitives` 直接含两个导出
+ *   · 0.2.1-rc.2 / rc.3 / rc.4：本仓钉的那份 + 发布包 + 0.2.1-rc.4 的 shell 均含
+ *   · 0.1.2-rc.1：宿主 shell `index-Df-65__b.js` 含两个名字
+ *   · 0.1.5-rc.3：树内没有该包，改从 registry 取发布包核对，两个导出都在
+ * 也就是说那段手写几何**一次都没执行过**。没执行过的代码不是保险，是负债：它不会被
+ * 任何测试覆盖，而一旦真的走到，等于用一条从未验证的路径去画用户看得见的面板。
+ *
+ * 保留 `pick()` 与两个 `hasOfficial*` 标志（各一行），因为**加载安全**与**行为兜底**
+ * 是两件事：具名 import 在导出缺失时是链接期硬失败，会让插件在那种宿主上整条加载不了；
+ * 而属性访问 + 缺失时响亮告警，面板退到调用方已有的静态 `bottom` 样式与遮罩关闭，
+ * 功能降级但看得见、日志里有话。删掉的是没人走的算法，不是兜底本身。
  */
-function useLegacyAnchoredPosition({
-  open,
-  anchorRef,
-  panelRef,
-  side = 'bottom',
-  align = 'start',
-  gap,
-  margin,
-}: PanelAnchorOptions): CSSProperties | null {
-  const [position, setPosition] = useState<CSSProperties | null>(null);
 
-  useLayoutEffect(() => {
-    if (!open) {
-      setPosition(null);
-      return undefined;
-    }
-    const measure = (): void => {
-      const anchor = anchorRef.current;
-      const panel = panelRef.current;
-      if (anchor === null || panel === null) return;
-      const rect = anchor.getBoundingClientRect();
-      const panelWidth = panel.offsetWidth;
-      const panelHeight = panel.offsetHeight;
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-
-      const left = align === 'end'
-        ? rect.right - panelWidth
-        : rect.left;
-      const rawTop = side === 'top'
-        ? rect.top - panelHeight - gap
-        : rect.bottom + gap;
-
-      // 水平留边距后夹取；上/下沿各自翻转，保证面板始终可见。
-      const clampedLeft = Math.min(
-        Math.max(margin, left),
-        Math.max(margin, viewportWidth - panelWidth - margin),
-      );
-      const overflowsTop = rawTop < margin;
-      const overflowsBottom = rawTop + panelHeight > viewportHeight - margin;
-      const top = overflowsTop && !overflowsBottom
-        ? rect.bottom + gap
-        : overflowsBottom && !overflowsTop
-          ? rect.top - panelHeight - gap
-          : rawTop;
-
-      setPosition({
-        left: `${Math.round(clampedLeft)}px`,
-        top: `${Math.round(Math.max(margin, Math.min(top, viewportHeight - panelHeight - margin)))}px`,
-      });
-    };
-
-    measure();
-    window.addEventListener('scroll', measure, true);
-    window.addEventListener('resize', measure);
-    const panel = panelRef.current;
-    const observer = typeof ResizeObserver === 'undefined' || panel === null
-      ? undefined
-      : new ResizeObserver(measure);
-    if (observer !== undefined && panel !== null) observer.observe(panel);
-    return () => {
-      window.removeEventListener('scroll', measure, true);
-      window.removeEventListener('resize', measure);
-      observer?.disconnect();
-    };
-  }, [open, anchorRef, panelRef, side, align, gap, margin]);
-
-  return position;
+/** 缺官方实现时只告警一次：扫描/渲染是高频路径，刷屏会淹掉真问题。 */
+let missingHookWarned = false;
+function warnMissingHook(name: string): void {
+  if (missingHookWarned) return;
+  missingHookWarned = true;
+  try {
+    console.warn(
+      `dsh-later: 宿主 primitives 未导出 ${name}，面板锚定/外部点击关闭降级为静态定位与遮罩关闭。`
+        + '这通常意味着宿主版本不在本插件已验证的代次表内（见 src/upstream-compat.ts 的 KERNEL_GENERATIONS）。',
+    );
+  } catch {
+    /* 告警出口失败不影响渲染 */
+  }
 }
-
-/** 兜底用的空实现：不注册监听，关闭交给调用方的既有路径（Escape / mask）。 */
-function noopDismiss(): void {
-  /* 旧代次宿主无官方 outside-pointer hook，由 SchedButton 的 mask 负责关闭。 */
-}
-
-/** 模块初始化时定型，整个页面生命周期内不变（见文件头）。 */
-const anchorImpl: UseAnchoredPosition = hostUseAnchoredPosition ?? useLegacyAnchoredPosition;
-const dismissImpl: UseDismissOnOutsidePointer = hostUseDismissOnOutsidePointer ?? noopDismiss;
 
 /** 宿主是否提供了官方的外部点击关闭能力。 */
 export const hasOfficialOutsideDismiss = hostUseDismissOnOutsidePointer !== undefined;
@@ -176,7 +124,11 @@ export const hasOfficialAnchoredPosition = hostUseAnchoredPosition !== undefined
  * @param options 面板开合、两个 ref、放置边与对齐、间距与留白。
  */
 export function usePanelAnchorPosition(options: PanelAnchorOptions): CSSProperties | null {
-  return anchorImpl(options);
+  if (hostUseAnchoredPosition === undefined) {
+    warnMissingHook('useAnchoredPosition');
+    return null;
+  }
+  return hostUseAnchoredPosition(options);
 }
 
 /**
@@ -192,7 +144,12 @@ export function usePanelOutsideDismiss(
   setOpen: (open: boolean) => void,
   portal?: RefObject<HTMLElement | null>,
 ): void {
-  return dismissImpl(root, open, setOpen, portal);
+  if (hostUseDismissOnOutsidePointer === undefined) {
+    // 不注册监听：关闭仍由调用方的遮罩与 Escape 负责（见 SchedButton 的 !hasOfficial 分支）。
+    warnMissingHook('useDismissOnOutsidePointer');
+    return;
+  }
+  hostUseDismissOnOutsidePointer(root, open, setOpen, portal);
 }
 
 /**
@@ -237,6 +194,8 @@ export function useEscapeToClose(open: boolean, setOpen: (open: boolean) => void
  */
 export const ICON_EXPORT_NAMES: readonly string[] = [
   'IconClockOutlineRegular', 'IconClockOutline16',
+  'IconCopyOutlineRegular', 'IconCopyOutline16',
+  'IconCheckOutlineRegular', 'IconCheckOutline16',
   'IconCloseOutlineRegular', 'IconCloseOutline16',
   'IconChevronDownOutlineRegular', 'IconChevronDownOutline14',
   'IconEditOutlineRegular', 'IconEditOutline16',
@@ -258,6 +217,14 @@ function firstIcon(...candidates: readonly (IconComponent | undefined)[]): IconC
 export const IconClock = firstIcon(
   pick<IconComponent>('IconClockOutlineRegular'),
   pick<IconComponent>('IconClockOutline16'),
+);
+export const IconCopy = firstIcon(
+  pick<IconComponent>('IconCopyOutlineRegular'),
+  pick<IconComponent>('IconCopyOutline16'),
+);
+export const IconCheck = firstIcon(
+  pick<IconComponent>('IconCheckOutlineRegular'),
+  pick<IconComponent>('IconCheckOutline16'),
 );
 export const IconClose = firstIcon(
   pick<IconComponent>('IconCloseOutlineRegular'),
@@ -343,6 +310,52 @@ export function fileSizeTextCompat(bytes: number): string {
 }
 
 /**
+ * 复制到剪贴板：优先宿主的 `writeClipboard`，缺失时退到 `navigator.clipboard`，
+ * 再退到隐藏 textarea + `execCommand('copy')`（旧宿主 / 非安全上下文）。
+ *
+ * 为什么不用具名 import：`writeClipboard` 在部分代次的 primitives 里不存在，
+ * 具名 import 是链接期硬失败，会让整条插件加载不了。用 `pick()` 探测后逐级降级。
+ * @param text - 要复制的纯文本。
+ * @returns 是否成功（失败由调用方决定要不要反馈）。
+ */
+export async function writeClipboardCompat(text: string): Promise<boolean> {
+  const host = pick<(value: string) => Promise<boolean>>('writeClipboard');
+  if (host !== undefined) {
+    try {
+      return await host(text);
+    } catch {
+      /* 宿主实现失败时继续走本地降级 */
+    }
+  }
+  try {
+    const nav = (globalThis as { navigator?: { clipboard?: { writeText?: (value: string) => Promise<void> } } })
+      .navigator;
+    if (nav?.clipboard?.writeText !== undefined) {
+      await nav.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 权限/非安全上下文，继续降级 */
+  }
+  try {
+    if (typeof document === 'undefined') return false;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 本代次解析到的图标名（别名 → 实际用的宿主导出名）。
  *
  * 诊断与测试用：能核对"这一代到底用了哪一套名字"，而不是读代码猜。
@@ -350,6 +363,8 @@ export function fileSizeTextCompat(bytes: number): string {
 export function resolvedIconNames(): Record<string, string | undefined> {
   const table: Record<string, readonly (readonly [string, IconComponent | undefined])[]> = {
     clock: [['IconClockOutlineRegular', pick<IconComponent>('IconClockOutlineRegular')], ['IconClockOutline16', pick<IconComponent>('IconClockOutline16')]],
+    copy: [['IconCopyOutlineRegular', pick<IconComponent>('IconCopyOutlineRegular')], ['IconCopyOutline16', pick<IconComponent>('IconCopyOutline16')]],
+    check: [['IconCheckOutlineRegular', pick<IconComponent>('IconCheckOutlineRegular')], ['IconCheckOutline16', pick<IconComponent>('IconCheckOutline16')]],
     close: [['IconCloseOutlineRegular', pick<IconComponent>('IconCloseOutlineRegular')], ['IconCloseOutline16', pick<IconComponent>('IconCloseOutline16')]],
     chevronDown: [['IconChevronDownOutlineRegular', pick<IconComponent>('IconChevronDownOutlineRegular')], ['IconChevronDownOutline14', pick<IconComponent>('IconChevronDownOutline14')]],
     edit: [['IconEditOutlineRegular', pick<IconComponent>('IconEditOutlineRegular')], ['IconEditOutline16', pick<IconComponent>('IconEditOutline16')]],

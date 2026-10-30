@@ -46,6 +46,8 @@ import type { SchedButtonInjected } from './components/SchedButton.js';
 import type { ScheduleDockInjected } from './components/ScheduleDock.js';
 import type { ClientAttachment } from './types.js';
 import { mountSessionPresence, type PresenceLocaleLike } from './session-presence.js';
+import { mountBubbleMarker } from './marker-controller.js';
+import type { LocaleFaceLike } from './useSchedT.js';
 import {
   createScheduleSummaryStore,
   getScheduleSummaryStore,
@@ -205,6 +207,12 @@ function apply(ctx: Context): void {
         maxPromptCharsHint: '提醒内容最大字符数（仅在「允许长文本提醒」开启时生效）。',
         maxPromptCharsLockedHint: '开启「允许长文本提醒」后可调。',
         smartWindowHint: '用于「工作时间」芯片与智能模式自动排期。',
+        /**
+         * 五个时段的跨字段序关系被写反时，段尾挂这一句（同时锁住保存）。
+         * 规则本身只有一份，在 `src/smart-window.ts` 的 `SMART_WINDOW_ORDER`；
+         * 这里的顺序措辞必须与那张表同序——改了表要连着改这句。
+         */
+        smartWindowOrderHint: '五个时段需依次递增：工作时间开始 < 午休开始 < 午休结束 < 工作时间结束 < 夜间静默起点。',
         workStartLabel: '工作时间开始',
         workEndLabel: '工作时间结束（晚间开始）',
         lunchStartLabel: '午休开始',
@@ -284,6 +292,8 @@ function apply(ctx: Context): void {
         maxPromptCharsHint: 'Maximum characters per reminder (takes effect only when "Allow long reminder prompts" is on).',
         maxPromptCharsLockedHint: 'Adjustable after enabling "Allow long reminder prompts".',
         smartWindowHint: 'Used by the Work-hours chip and smart auto-scheduling.',
+        // 与 zh 那条同序：措辞就是 `SMART_WINDOW_ORDER` 那张表的读法。
+        smartWindowOrderHint: 'The five windows must increase in order: work start < lunch start < lunch end < work end < night quiet.',
         workStartLabel: 'Work day start',
         workEndLabel: 'Work day end (evening start)',
         lunchStartLabel: 'Lunch break start',
@@ -540,6 +550,30 @@ function apply(ctx: Context): void {
     );
   };
 
+  /** 气泡标记是否已挂载：两条设置轨道只会命中一条，重复注册会占两次 priority。 */
+  let markerMounted = false;
+
+  /**
+   * 挂载定时消息气泡标记（issue #112）。
+   *
+   * `off` 由 marker-controller 自己收敛为「不注册」；能力门禁（0.2.1+ 的
+   * `conversation.chat.node` + 用户内容工厂）也在那里，所以这里只负责接线一次。
+   * @param scope - 本插件 namespace 的设置面（旧 `settingsScope` 或新 `configForms`）。
+   */
+  const mountMarker = (scope: ClientSettingsScope | ClientConfigForm): void => {
+    if (markerMounted) return;
+    markerMounted = true;
+    ctx.effect(
+      () =>
+        mountBubbleMarker({
+          slots,
+          scope,
+          ...(locale === undefined ? {} : { locale: locale as unknown as LocaleFaceLike }),
+        }),
+      'dsh-later: bubble marker',
+    );
+  };
+
   /** 设置卡文案取值器；locale 服务缺失时卡片不注册（按钮自带回退，仍可挂载）。 */
   const cardT = locale === undefined ? undefined : locale.bind(NS);
 
@@ -575,6 +609,7 @@ function apply(ctx: Context): void {
     // 徽标显隐开关接到这条设置轨道上（issue #83）：保存即生效，不依赖刷新页面。
     attachBadgeVisibility(scope);
     mountComposer(scope);
+    mountMarker(scope);
     if (cardT === undefined) return;
     // 设置对话框中的设置页：默认不显示，由插件详情页的开关控制。
     // 开关状态存储在 localStorage 中，key 为 'dsh-later:show-settings-section'。
@@ -617,6 +652,7 @@ function apply(ctx: Context): void {
     // 徽标显隐开关接到这条设置轨道上（issue #83）：保存即生效，不依赖刷新页面。
     attachBadgeVisibility(scope);
     mountComposer(scope);
+    mountMarker(scope);
     if (cardT === undefined) return;
     ctx.effect(
       () =>

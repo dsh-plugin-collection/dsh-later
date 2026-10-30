@@ -48,8 +48,39 @@ const given = (opt('versions', '') || '').split(',').map((s) => s.trim()).filter
 const VERSIONS = given.length ? given : KERNEL_GENERATIONS.map((g) => g.id ?? g);
 
 /**
+ * 一行的结论。**唯一一份** —— HTML、matrix.json、进程退出码都必须走它。
+ *
+ * 为什么要抽出来：此前"合格"的判据在 HTML 里写一遍，退出码在另一处用 `rows.every(ok)`
+ * 判一遍，而 `ok` 只代表"浏览器起来了 + 截图没炸"。结果 badge 在 4 个代次整块不出现，
+ * 矩阵仍然 `exit 0`。同一个结论算两次，就一定会漂成两个不同的结论。
+ *
+ * @param {Record<string, any>} row
+ * @returns {{pass: boolean, bits: string[]}}
+ */
+export function rowVerdict(row) {
+  if (row.ok !== true) return { pass: false, bits: [`未能启动：${String(row.error ?? '未知原因').slice(0, 160)}`] };
+  const bits = [
+    `按钮：${row.buttonFound ? '在' : '缺'}`,
+    `dock 行：${row.dockRows ?? 0}`,
+    `面板：${row.panelOpened ? '打开' : '未打开'}`,
+    `侧栏 badge：${row.badges ?? 0}`,
+    `控制台错误：${(row.errors ?? []).length}`,
+    `警告：${(row.warns ?? []).length}`,
+  ];
+  const pass = Boolean(row.buttonFound)
+    && (row.dockRows ?? 0) > 0
+    && row.panelOpened === true
+    // badge 进判据：它是"用户在侧栏看得见提醒"这一面的唯一证据。此前它根本不被观测。
+    && (row.badges ?? 0) > 0
+    && (row.errors ?? []).length === 0;
+  // 自检告过警说明"漂了但至少说话了"，与"无声消失"区分开——后者更糟。
+  if ((row.driftWarns ?? []).length > 0) bits.push('⚠ 自检已报宿主 DOM 漂移');
+  return { pass, bits };
+}
+
+/**
  * 生成矩阵页（纯函数，能被测试直接调）。
- * @param {Array<{version: string, ok: boolean, error?: string, dockRows?: number, panelOpened?: boolean, buttonFound?: boolean, errors?: string[], shots?: Record<string,string>}>} rows
+ * @param {Array<{version: string, ok: boolean, error?: string, dockRows?: number, panelOpened?: boolean, buttonFound?: boolean, badges?: number, errors?: string[], warns?: string[], shots?: Record<string,string>}>} rows
  * @param {{title?: string, generatedAt?: string}} [meta]
  * @returns {string} HTML
  */
@@ -61,20 +92,13 @@ export function renderMatrixHtml(rows, meta = {}) {
     return `<a href="${file}" target="_blank"><img src="${file}" alt="${file}" loading="lazy"></a>`;
   };
   const status = (row) => {
-    if (!row.ok) return `<div class="bad">未能启动：${(row.error ?? '未知原因').slice(0, 160)}</div>`;
-    const bits = [
-      `按钮：${row.buttonFound ? '在' : '缺'}`,
-      `dock 行：${row.dockRows ?? 0}`,
-      `面板：${row.panelOpened ? '打开' : '未打开'}`,
-      `控制台错误：${(row.errors ?? []).length}`,
-    ];
-    const cls = row.buttonFound && row.dockRows > 0 && row.panelOpened && (row.errors ?? []).length === 0 ? 'good' : 'warn';
-    return `<div class="${cls}">${bits.join('　')}</div>`;
+    const { pass, bits } = rowVerdict(row);
+    return `<div class="${pass ? 'good' : 'warn'}">${bits.join('　')}</div>`;
   };
   const body = rows.map((row) => `
   <tr>
     <th><div class="ver">${row.version}</div>${status(row)}</th>
-    ${['composer', 'dock', 'panel'].map((key) => `<td>${cell(row, key)}</td>`).join('')}
+    ${['composer', 'dock', 'panel', 'badge'].map((key) => `<td>${cell(row, key)}</td>`).join('')}
   </tr>`).join('\n');
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>${meta.title ?? 'UI 矩阵'}</title>
@@ -119,11 +143,16 @@ export function buildEvidenceManifest(rows, meta) {
     const file = meta.files?.[evidence];
     return {
       version: row.version,
-      verdict: row.ok ? 'CAPTURED' : 'FAILED',
+      verdict: rowVerdict(row).pass ? 'PASS' : 'FAIL',
       button: row.buttonFound ?? null,
       dockRows: row.dockRows ?? 0,
       panelOpened: row.panelOpened ?? false,
+      // badge 与 warning 都要进产物：缺了它们，"全绿"这个词就还是不可信的。
+      badges: row.badges ?? 0,
+      badgeRows: row.badgeRows ?? null,
       consoleErrors: (row.strictErrors ?? []).length,
+      consoleWarnings: (row.warns ?? []).length,
+      driftWarns: (row.driftWarns ?? []).length,
       error: row.error ?? null,
       evidence: file === undefined ? null : { file: evidence, bytes: file.bytes, sha256: file.sha256 },
       sources: row.shots ?? {},
@@ -211,7 +240,7 @@ export async function runMatrix(versions = VERSIONS) {
       process.stdout.write(`HTTP ${started.http} `);
       const capture = await captureUi({ port, outDir: OUT, version });
       Object.assign(row, capture, { ok: true });
-      console.log(`按钮=${capture.buttonFound ? 'Y' : 'N'} dock=${capture.dockRows} 面板=${capture.panelOpened ? 'Y' : 'N'} 错误=${capture.errors.length}`);
+      console.log(`按钮=${capture.buttonFound ? 'Y' : 'N'} dock=${capture.dockRows} 面板=${capture.panelOpened ? 'Y' : 'N'} badge=${capture.badges} 错误=${capture.errors.length} 警告=${capture.warns.length}`);
     } catch (error) {
       row.error = String(error?.message ?? error);
       console.log(`失败：${row.error.slice(0, 160)}`);
@@ -223,8 +252,9 @@ export async function runMatrix(versions = VERSIONS) {
   }
   writeFileSync(join(OUT, 'matrix.json'), `${JSON.stringify({ pluginVersion, versions, rows }, null, 2)}\n`);
   writeFileSync(join(OUT, 'matrix.html'), renderMatrixHtml(rows, { pluginVersion }));
-  const failed = rows.filter((r) => !r.ok).length;
-  console.log(`\n汇总：成功 ${rows.length - failed} / 失败 ${failed}；矩阵 ${join(OUT, 'matrix.html')}`);
+  // 结论取自 rowVerdict（与 HTML、manifest 同一份），不再用"浏览器起来了"当"这代能用"。
+  const failed = rows.filter((r) => !rowVerdict(r).pass).length;
+  console.log(`\n汇总：通过 ${rows.length - failed} / 不通过 ${failed}；矩阵 ${join(OUT, 'matrix.html')}`);
   if (EVIDENCE.length > 0) {
     const manifest = await writeEvidence(rows, resolve(EVIDENCE));
     console.log(`证据：${manifest}（拼图 + 每代 dock 缩略图 + 清单）`);
@@ -236,5 +266,9 @@ export async function runMatrix(versions = VERSIONS) {
 const invoked = process.argv[1] === undefined ? undefined : resolve(process.argv[1]);
 if (invoked !== undefined && invoked === fileURLToPath(import.meta.url)) {
   const rows = await runMatrix();
-  process.exit(rows.every((r) => r.ok) ? 0 : 1);
+  /**
+   * 退出码必须用 rowVerdict，不能用 `r.ok`。`ok` 只代表"浏览器起来了、截图没炸"，
+   * 于是 badge 在 4 个代次整块不出现时这条命令仍然报 0 —— 采集件自己把红报成绿。
+   */
+  process.exit(rows.every((r) => rowVerdict(r).pass) ? 0 : 1);
 }

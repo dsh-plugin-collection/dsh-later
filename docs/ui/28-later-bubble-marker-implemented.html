@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 实现后的气泡标记 · 定稿预览</title>
+<style>
+  body[data-theme="dark"] {
+    --bg: #121316; --stage: #17181b; --card: #1f2126;
+    --text: #e8e9ec; --text-2: #b6bac2; --text-3: #8b909a; --text-4: #6b7078;
+    --line: #2c2f35; --line-2: #3a3e46;
+    --bubble: #2c2c2e; --bubble-fg: #f9fafb;
+    --mark: #adb2b8; --mark-hover: #cfd3d6;
+    --amber: #f7ad31;
+    --tooltip-bg: #43454a; --tooltip-fg: #fff;
+    --brand: #93aaff; --brand-soft: #232a44;
+    --ok: #6ee7a0; --ok-soft: #1d2f24;
+    --hover: rgba(255, 255, 255, .07);
+  }
+  body[data-theme="light"] {
+    --bg: #f4f5f7; --stage: #e9ebef; --card: #fff;
+    --text: #1b1d21; --text-2: #5f6570; --text-3: #8b909a; --text-4: #adb2b8;
+    --line: #e5e7eb; --line-2: #d8dbe0;
+    --bubble: #edf3fe; --bubble-fg: #1b1d21;
+    --mark: #81858c; --mark-hover: #61666b;
+    --amber: #dd8629;
+    --tooltip-bg: #2c2c2e; --tooltip-fg: #fff;
+    --brand: #4d6bfe; --brand-soft: #eef1ff;
+    --ok: #15803d; --ok-soft: #f0fdf4;
+    --hover: rgba(0, 0, 0, .05);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 30px 22px 80px; background: var(--bg); color: var(--text);
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .page { max-width: 1120px; margin: 0 auto; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .lede { color: var(--text-3); margin: 0 0 6px; font-size: 13px; max-width: 80ch; }
+  h2 { font-size: 15px; margin: 40px 0 4px; display: flex; align-items: center; gap: 9px; }
+  h2 .pill {
+    font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand); letter-spacing: .02em;
+  }
+  h3 { font-size: 12.5px; margin: 22px 0 6px; color: var(--text-2); font-weight: 600; }
+  .note { color: var(--text-2); margin: 0 0 14px; font-size: 13px; max-width: 78ch; }
+  .note b { color: var(--text); font-weight: 600; }
+  .note code, td code, .src code, .callout code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: .92em;
+    background: var(--hover); border-radius: 4px; padding: .5px 4px;
+  }
+  .btn {
+    font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    background: transparent; color: var(--text-2); border: 1px solid var(--line-2);
+  }
+  .btn:hover { background: var(--hover); color: var(--text); }
+
+  /* 会话视口 */
+  .stage {
+    background: var(--stage); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 28px 30px; margin: 12px 0 8px; position: relative;
+  }
+  .stage-tag {
+    position: absolute; top: -9px; left: 18px; font-size: 10.5px; letter-spacing: .04em;
+    color: var(--text-4); background: var(--stage); padding: 0 6px;
+  }
+  .chat { max-width: 748px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+  .a-text { font-size: 14px; line-height: 24px; color: var(--text); }
+  .a-text .dim { color: var(--text-3); }
+
+  /* ===== 行容器（复刻官方 userRow：列向、右对齐、间距 6px） ===== */
+  .ss-row { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .ss-main { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; width: 100%; }
+  .ss-stack {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+    max-width: min(calc(748px * .702), 82%); min-width: 0;
+  }
+  .ss-bubble {
+    background: var(--bubble); color: var(--bubble-fg); border-radius: 20px;
+    padding: 10px 16px; font-size: 14px; line-height: 22px;
+    white-space: pre-wrap; word-break: break-word; max-width: 100%;
+  }
+  /* 操作行（复刻官方 MessageIconActions） */
+  .ss-actions { height: 28px; display: flex; align-items: center; gap: 8px; color: var(--text-3); }
+  .ss-time { font-size: 13px; line-height: 24px; color: var(--text-3); white-space: nowrap; padding-right: 12px; font-variant-numeric: tabular-nums; }
+  .ss-copy {
+    width: 28px; height: 28px; border-radius: 8px; border: none; background: transparent;
+    color: var(--text-3); display: inline-grid; place-items: center; padding: 6px; cursor: default;
+  }
+  .ss-copy svg { width: 15px; height: 15px; }
+
+  /* ===== 标记（本插件新增的唯一元素） ===== */
+  .ss-mark {
+    position: relative; flex: none; width: 16px; height: 16px; margin-top: 13px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--mark); cursor: default;
+  }
+  .ss-mark:hover { color: var(--mark-hover); }
+  .ss-mark svg { width: 16px; height: 16px; }
+
+  /* 方案 meta：气泡上方一行 */
+  .ss-meta {
+    display: flex; align-items: center; gap: 6px; align-self: flex-end;
+    font-size: 12px; line-height: 16px; color: var(--text-3);
+    margin-bottom: -4px;
+  }
+  .ss-meta svg { width: 13px; height: 13px; }
+
+  /* 方案 hover：默认隐形 */
+  .ss-row.ss-hover-mode .ss-mark { opacity: 0; transition: opacity 120ms ease; }
+  .ss-row.ss-hover-mode:hover .ss-mark,
+  .ss-row.ss-hover-mode:focus-within .ss-mark,
+  .ss-row.ss-hover-mode.is-hovered .ss-mark { opacity: 1; }
+  @media (hover: none) { .ss-row.ss-hover-mode .ss-mark { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ss-row.ss-hover-mode .ss-mark { transition: none; } }
+
+  /* tooltip：标记左侧 */
+  .ss-mark[data-tip]:hover::after, .ss-mark.tip::after {
+    content: attr(data-tip);
+    position: absolute; right: calc(100% + 9px); top: 50%; transform: translateY(-50%);
+    background: var(--tooltip-bg); color: var(--tooltip-fg);
+    font-size: 12px; line-height: 16px; white-space: nowrap;
+    padding: 5px 9px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.22);
+    pointer-events: none; z-index: 3;
+  }
+  .ss-mark[data-tip]:hover::before, .ss-mark.tip::before {
+    content: ""; position: absolute; right: calc(100% + 4px); top: 50%;
+    width: 6px; height: 6px; transform: translateY(-50%) rotate(45deg);
+    background: var(--tooltip-bg); pointer-events: none; z-index: 3;
+  }
+
+  /* 附件占位 */
+  .thumb-row { display: flex; gap: 8px; justify-content: flex-end; }
+  .thumb {
+    width: 168px; height: 108px; border-radius: 12px; border: 1px solid var(--line-2);
+    background:
+      linear-gradient(135deg, rgba(125,125,125,.16) 0 25%, transparent 25% 50%, rgba(125,125,125,.16) 50% 75%, transparent 75%);
+    background-size: 18px 18px; display: grid; place-items: center;
+    color: var(--text-4); font-size: 11px;
+  }
+
+  /* 对照 */
+  .pair { display: flex; flex-direction: column; gap: 16px; }
+  .pair-item { display: flex; flex-direction: column; gap: 8px; }
+  .pair-label {
+    font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-4);
+  }
+  .pair-frame { border: 1px dashed var(--line-2); border-radius: 10px; padding: 14px 16px; }
+  .pair-frame .chat { max-width: 748px; gap: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-top: 1px solid var(--line); }
+  th { color: var(--text-3); font-weight: 600; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  td { color: var(--text-2); line-height: 1.55; }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  tr:last-child td { border-bottom: 1px solid var(--line); }
+  td.num, th.num { font-variant-numeric: tabular-nums; }
+
+  pre {
+    background: var(--stage); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font-size: 12px; line-height: 1.7;
+    color: var(--text-2); margin: 12px 0 0;
+  }
+  pre .c { color: var(--text-4); }
+  pre .our { color: var(--brand); }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+  @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card h4 { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; }
+  .card p { margin: 0 0 12px; font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+  .card .mini { background: var(--stage); border-radius: 10px; padding: 12px 14px; }
+  .card .mini .ss-stack { max-width: 100%; }
+  .card .mini .ss-bubble { font-size: 13px; line-height: 20px; padding: 8px 13px; }
+  .card .mini .ss-mark { margin-top: 11px; }
+  .card .mini .thumb { width: 120px; height: 76px; }
+  .callout {
+    border: 1px solid var(--line); border-left: 3px solid var(--amber);
+    background: var(--card); border-radius: 10px; padding: 12px 15px; margin: 14px 0 4px;
+    font-size: 12.5px; color: var(--text-2);
+  }
+  .callout b { color: var(--text); }
+  .src { font-size: 11px; color: var(--text-4); margin-top: 8px; }
+  footer { margin-top: 44px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--text-4); font-size: 11.5px; }
+</style>
+</head>
+<body data-theme="dark">
+<div class="page">
+  <header>
+    <div>
+      <h1>dsh-later · 实现后的气泡标记</h1>
+      <p class="lede">
+        按 #112 的设计做的 1:1 预览。气泡、图片、引用摘要全部由官方 factory 渲染，我们只加一个 16px 时钟和一行复刻的操作行。
+        下面所有尺寸都取自宿主实际样式（0.2.1-rc.2）。
+      </p>
+    </div>
+    <button class="btn" id="theme">深色 / 浅色</button>
+  </header>
+
+  <h2>一图看懂 <span class="pill">默认 left</span></h2>
+  <p class="note">
+    带标记的消息，只是在气泡左侧多了一个 16px 的描边钟。气泡本身的圆角、内边距、字号、行高、颜色都不变；
+    气泡的右边缘也没有移动，标记占的是左侧原本就空着的区域。带附件时标记仍对齐气泡首行（按附件行高度补偿），不和图片顶边打架。
+  </p>
+  <div class="stage">
+    <span class="stage-tag">会话 · 748px 内容宽</span>
+    <div class="chat">
+      <div class="ss-row">
+        <div class="ss-stack"><div class="ss-bubble">先看一下现在的定时逻辑</div></div>
+        <div class="ss-actions"><span class="ss-time">21:12</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+      <div class="a-text">定时逻辑在 <span class="dim">src/runtime.ts</span> 的 <span class="dim">buildMessage</span>：one-shot 按投递形态分组，<span class="dim">user</span> 通道原样拼内容。</div>
+
+      <div class="ss-row">
+        <div class="ss-main">
+          <span class="ss-mark" role="img" aria-label="定时发送，21:30 送达" data-tip="定时发送 · 21:30 送达">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          </span>
+          <div class="ss-stack"><div class="ss-bubble">继续，把 typecheck 的红项修掉，然后开 PR</div></div>
+        </div>
+        <div class="ss-actions"><span class="ss-time">21:30</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+      <div class="a-text">收到，红项都在 0.2.1 的插槽类型上，已修完并开 PR。</div>
+    </div>
+  </div>
+  <p class="src">标记 16×16、距气泡 8px、与首行文字中线齐平（气泡上内边距 10px + 半行高，偏移 13px）；有附件时按附件行高度补偿。</p>
+
+  <h2>零漂移对照 <span class="pill">普通消息</span></h2>
+  <p class="note">
+    接管后所有用户消息都走我们的组件，所以普通消息必须逐项一致。下面两条是同一条消息的两次渲染：
+    左边是官方现状，右边是接管后的组件（内容仍由官方 factory 出）。差别应该只有标记。
+  </p>
+  <div class="stage">
+    <span class="stage-tag">同一条消息 · 两次渲染</span>
+    <div class="pair">
+      <div class="pair-item">
+        <span class="pair-label">官方现状</span>
+        <div class="pair-frame">
+          <div class="chat">
+            <div class="ss-row">
+              <div class="ss-stack"><div class="ss-bubble">发布说明补到 CHANGELOG，顺带把 1.9.1 的 tag 打上</div></div>
+              <div class="ss-actions"><span class="ss-time">22:05</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pair-item">
+        <span class="pair-label">接管后 · 普通消息（无标记）</span>
+        <div class="pair-frame">
+          <div class="chat">
+            <div class="ss-row">
+              <div class="ss-stack"><div class="ss-bubble">发布说明补到 CHANGELOG，顺带把 1.9.1 的 tag 打上</div></div>
+              <div class="ss-actions"><span class="ss-time">22:05</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>项</th><th class="num">官方</th><th class="num">接管后</th><th>怎么保证</th></tr></thead>
+      <tbody>
+        <tr><td>气泡内边距</td><td class="num">10px 16px</td><td class="num">同</td><td>工厂渲染，不碰</td></tr>
+        <tr><td>圆角 / 字号 / 行高</td><td class="num">20px / 14px / 22px</td><td class="num">同</td><td>工厂渲染，不碰</td></tr>
+        <tr><td>气泡与操作行间距</td><td class="num">6px</td><td class="num">同</td><td>行容器复刻</td></tr>
+        <tr><td>操作行高</td><td class="num">28px</td><td class="num">同</td><td>复刻</td></tr>
+        <tr><td>时间</td><td class="num">13px / 24</td><td class="num">同</td><td>复刻，格式对齐官方</td></tr>
+        <tr><td>复制按钮</td><td class="num">28×28，图标 15</td><td class="num">同</td><td>复刻</td></tr>
+        <tr><td>气泡右边缘</td><td class="num">贴行右</td><td class="num">同</td><td>标记占左侧空白，不挤气泡</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>三档 <span class="pill">定稿</span></h2>
+
+  <h3>left · 气泡左侧常显（默认）</h3>
+  <p class="note">常显，悬停标记时给出来源与送达时刻。第二条演示悬停态。</p>
+  <div class="stage">
+    <span class="stage-tag">left · 默认 / 悬停</span>
+    <div class="chat">
+      <div class="ss-row">
+        <div class="ss-main">
+          <span class="ss-mark" role="img" aria-label="定时发送，21:30 送达" data-tip="定时发送 · 21:30 送达">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          </span>
+          <div class="ss-stack"><div class="ss-bubble">继续，把 typecheck 的红项修掉，然后开 PR</div></div>
+        </div>
+        <div class="ss-actions"><span class="ss-time">21:30</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+      <div class="ss-row">
+        <div class="ss-main">
+          <span class="ss-mark tip" role="img" aria-label="定时发送，22:05 送达，2 条合并" data-tip="定时发送 · 22:05 送达 · 2 条合并">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          </span>
+          <div class="ss-stack"><div class="ss-bubble">发布说明补到 CHANGELOG，顺带把 1.9.1 的 tag 打上
+然后把 PR 描述里的截图换掉</div></div>
+        </div>
+        <div class="ss-actions"><span class="ss-time">22:05</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>meta · 气泡上方一行</h3>
+  <p class="note">信息写全，代价是每个定时气泡多 18px 高度：12px 文案行 16px，与气泡之间留 2px。</p>
+  <div class="stage">
+    <span class="stage-tag">meta</span>
+    <div class="chat">
+      <div class="ss-row">
+        <div class="ss-meta">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.05" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          定时发送 · 22:05
+        </div>
+        <div class="ss-stack"><div class="ss-bubble">发布说明补到 CHANGELOG，顺带把 1.9.1 的 tag 打上</div></div>
+        <div class="ss-actions"><span class="ss-time">22:05</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+      <div class="ss-row">
+        <div class="ss-stack"><div class="ss-bubble">这条是手动发的，没有上面那行</div></div>
+        <div class="ss-actions"><span class="ss-time">22:06</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>hover · 悬停才出现</h3>
+  <p class="note">静止时版面和现状一模一样；鼠标停在消息行上标记才淡入（120ms）。第二条是强制展示。</p>
+  <div class="stage">
+    <span class="stage-tag">hover · 默认 / 悬停</span>
+    <div class="chat">
+      <div class="ss-row ss-hover-mode">
+        <div class="ss-main">
+          <span class="ss-mark" role="img" aria-label="定时发送，21:30 送达" data-tip="定时发送 · 21:30 送达">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          </span>
+          <div class="ss-stack"><div class="ss-bubble">继续，把 typecheck 的红项修掉，然后开 PR</div></div>
+        </div>
+        <div class="ss-actions"><span class="ss-time">21:30</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+      <div class="ss-row ss-hover-mode is-hovered">
+        <div class="ss-main">
+          <span class="ss-mark" role="img" aria-label="定时发送，21:30 送达" data-tip="定时发送 · 21:30 送达">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          </span>
+          <div class="ss-stack"><div class="ss-bubble">发布说明补到 CHANGELOG，顺带把 1.9.1 的 tag 打上</div></div>
+        </div>
+        <div class="ss-actions"><span class="ss-time">22:05</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>off · 不注册</h3>
+  <p class="note">不是「注册后隐藏」，而是根本不注册：官方渲染器原样工作，一行代码都不经过我们。</p>
+  <div class="stage">
+    <span class="stage-tag">off · 官方渲染</span>
+    <div class="chat">
+      <div class="ss-row">
+        <div class="ss-stack"><div class="ss-bubble">继续，把 typecheck 的红项修掉，然后开 PR</div></div>
+        <div class="ss-actions"><span class="ss-time">21:30</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>状态细节</h2>
+  <div class="cards">
+    <div class="card">
+      <h4>批次合并</h4>
+      <p>多条任务合并成一个气泡，只画一个钟；悬停时 tooltip 里补「· 2 条合并」。</p>
+      <div class="mini">
+        <div class="ss-row">
+          <div class="ss-main">
+            <span class="ss-mark" role="img" aria-label="定时发送，22:05 送达，2 条合并">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+            </span>
+            <div class="ss-stack"><div class="ss-bubble">发布说明补到 CHANGELOG
+tag 也打上</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h4>带附件</h4>
+      <p>有附件时按附件行高度补偿，标记仍与气泡首行齐平：标记属于气泡，不属于图片。</p>
+      <div class="mini">
+        <div class="ss-row">
+          <div class="ss-main">
+            <span class="ss-mark" role="img" aria-label="定时发送，22:05 送达" data-tip="定时发送 · 22:05 送达" style="margin-top:94px">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+            </span>
+            <div class="ss-stack">
+              <div class="thumb-row"><div class="thumb">cover.png</div></div>
+              <div class="ss-bubble">配图按这张来，标题用 1.9.1</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h4>连续两条用户消息</h4>
+      <p>操作行默认隐藏，悬停才显示，与原版一致；标记不受影响。</p>
+      <div class="mini">
+        <div class="ss-row">
+          <div class="ss-main">
+            <span class="ss-mark" role="img" aria-label="定时发送" style="margin-top:11px">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+            </span>
+            <div class="ss-stack"><div class="ss-bubble">第一条定时消息</div></div>
+          </div>
+        </div>
+        <div class="ss-row" style="margin-top:8px">
+          <div class="ss-main">
+            <span class="ss-mark" role="img" aria-label="定时发送" style="margin-top:11px">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+            </span>
+            <div class="ss-stack"><div class="ss-bubble">第二条紧跟着</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h4>英文界面</h4>
+      <p>文案跟着宿主语言走，格式与官方时间一致。</p>
+      <div class="mini">
+        <div class="ss-row">
+          <div class="ss-meta" style="margin-bottom:-2px">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.05" aria-hidden="true"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+            Scheduled · 22:05
+          </div>
+          <div class="ss-stack"><div class="ss-bubble">Ship the release notes</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>结构与尺寸</h2>
+  <p class="note">
+    宿主只把 key 为 <code>user</code> / <code>steering</code> 的节点交给我们的组件；气泡内容仍然来自官方工厂，
+    所以下面这段树里只有带 <b>ss-</b> 的三个节点是本插件新增的。
+  </p>
+<pre><span class="c">// 宿主</span>
+&lt;div data-chat-flow-kind="user"&gt;
+  &lt;div data-slot="conversation.chat.node"&gt;
+    <span class="our">&lt;div class="ss-row"&gt;</span>              <span class="c">// 复刻 userRow：列向、右对齐、gap 6px</span>
+      <span class="our">&lt;div class="ss-main"&gt;</span>          <span class="c">// 仅 left / hover：行向、gap 8px</span>
+        <span class="our">&lt;span class="ss-mark" /&gt;</span>     <span class="c">// 16px 描边钟，margin-top 13px</span>
+        <span class="c">&lt;!-- 官方 factory：conversation.chat.user.content --&gt;</span>
+        <span class="c">&lt;div class="…_userStack"&gt; 气泡 / 图片行 / 引用摘要 &lt;/div&gt;</span>
+      <span class="our">&lt;/div&gt;</span>
+      <span class="our">&lt;div class="ss-actions"&gt;</span>       <span class="c">// 复刻：时间 13/24 + 复制 28×28</span>
+        <span class="our">&lt;span class="ss-time" /&gt;</span>
+        <span class="our">&lt;button class="ss-copy" /&gt;</span>
+      <span class="our">&lt;/div&gt;</span>
+    <span class="our">&lt;/div&gt;</span>
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+
+  <table>
+    <thead><tr><th>项</th><th class="num">值</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>标记尺寸</td><td class="num">16×16</td><td>系统描边钟，stroke 1px</td></tr>
+      <tr><td>标记颜色</td><td class="num">label-tertiary</td><td>hover 提到 label-secondary</td></tr>
+      <tr><td>与气泡间距</td><td class="num">8px</td><td>flex gap</td></tr>
+      <tr><td>垂直偏移</td><td class="num">13px</td><td>气泡上内边距 10 + (22−16)/2，与首行中线齐平</td></tr>
+      <tr><td>有附件时</td><td class="num">附件行高 + 8 + 13</td><td>按附件行实测高度补偿；测不到就回落 13px，只影响观感</td></tr>
+      <tr><td>meta 行</td><td class="num">12px / 16px</td><td>行高 16，与气泡间隙 2px，总高度 +18px</td></tr>
+      <tr><td>meta 图标</td><td class="num">13×13</td><td>与 12px 文案视觉重心对齐</td></tr>
+      <tr><td>hover 淡入</td><td class="num">120ms</td><td>reduced-motion 下取消；触屏常显</td></tr>
+      <tr><td>tooltip</td><td class="num">12px / 16px</td><td>标记左侧 9px，圆角 8，带 6px 箭头</td></tr>
+      <tr><td>操作行</td><td class="num">28px</td><td>时间 13/24 + padding-right 12；复制 28×28、图标 15</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <b>关于颜色。</b>定稿用 tertiary（安静、和正文不抢）；想要更醒目就把 <code>color</code> 换成琥珀
+    <code>--dsw-static-amber-500</code>，一行改动，不新增设置。预览第一版（docs/ui/27）里的四种图标形态，
+    定稿只取了「系统描边钟」这一种。
+  </div>
+
+  <footer>
+    docs/ui/28-later-bubble-marker-implemented.html · 按 #112 的定稿参数做的静态预览 · 尺寸口径 0.2.1-rc.2
+  </footer>
+</div>
+<script>
+  document.getElementById('theme').onclick = () => {
+    document.body.dataset.theme = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+  };
+</script>
+</body>
+</html>

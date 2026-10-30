@@ -4,11 +4,9 @@
  * @module dsh-later/time-utils
  */
 /** 校验一个字符串是否为合法 IANA 时区（或 UTC）。 */
-export declare function isValidTimeZone(value: string): boolean;
 /** 浏览器默认时区（客户端）；host 侧无合理默认则退回 UTC。 */
 export declare function detectTimeZone(): string;
 /** 常见时区候选（面板下拉用）。 */
-export declare const COMMON_TIME_ZONES: readonly string[];
 /** 文案语言 id（zh 中文；en 英文；其余回退中文）。 */
 export type TextLocale = 'zh' | 'en';
 /**
@@ -29,23 +27,12 @@ export declare function formatAbsolute(epoch: number, timeZone: string, locale?:
 /** 仅时间部分 "HH:mm"（按指定时区）。 */
 export declare function formatHhmm(epoch: number, timeZone: string): string;
 /** 周期几第几天（与 formatAbsolute 里的 wkday 词对齐）。 */
-export declare function weekdayLabel(epoch: number, timeZone: string): string;
 /**
  * 倒计时 "HH:MM:SS"（或剩余不足 1 小时时 "MM:SS"）。
  */
 export declare function formatCountdown(epoch: number, now?: number): string;
 /** 未来距离（毫秒）；用于紧急度判断。 */
 export declare function remainingMs(epoch: number, now?: number): number;
-/**
- * 构造 `at` 对象：{date, time, time_zone}。
- * @param epoch - 目标 epoch 毫秒。
- * @param timeZone - IANA 时区。
- */
-export declare function atObjectOf(epoch: number, timeZone: string): {
-    date: string;
-    time: string;
-    time_zone: string;
-};
 /** 解析出来的一段本地墙钟。 */
 export interface LocalClockParts {
     readonly hour: number;

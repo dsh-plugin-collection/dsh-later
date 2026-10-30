@@ -187,7 +187,7 @@ function allocateScheduleId(folded: FoldedSchedules): ScheduleId {
 
 ```typescript
 // 时区验证（IANA）
-function isValidTimeZone(tz: string): boolean {
+function isValidIanaZone(tz: string): boolean {   // 实现在 src/user-tools.ts
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
     return true;

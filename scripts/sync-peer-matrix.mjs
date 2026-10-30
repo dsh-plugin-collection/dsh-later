@@ -19,7 +19,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkgPath = join(root, 'package.json');
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 
-const { peerMatrixEntries, KERNEL_GENERATIONS } = await import(
+const { peerMatrixEntries, enginesDshRange, KERNEL_GENERATIONS } = await import(
   join(root, 'lib', 'upstream-compat.js')
 );
 
@@ -59,6 +59,22 @@ for (const { packageName, range } of entries) {
         `devDependencies.${packageName}: ${prev ?? '(absent)'} → ${latestGeneration}（固定到最新已验证代次）`,
       );
     }
+  }
+}
+
+/**
+ * `engines.dsh` = 声明支持范围（**由 KERNEL_GENERATIONS 按 tuple 上界推导**，不是 peer 那串）。
+ *
+ * 为什么单独处理：这一项此前是手写常量，于是「加了一代」只更新 peer 枚举、engines 悄悄不动，
+ * 两者各说各话。而且 node-semver 不把预发布算进普通范围，手写的 `>=a <b` 会把别的 tuple 的
+ * 预发布一起放行（实测 `0.2.2-alpha.2` 等都判支持）。形状与理由见 `enginesDshRange`。
+ */
+if ('engines' in pkg && typeof pkg.engines.dsh === 'string') {
+  const prev = pkg.engines.dsh;
+  const next = enginesDshRange();
+  if (prev !== next) {
+    pkg.engines.dsh = next;
+    changed.push(`engines.dsh:\n    旧 ${prev}\n    新 ${next}`);
   }
 }
 

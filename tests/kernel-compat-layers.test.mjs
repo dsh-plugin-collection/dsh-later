@@ -6,7 +6,10 @@
  *
  *  1. `attachment-blocks`：0.1.2 的 `ContentBlock` 没有 `file` 变体 ⇒ 文件块降级成文本；
  *     ≥0.1.5 原样透传。硬塞的后果是"被宿主拒"或"装配期静默丢弃"，用户到点收到一条没有附件的消息。
- *  2. `workspace-path-compat`：0.1.5/0.1.2 的 `dsh-util-workspace-path` 没有 `fileMediaUrl`。
+ *  2. `media-url` 的 URL 换算：这里**不再有代次分支**——宿主同名的 `fileMediaUrl` 所在包在浏览器
+ *     侧不可解析（8 代皆然），所以本插件那份就是唯一实现，下面这些断言从「只在老代次跑的装饰」
+ *     变成了真正的线上覆盖。曾经的「优先调宿主」探测恒为真，因为构建把 devDependencies 那份
+ *     内联了进来；它已随 `workspace-path-compat.ts` 一并拆除。
  *  3. `primitives-compat`：图标在 0.1.7 之前叫尺寸后缀名 —— 本机只能验证"新名优先"这一侧，
  *     老名兜底由 `resolvedIconNames()` + 跨代 tsc（`--steps type`）共同保证。
  * @module tests/kernel-compat-layers
@@ -120,7 +123,11 @@ const iconExportNames = (() => {
 
 test('图标兼容层：每个别名都有"新名优先、老名兜底"两条候选，且候选都在导出清单里', () => {
   const aliases = [...compatSource.matchAll(/export const (Icon[A-Za-z]+) = firstIcon\(([\s\S]*?)\);/g)];
-  assert.equal(aliases.length, 9, '应导出 9 个别名图标（时钟/叉/下箭头/编辑/暂停/播放/发送/删除/信息）');
+  assert.equal(
+    aliases.length,
+    11,
+    '应导出 11 个别名图标（时钟/叉/下箭头/编辑/暂停/播放/发送/删除/信息 + 复制/对勾）',
+  );
   for (const [, alias, body] of aliases) {
     const picked = [...body.matchAll(/pick<IconComponent>\('([A-Za-z0-9]+)'\)/g)].map((m) => m[1]);
     assert.equal(picked.length, 2, `${alias} 必须有两个候选（新名 + 老代次兜底名）`);

@@ -65,14 +65,6 @@ export function removePending(clientSeq: number): void {
 }
 
 /** 清空全部暂存。 */
-export function clearPending(): void {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* 静默降级 */
-  }
-}
 
 /** 类型守卫。 */
 function isPendingSchedule(value: unknown): value is PendingSchedule {

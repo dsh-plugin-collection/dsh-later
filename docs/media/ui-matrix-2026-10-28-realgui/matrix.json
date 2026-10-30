@@ -1,0 +1,97 @@
+{
+  "pluginVersion": "1.9.0",
+  "versions": [
+    "0.1.2-rc.1",
+    "0.1.5-rc.3",
+    "0.1.7-rc.1",
+    "0.1.7-rc.2",
+    "0.2.0-rc.2",
+    "0.2.1-rc.2"
+  ],
+  "rows": [
+    {
+      "version": "0.1.2-rc.1",
+      "ok": true,
+      "shots": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.2-rc.1-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.2-rc.1-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.2-rc.1-3-panel.png"
+      },
+      "dockRows": 1,
+      "panelOpened": true,
+      "buttonFound": true,
+      "errors": [],
+      "strictErrors": []
+    },
+    {
+      "version": "0.1.5-rc.3",
+      "ok": true,
+      "shots": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.5-rc.3-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.5-rc.3-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.5-rc.3-3-panel.png"
+      },
+      "dockRows": 1,
+      "panelOpened": true,
+      "buttonFound": true,
+      "errors": [],
+      "strictErrors": []
+    },
+    {
+      "version": "0.1.7-rc.1",
+      "ok": true,
+      "shots": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.7-rc.1-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.7-rc.1-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.7-rc.1-3-panel.png"
+      },
+      "dockRows": 1,
+      "panelOpened": true,
+      "buttonFound": true,
+      "errors": [],
+      "strictErrors": []
+    },
+    {
+      "version": "0.1.7-rc.2",
+      "ok": true,
+      "shots": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.7-rc.2-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.7-rc.2-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.1.7-rc.2-3-panel.png"
+      },
+      "dockRows": 1,
+      "panelOpened": true,
+      "buttonFound": true,
+      "errors": [],
+      "strictErrors": []
+    },
+    {
+      "version": "0.2.0-rc.2",
+      "ok": true,
+      "shots": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.2.0-rc.2-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.2.0-rc.2-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.2.0-rc.2-3-panel.png"
+      },
+      "dockRows": 1,
+      "panelOpened": true,
+      "buttonFound": true,
+      "errors": [],
+      "strictErrors": []
+    },
+    {
+      "version": "0.2.1-rc.2",
+      "ok": true,
+      "shots": {
+        "composer": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.2.1-rc.2-1-composer.png",
+        "dock": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.2.1-rc.2-2-dock.png",
+        "panel": "/home/wujue/workspace/dsh-plugins/dsh-later/.agents/worktrees/verify-ui-face/.verify/ui-matrix-all/0.2.1-rc.2-3-panel.png"
+      },
+      "dockRows": 1,
+      "panelOpened": true,
+      "buttonFound": true,
+      "errors": [],
+      "strictErrors": []
+    }
+  ]
+}

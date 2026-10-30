@@ -218,7 +218,17 @@ function createDom() {
     createElement: (tag) => new El(tag),
     getElementById: () => null,
     querySelector: () => null,
-    querySelectorAll: () => [],
+    /**
+     * 以前这里是 `() => []`，等于假 DOM 里**永远没有侧栏行**：本文件 :398 特意
+     * `makeRow()` 再 `doc.body.append(row)` 铺好的那一行，实现里根本查不到，
+     * 于是侧栏 badge 那条分支在这个测试里从来没被跑过（铺了等于没铺）。
+     *
+     * 委派给 body 自己的实现——`El.prototype.querySelectorAll` 已带 matchChain，
+     * 只改「能不能查到」，不改任何匹配规则。
+     */
+    querySelectorAll(sel) {
+      return this.body.querySelectorAll(sel);
+    },
     addEventListener(t, fn) {
       this._listeners.set(t, fn);
     },

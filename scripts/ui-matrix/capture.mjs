@@ -70,7 +70,23 @@ export async function captureUi({ port, outDir, version, prompt }) {
   mkdirSync(outDir, { recursive: true });
   const cookie = mintCookie(port);
   const browser = await chromium.launch({ headless: true });
-  const result = { version, shots: {}, dockRows: 0, panelOpened: false, buttonFound: false, errors: [], strictErrors: [] };
+  const result = {
+    version,
+    shots: {},
+    dockRows: 0,
+    panelOpened: false,
+    buttonFound: false,
+    badges: 0,
+    errors: [],
+    strictErrors: [],
+    /**
+     * console **warning** 单独收（`warns`），并把 badge 漂移自检那一条挑出来（`driftWarns`）。
+     * 此前这里只收 `error`，于是"控制台 0 错误"这个结论完全掩盖了漂移告警——2026-10-28
+     * 那次四代 badge 整块不出现、自检一条没告，采集面也同样是瞎的。
+     */
+    warns: [],
+    driftWarns: [],
+  };
   try {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
@@ -80,8 +96,13 @@ export async function captureUi({ port, outDir, version, prompt }) {
     await context.addCookies([{ ...cookie, domain: '127.0.0.1', path: '/' }]);
     const page = await context.newPage();
     page.on('console', (m) => {
-      if (m.type() !== 'error') return;
       const text = m.text().slice(0, 240);
+      if (m.type() === 'warning') {
+        result.warns.push(text);
+        if (text.includes('badge 未注入')) result.driftWarns.push(text);
+        return;
+      }
+      if (m.type() !== 'error') return;
       result.errors.push(text);
       // 资源 404/401 只记不判红：老代次少一两个静态资源（favicon 之类）不该掩盖真正的 JS 错误。
       if (!/Failed to load resource/.test(text)) result.strictErrors.push(text);
@@ -159,6 +180,34 @@ export async function captureUi({ port, outDir, version, prompt }) {
     }
     result.shots.panel = join(outDir, `${version}-3-panel.png`);
     await page.screenshot({ path: result.shots.panel });
+
+    /**
+     * 侧栏 badge。这一面此前**根本不在判据里**，所以它在四代上整块消失时矩阵仍然
+     * `exit 0` —— "前五面全绿 ≠ 插件能用"的活标本。
+     *
+     * 必须轮询而不是固定 sleep：badge 的数据来自摘要 store，它有 30s 状态 tick 与
+     * 60s 列表重拉，实测 `indexSize` 要等若干轮扫描才起来（前 8 次扫描都是 0，
+     * 只看前几条会误判成"数据面也漂了"）。
+     */
+    const badgeDeadline = Date.now() + 150_000;
+    let sidebar = { badges: 0, matched: 0, badgeable: 0 };
+    do {
+      sidebar = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('[role="treeitem"]')];
+        return {
+          badges: document.querySelectorAll('.ss-presence').length,
+          matched: rows.length,
+          badgeable: rows.filter((r) => !r.hasAttribute('aria-expanded')).length,
+        };
+      });
+      if (sidebar.badges > 0) break;
+      await page.waitForTimeout(2000);
+    } while (Date.now() < badgeDeadline);
+    result.badges = sidebar.badges;
+    result.badgeRows = sidebar;
+    // 失败项也要出图：badge 没出现时这张就是证据，别只交成功的那几张。
+    result.shots.badge = join(outDir, `${version}-4-badge-${sidebar.badges > 0 ? 'PASS' : 'FAIL'}.png`);
+    await page.screenshot({ path: result.shots.badge });
   } finally {
     await browser.close();
   }

@@ -38,6 +38,7 @@ import {
 } from './user-tools.js';
 import type { PromptLimits, UserScheduleCreateInput } from './user-tools.js';
 import { name, SETTINGS_NAMESPACE } from './domain.js';
+import { DEFAULT_SMART_WINDOW } from './smart-window.js';
 import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { createRuntimeRegistry } from './runtime-registry.js';
 import { hostDictFor, hostFormat } from './strings.js';
@@ -133,6 +134,52 @@ const configSchema: z = s.object({
    * - `classic`：强制使用旧版点阵风格（10×10 fill 方块 crispEdges）。
    */
   clockIconStyle: s.union([s.const('auto'), s.const('modern'), s.const('classic')]).default('auto'),
+  /**
+   * 定时消息气泡标记的档位（issue #112）。
+   *
+   * - `off`：不注册渲染器，官方 user/steering 行原样工作。
+   * - `left`：气泡左外侧常显一个时钟（默认）。
+   * - `meta`：气泡上方一行 12px 文案。
+   * - `hover`：与 `left` 同位置，行悬停/聚焦时淡入。
+   *
+   * 只在 0.2.1+ 生效：那一代起才有 `conversation.chat.user.content` 工厂与
+   * `renderFactorySlot` 席位；老代次客户端不注册（能力门禁，不按版本号猜）。
+   */
+  bubbleMarker: s
+    .union([s.const('off'), s.const('left'), s.const('meta'), s.const('hover')])
+    .default('left'),
+  /**
+   * 智能时段的五个边界（HH:mm）。设置卡的「时间设置」段渲染的就是这五项，
+   * 面板的「今天晚间 / 明天早上 / 智能」三枚芯片与 `nextSmartTarget` 消费的就是这五个值。
+   *
+   * **这五个字段为什么必须写在 `Config` 上**（issue #19）：卡片一直在写这五个 key，
+   * 但 `Config` 里一个都没有，于是设置层的快照永远不会带上它们，客户端
+   * `sanitizeSmartWindowConfig` 的 `pick` 逐项落空 → 面板恒用默认时段，用户的改动
+   * 不报错、不生效、也不消失（最难发现的一类）。声明在 `Config` 上是两代内核唯一的
+   * 落地路径：0.2.0 的 `describe()` 只从 `entry.fiber.runtime.Config` 生成表单，
+   * 0.1.5 的 `settingsProvider.register()` 传的也是同一个对象
+   * （{@link SchedulerSettingsSchema} 只是别名）。反向门禁见
+   * `tests/settings-schema-coverage.test.mjs`：卡片可写字段 ⊆ `Config.dict` 键集。
+   *
+   * **只声明 `s.string()`，不加 `.pattern()` 做格式校验**，两个理由：
+   *  1. 这五个值之间有**跨字段**的序关系（见 `SMART_WINDOW_ORDER`），per-field 的
+   *     schema 约束表达不了；把格式放这里、把序关系放别处，等于同一份输入有两套
+   *     「什么算合法」，迟早漂移。
+   *  2. `.pattern()` 在这条依赖链上并非到处都有。`.volatile()` 已经在 0.1.5 线的
+   *     schemastery 3.18.2 上缺过一次，缺的后果是**整个插件不加载**（见
+   *     {@link volatileIfSupported}）。格式判定放在消费端的
+   *     {@link import('./smart-window.js').sanitizeSmartWindowConfig} 里，任何代次都
+   *     是同一份行为，而且非法值的降级（逐项回落 + 序关系不成立则整体回落）与
+   *     格式校验天然在同一处、同一个函数里说完。
+   *
+   * 默认值直接取 `DEFAULT_SMART_WINDOW`：卡片与算法共用那一份常量，这里再抄一遍
+   * 字面量就是第三个事实来源。
+   */
+  workStart: s.string().default(DEFAULT_SMART_WINDOW.workStart),
+  workEnd: s.string().default(DEFAULT_SMART_WINDOW.workEnd),
+  lunchStart: s.string().default(DEFAULT_SMART_WINDOW.lunchStart),
+  lunchEnd: s.string().default(DEFAULT_SMART_WINDOW.lunchEnd),
+  eveningEnd: s.string().default(DEFAULT_SMART_WINDOW.eveningEnd),
   /**
    * 高级语法（**Beta**，默认开启）：`/later` 与 `/schedule` 的多次写法。
    *
@@ -262,8 +309,14 @@ function renderText(_args: unknown, value: string): { type: 'text'; text: string
   return [{ type: 'text', text: value }];
 }
 
-/** 为单个 root agent 注册 `user_schedule_*` 工具。 */
-function registerUserScheduleTools(
+/**
+ * 为单个 root agent 注册 `user_schedule_*` 工具。
+ *
+ * 导出仅为可测性：注册半途失败必须拆掉已成注册，这条只能直接驱动本函数才验得到
+ * （走完整 `apply` 要假的 cordis 上下文全套，成本高到没人写，于是这条纪律历史上
+ * 从来没被测过——正是不测的原因）。宿主入口不消费它。
+ */
+export function registerUserScheduleTools(
   rootCtx: Context,
   toolCtx: Context,
   agent: Agent,
@@ -271,7 +324,38 @@ function registerUserScheduleTools(
   getLocale: () => string | undefined,
   onUserChange: (agent: Agent) => boolean,
 ): () => void {
-  const dispose = () => undefined;
+  /**
+   * 已成功注册的工具撤销句柄。
+   *
+   * 为什么要有这个队列：`tools.register` 的返回是「拆掉这一个」的 disposer，而注册
+   * 副作用**先于**返回值生效。原先写成数组字面量
+   * `const disposers = [register(A), register(B), register(C)]`，三个 register 会在
+   * 字面量求值时**全部执行完**才绑定给 `disposers`——于是第 2 个抛错时第 1 个已经进了
+   * 宿主注册表，却没有任何句柄能拆它。catch 里原先调的 `dispose` 又是个
+   * `() => undefined` 占位，等于什么都不做，然后把错误重抛出去。后果是之后每次
+   * attach 都撞 `already registered`，该会话永久拿不到 runtime（正是
+   * `runtime-registry.ts` 模块头警告的那类事故）。
+   *
+   * 现在改成登记「待注册的工厂」再逐个执行、逐个入账，半途失败可拆干净。
+   */
+  const disposers: Array<() => void> = [];
+
+  /** 倒序撤销已成注册；可重复调用，第二次起是空操作。 */
+  const unwind = (): void => {
+    for (const disposeOne of disposers.splice(0, disposers.length).reverse()) {
+      try {
+        disposeOne();
+      } catch {
+        /* 尽力而为：一个拆不掉不该阻断其余拆除，否则漏拆的比拆掉的更多 */
+      }
+    }
+  };
+
+  /** 逐个注册并即时登记句柄（不要在字面量里一次算完，理由见上）。 */
+  const registerAll = (entries: ReadonlyArray<() => () => void>): void => {
+    for (const entry of entries) disposers.push(entry());
+  };
+
   try {
     const t = hostDictFor(getLocale());
     const maxChars = resolveSchedulerPromptLimits(getSettings()).maxChars;
@@ -287,8 +371,8 @@ function registerUserScheduleTools(
         return false;
       }
     };
-    const disposers = [
-      toolCtx.tools.register(
+    registerAll([
+      () => toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_create',
           // description 在每次 register 时按当前 settings + locale 生成：
@@ -346,7 +430,7 @@ function registerUserScheduleTools(
           presentCall: (args) => present(t.presentCreate, 'other', (args as { prompt?: unknown })?.prompt),
         }),
       ),
-      toolCtx.tools.register(
+      () => toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_list',
           description: t.toolListDesc,
@@ -363,7 +447,7 @@ function registerUserScheduleTools(
           presentCall: () => present(t.presentList, 'read'),
         }),
       ),
-      toolCtx.tools.register(
+      () => toolCtx.tools.register(
         defineTool({
           name: 'user_schedule_delete',
           description: t.toolDeleteDesc,
@@ -389,12 +473,10 @@ function registerUserScheduleTools(
           presentCall: (args) => present(t.presentDelete, 'other', (args as { id?: unknown })?.id),
         }),
       ),
-    ];
-    return () => {
-      for (const disposeOne of disposers.reverse()) disposeOne();
-    };
+    ]);
+    return unwind;
   } catch (error) {
-    dispose();
+    unwind();
     rootCtx.logger.warn(`later: user tools 注册失败: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
@@ -500,6 +582,16 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     /**
      * 把「settings 原始值」规整为运行时设置（容错非法值回落默认）。
      * 三条代次轨道共用，避免各处重复解析逻辑。
+     *
+     * ⚠️ 这里**故意不搬运 `workStart`/`workEnd`/`lunchStart`/`lunchEnd`/`eveningEnd`**：
+     * `getSettings()` 的宿主消费者（runtime 的投递口径、commands、user-tools 的字符上限）
+     * 没有一个算时段——智能时段是**面板**的功能，唯一读者是客户端
+     * `useSchedulerSettings` → `sanitizeSmartWindowConfig`（实测：全仓 `nextSmartTarget`
+     * 的调用点只有 `SchedPanel`）。宿主侧再抄一份就等于给同一个值造第二条通路，
+     * 而两条通路各有各的降级口径正是这个 bug 能活这么久的原因。
+     * 若将来真的要宿主侧算时段（例如 `/later` 无参数时默认排到下一个智能时段），
+     * 正确做法是在这里加 `smartWindow: sanitizeSmartWindowConfig(value)`，
+     * 与客户端共用**同一个**清洗函数，而不是新写一份。
      */
     const readSettings = (value: SettingsRawValue | undefined): SchedulerSettings => ({
       maxSchedules: resolveMaxSchedules(value?.maxSchedules ?? startSettings.maxSchedules),

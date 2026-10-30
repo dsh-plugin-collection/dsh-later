@@ -5,15 +5,6 @@
  */
 
 /** 校验一个字符串是否为合法 IANA 时区（或 UTC）。 */
-export function isValidTimeZone(value: string): boolean {
-  if (typeof value !== 'string' || value.length === 0) return false;
-  try {
-    const resolved = new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone;
-    return resolved === value || value === 'UTC';
-  } catch {
-    return false;
-  }
-}
 
 /** 浏览器默认时区（客户端）；host 侧无合理默认则退回 UTC。 */
 export function detectTimeZone(): string {
@@ -26,17 +17,6 @@ export function detectTimeZone(): string {
 }
 
 /** 常见时区候选（面板下拉用）。 */
-export const COMMON_TIME_ZONES: readonly string[] = [
-  'Asia/Shanghai',
-  'Asia/Tokyo',
-  'Asia/Singapore',
-  'Asia/Hong_Kong',
-  'UTC',
-  'America/Los_Angeles',
-  'America/New_York',
-  'Europe/London',
-  'Europe/Paris',
-];
 
 /** 文案语言 id（zh 中文；en 英文；其余回退中文）。 */
 export type TextLocale = 'zh' | 'en';
@@ -108,22 +88,6 @@ export function formatHhmm(epoch: number, timeZone: string): string {
 }
 
 /** 周期几第几天（与 formatAbsolute 里的 wkday 词对齐）。 */
-export function weekdayLabel(epoch: number, timeZone: string): string {
-  const weekday = new Intl.DateTimeFormat('en-US-u-ca-iso8601-nu-latn', {
-    timeZone,
-    weekday: 'short',
-  }).format(epoch);
-  const map: Record<string, string> = {
-    Sun: '周日',
-    Mon: '周一',
-    Tue: '周二',
-    Wed: '周三',
-    Thu: '周四',
-    Fri: '周五',
-    Sat: '周六',
-  };
-  return map[weekday] ?? weekday;
-}
 
 /**
  * 倒计时 "HH:MM:SS"（或剩余不足 1 小时时 "MM:SS"）。
@@ -145,33 +109,6 @@ export function remainingMs(epoch: number, now: number = Date.now()): number {
   return Math.max(0, epoch - now);
 }
 
-/**
- * 构造 `at` 对象：{date, time, time_zone}。
- * @param epoch - 目标 epoch 毫秒。
- * @param timeZone - IANA 时区。
- */
-export function atObjectOf(
-  epoch: number,
-  timeZone: string,
-): { date: string; time: string; time_zone: string } {
-  const parts = new Intl.DateTimeFormat('en-US-u-ca-iso8601-nu-latn', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(epoch);
-  const map: Record<string, string> = {};
-  for (const part of parts) map[part.type] = part.value;
-  return {
-    date: `${map['year']}-${map['month']}-${map['day']}`,
-    time: `${map['hour']}:${map['minute']}:${map['second']}`,
-    time_zone: timeZone,
-  };
-}
 
 // ── `at` 的文法：预览、守门人、面板三处共用同一份 ──────────────────────────────────
 

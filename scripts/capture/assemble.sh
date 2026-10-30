@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把 capture-all.cjs 采集的分镜/截图合成为 README 用的 GIF 与 PNG。
+# 把 capture-all.cjs 采集的分镜/截图合成为 README 用的动画 WebP 与 PNG。
 # 用法: ./assemble.sh [/tmp/ss-out] [触发截图页内裁剪区 x,y,w,h(2x 坐标)]
 # 例:   ./assemble.sh /tmp/ss-out 850,1058,1500,142
 set -euo pipefail
@@ -7,13 +7,13 @@ OUT="${1:-/tmp/ss-out}"
 CROP="${2:-}"   # fired-full.png 的消息块裁剪区（2x 页面坐标）
 FR_C="$OUT/frames-create"; FR_F="$OUT/frames-fired"
 
-pal() { # stdin frames → palette GIF
+pal() { # stdin frames → 动画 WebP（libwebp_anim + palette；GIF 无帧间压缩，同一内容体积约 2.4 倍）
   ffmpeg -y -v error -f concat -safe 0 -i "$1" \
     -vf "scale=720:361:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
-    -loop 0 "$2"
+    -loop 0 -c:v libwebp_anim -q:v 60 -compression_level 6 "$2"
 }
 
-# 1) 创建流程 GIF：7 帧，关键步骤停留更长
+# 1) 创建流程动画：7 帧，关键步骤停留更长
 {
   echo "ffconcat version 1.0"
   printf "file '%s'\nduration %.1f\n" \
@@ -22,9 +22,9 @@ pal() { # stdin frames → palette GIF
     "$FR_C/create-06.png" 1.1
   printf "file '%s'\n" "$FR_C/create-06.png"
 } > "$OUT/list-create.txt"
-pal "$OUT/list-create.txt" "$OUT/docs-scheduler-create.gif"
+pal "$OUT/list-create.txt" "$OUT/docs-scheduler-create.webp"
 
-# 2) 到期触发 GIF：倒计时段 2s/帧 → 注入行+toast 1s/帧 → 跳过模型思考 → 完整消息收尾
+# 2) 到期触发动画：倒计时段 2s/帧 → 注入行+toast 1s/帧 → 跳过模型思考 → 完整消息收尾
 #    帧号基于 capture-all.cjs 的 T-90s 起 1fps 序列；注入帧 INJ 由采集日志给出（默认 87）
 INJ="${3:-87}"
 {
@@ -36,7 +36,7 @@ INJ="${3:-87}"
   done
   printf "file '%s/f-%03d.png'\nduration 1.8\nfile '%s/f-%03d.png'\n" "$FR_F" "$((INJ + 23))" "$FR_F" "$((INJ + 23))"
 } > "$OUT/list-fired.txt"
-pal "$OUT/list-fired.txt" "$OUT/docs-scheduler-fired.gif"
+pal "$OUT/list-fired.txt" "$OUT/docs-scheduler-fired.webp"
 
 # 3) 到期消息块 PNG：从 fired-full.png 按 2x 坐标裁剪
 if [[ -n "$CROP" ]]; then
@@ -64,8 +64,8 @@ duration 1.2
     printf "file '%s/later-03.png'
 " "$FR_L"
   } > "$OUT/list-later.txt"
-  pal "$OUT/list-later.txt" "$OUT/docs-later.gif"
+  pal "$OUT/list-later.txt" "$OUT/docs-later.webp"
 fi
 
-ls -la "$OUT"/docs-scheduler-*.gif "$OUT"/docs-later.gif "$OUT"/screenshot-*.png 2>/dev/null || true
+ls -la "$OUT"/docs-scheduler-*.webp "$OUT"/docs-later.webp "$OUT"/screenshot-*.png 2>/dev/null || true
 echo "done → $OUT"

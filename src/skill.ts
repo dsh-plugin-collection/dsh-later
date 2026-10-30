@@ -165,11 +165,6 @@ export function resolveSkillLocale(localeId: string | undefined): HostLocaleId {
   return localeId === 'en' ? 'en' : 'zh';
 }
 
-/** `locator` 里携带的加载线索：本插件只带一个 path。 */
-interface SkillLocator {
-  readonly path: string;
-}
-
 function locatorPath(locator: unknown): string | undefined {
   if (locator === null || typeof locator !== 'object') return undefined;
   const path = (locator as { path?: unknown }).path;

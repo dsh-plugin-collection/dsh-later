@@ -302,15 +302,3 @@ export function toChangePayload(record: ScheduleRecord): never {
   return record as never;
 }
 
-/**
- * `foldScheduleEvents().active` 元素的读取侧类型。
- *
- * 0.1.5 直接返回 `ScheduleRecord`；0.1.7 返回 `LegacyScheduleRecord`
- * （title 可选，因为历史事件没有）。本插件读路径只在 title 存在时展示，
- * 缺失时回退到 prompt——故按 Legacy 收窄是**语义正确**的，而非绕过检查。
- */
-export function asLegacyRecords(
-  records: readonly unknown[],
-): readonly ScheduleRecord[] {
-  return records as readonly ScheduleRecord[];
-}

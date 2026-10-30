@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-later · 不接管时的原生样式选项</title>
+<style>
+  body[data-theme="dark"] {
+    --bg: #121316; --stage: #17181b; --card: #1f2126;
+    --text: #e8e9ec; --text-2: #b6bac2; --text-3: #8b909a; --text-4: #6b7078;
+    --line: #2c2f35; --line-2: #3a3e46;
+    --bubble: #2c2c2e; --bubble-fg: #f9fafb;
+    --mark: #adb2b8;
+    --brand: #93aaff; --brand-soft: #232a44;
+    --ok: #6ee7a0; --warn: #f0b26b;
+    --hover: rgba(255, 255, 255, .07);
+    --trigger-bg: #1b1d20;
+  }
+  body[data-theme="light"] {
+    --bg: #f4f5f7; --stage: #e9ebef; --card: #fff;
+    --text: #1b1d21; --text-2: #5f6570; --text-3: #8b909a; --text-4: #adb2b8;
+    --line: #e5e7eb; --line-2: #d8dbe0;
+    --bubble: #edf3fe; --bubble-fg: #1b1d21;
+    --mark: #81858c;
+    --brand: #4d6bfe; --brand-soft: #eef1ff;
+    --ok: #15803d; --warn: #b45309;
+    --hover: rgba(0, 0, 0, .05);
+    --trigger-bg: #f6f7f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 30px 22px 80px; background: var(--bg); color: var(--text);
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .page { max-width: 1120px; margin: 0 auto; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .lede { color: var(--text-3); margin: 0 0 6px; font-size: 13px; max-width: 82ch; }
+  h2 { font-size: 15px; margin: 38px 0 4px; display: flex; align-items: center; gap: 9px; }
+  h2 .pill {
+    font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand);
+  }
+  .note { color: var(--text-2); margin: 0 0 14px; font-size: 13px; max-width: 80ch; }
+  .note b { color: var(--text); }
+  .note code, td code, .src code, .callout code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: .92em;
+    background: var(--hover); border-radius: 4px; padding: .5px 4px;
+  }
+  .btn {
+    font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    background: transparent; color: var(--text-2); border: 1px solid var(--line-2);
+  }
+  .btn:hover { background: var(--hover); color: var(--text); }
+
+  .stage {
+    background: var(--stage); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 28px 30px; margin: 12px 0 8px; position: relative;
+  }
+  .stage-tag {
+    position: absolute; top: -9px; left: 18px; font-size: 10.5px; letter-spacing: .04em;
+    color: var(--text-4); background: var(--stage); padding: 0 6px;
+  }
+  .chat { max-width: 748px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+  .a-text { font-size: 14px; line-height: 24px; color: var(--text); }
+  .a-text .dim { color: var(--text-3); }
+
+  /* 官方气泡（对照用） */
+  .ss-row { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .ss-main { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; width: 100%; }
+  .ss-stack {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+    max-width: min(calc(748px * .702), 82%); min-width: 0;
+  }
+  .ss-bubble {
+    background: var(--bubble); color: var(--bubble-fg); border-radius: 20px;
+    padding: 10px 16px; font-size: 14px; line-height: 22px;
+    white-space: pre-wrap; word-break: break-word; max-width: 100%;
+  }
+  .ss-actions { height: 28px; display: flex; align-items: center; gap: 8px; color: var(--text-3); }
+  .ss-time { font-size: 13px; line-height: 24px; color: var(--text-3); white-space: nowrap; padding-right: 12px; font-variant-numeric: tabular-nums; }
+  .ss-copy { width: 28px; height: 28px; border-radius: 8px; color: var(--text-3); display: inline-grid; place-items: center; padding: 6px; }
+  .ss-copy svg { width: 15px; height: 15px; }
+  .ss-mark { flex: none; width: 16px; height: 16px; margin-top: 13px; display: inline-flex; align-items: center; justify-content: center; color: var(--mark); }
+  .ss-mark svg { width: 16px; height: 16px; }
+
+  /* 官方触发行（TurnTriggerNodeView.module.css 逐字复刻） */
+  .tt-root {
+    border: .5px solid var(--line); border-radius: 20px; background: var(--trigger-bg);
+    min-width: 0; transition: background-color .1s;
+  }
+  .tt-root:hover { background: var(--hover); }
+  .tt-header {
+    width: 100%; color: var(--text-3); font: inherit; text-align: left; cursor: default;
+    background: 0 0; border: 0; align-items: center; gap: 10px; padding: 12px 16px;
+    display: flex;
+  }
+  .tt-header:hover { color: var(--text-2); }
+  .tt-icon { color: inherit; flex: none; display: inline-flex; }
+  .tt-title { font-size: 14px; flex: none; }
+  .tt-time { color: inherit; font-size: 12px; flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .tt-chevron { color: inherit; flex: none; }
+  .tt-body { padding: 0 16px 12px 40px; }
+  .tt-explanation { color: var(--text-2); font-size: 12px; margin: 8px 0; }
+  .tt-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; font-size: 12px; overflow: auto; }
+
+  /* 回合尾部卡片（示意，非逐像素） */
+  .tail-card {
+    border: .5px solid var(--line); border-radius: 12px; background: var(--card);
+    padding: 10px 14px; display: flex; align-items: center; gap: 8px;
+    color: var(--text-2); font-size: 12px; width: fit-content;
+  }
+  .tail-card svg { width: 14px; height: 14px; color: var(--text-3); }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-top: 1px solid var(--line); }
+  th { color: var(--text-3); font-weight: 600; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  td { color: var(--text-2); line-height: 1.55; }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  tr:last-child td { border-bottom: 1px solid var(--line); }
+  .yes { color: var(--ok); }
+  .no { color: var(--warn); }
+  .callout {
+    border: 1px solid var(--line); border-left: 3px solid var(--warn);
+    background: var(--card); border-radius: 10px; padding: 12px 15px; margin: 14px 0 4px;
+    font-size: 12.5px; color: var(--text-2);
+  }
+  .callout b { color: var(--text); }
+  .src { font-size: 11px; color: var(--text-4); margin-top: 8px; }
+  footer { margin-top: 44px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--text-4); font-size: 11.5px; }
+</style>
+</head>
+<body data-theme="dark">
+<div class="page">
+  <header>
+    <div>
+      <h1>不接管渲染器，原生能做到哪些</h1>
+      <p class="lede">
+        结论先给：气泡本身没有任何现成的样式钩子，按来源区分不了；能用的只有几种「换一种呈现」或「放到别的位置」的办法。
+        下面的原生行按 0.2.1-rc.2 的组件样式复刻。
+      </p>
+    </div>
+    <button class="btn" id="theme">深色 / 浅色</button>
+  </header>
+
+  <h2>先说清楚「原生」的边界</h2>
+  <p class="note">
+    宿主给用户消息的只有三个入口：<code>user.content</code> 是 factory（不能注册）、<code>user.images</code> 只能换图片画廊、
+    <code>chat.node</code> 的 <code>user</code> 键是整行替换。唯一能「只加东西不接管」的，是<b>换一种消息形态</b>：
+    让 <code>/later</code> 的 <code>source.kind</code> 不是 <code>user</code>。
+  </p>
+
+  <h2>方案 A · 触发行 <span class="pill">原生 · 零接管</span></h2>
+  <p class="note">
+    把 <code>/later</code> 的投递来源改成 <code>kind:'schedule'</code>，消息唤醒新回合时，官方渲染成一个可展开的卡片：
+    时钟图标 + 「自动化任务」+ 时间，正文折叠在里面。插件一行渲染代码都不用写，钟是官方画的。
+  </p>
+  <div class="stage">
+    <span class="stage-tag">原生触发行 · 折叠 / 展开</span>
+    <div class="chat">
+      <div class="tt-root">
+        <button class="tt-header" type="button">
+          <span class="tt-icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg></span>
+          <span class="tt-title">自动化任务</span>
+          <time class="tt-time">21:30</time>
+          <span class="tt-chevron"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 6l4 4 4-4"/></svg></span>
+        </button>
+      </div>
+      <div class="tt-root">
+        <button class="tt-header" type="button">
+          <span class="tt-icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg></span>
+          <span class="tt-title">自动化任务</span>
+          <time class="tt-time">22:05</time>
+          <span class="tt-chevron"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 6l4 4 4-4"/></svg></span>
+        </button>
+        <div class="tt-body">
+          <p class="tt-explanation">这条通知触发了本轮回复。</p>
+          <div class="tt-content">发布说明补到 CHANGELOG，顺带把 1.9.1 的 tag 打上</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="src">
+    复刻自 <code>TurnTriggerNodeView.module.css</code>：圆角 20、<code>.5px</code> 描边、header 12×16、图标 14、时间 12 右对齐、body 左内边距 40。
+    标题是内核固定映射（<code>schedule → 自动化任务</code>），插件改不了；插件只能决定「用不用这个 kind」。
+  </p>
+
+  <h2>方案 B · 回合尾部卡片 <span class="pill">原生插槽 · 零接管</span></h2>
+  <p class="note">
+    <code>conversation.chat.turnTail</code> 是一轮结束后派发的插槽，官方 dsh-schedule 的「已创建定时」卡片就挂在这里。
+    可以画一个钟 + 「本轮由 21:30 的定时消息触发」，但位置在助手回复之后，是回合级，不是消息级。
+  </p>
+  <div class="stage">
+    <span class="stage-tag">回合尾部卡片（示意）</span>
+    <div class="chat">
+      <div class="ss-row">
+        <div class="ss-stack"><div class="ss-bubble">继续，把 typecheck 的红项修掉，然后开 PR</div></div>
+        <div class="ss-actions"><span class="ss-time">21:30</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+      <div class="a-text">收到，红项都在 0.2.1 的插槽类型上，已修完并开 PR。</div>
+      <div class="tail-card">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+        本轮由 21:30 的定时消息触发
+      </div>
+    </div>
+  </div>
+  <p class="src">卡片样式归插件所有（想怎么画怎么画），但位置由插槽决定：只能出现在回合尾部。</p>
+
+  <h2>对照 · 接管后的样子 <span class="pill">预览见 docs/ui/28</span></h2>
+  <p class="note">这是 #112 的方案：气泡不动，只在左侧加钟。它需要整行替换 <code>user</code> / <code>steering</code> 渲染器，代价见 #112。</p>
+  <div class="stage">
+    <span class="stage-tag">left · 气泡 + 钟</span>
+    <div class="chat">
+      <div class="ss-row">
+        <div class="ss-main">
+          <span class="ss-mark" role="img" aria-label="定时发送，21:30 送达">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z"/><path d="M8 4.31V8.46L11 10.08"/></svg>
+          </span>
+          <div class="ss-stack"><div class="ss-bubble">继续，把 typecheck 的红项修掉，然后开 PR</div></div>
+        </div>
+        <div class="ss-actions"><span class="ss-time">21:30</span><span class="ss-copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="6" height="7" rx="1.4"/><path d="M6 5V3.6h4V5"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>完整清单</h2>
+  <table>
+    <thead><tr><th>能做到什么</th><th>靠什么</th><th>代价</th><th>能加"气泡前的钟"吗</th></tr></thead>
+    <tbody>
+      <tr><td>触发行：钟 + 自动化任务 + 时间，内容折叠</td><td>把 source.kind 改成 <code>schedule</code>（提醒通道已有）</td><td>不再是气泡；标题不可定制；内容默认收起；语义变成"通知触发了本轮"</td><td class="yes">能，但钟在行上，不在气泡前</td></tr>
+      <tr><td>上下文注入行："上下文注入 · schedule · 摘要"</td><td>同上，但消息没唤醒新回合时</td><td>文案里带原始 kind、观感差；摘要 ≤120 字</td><td class="no">不能</td></tr>
+      <tr><td>回合尾部卡片</td><td><code>conversation.chat.turnTail</code> 插槽</td><td>只能放在助手回复之后；回合级；对每条消息的归属要自己判</td><td class="no">不能</td></tr>
+      <tr><td>换图片画廊样式</td><td><code>conversation.chat.user.images</code></td><td>只在有图消息生效；替换画廊；不是标记</td><td class="no">不能</td></tr>
+      <tr><td>气泡内文字前加 inline 标记</td><td><code>conversation.user.text.node</code>（key=<code>text</code>）</td><td>owner props 只有 <code>{raw, interactive}</code>，拿不到 source，区分不了哪条是定时消息</td><td class="no">不能，且会污染所有消息</td></tr>
+      <tr><td>纯 CSS 按来源改样式</td><td>无</td><td>行上没有任何"来自定时"的 data 属性，CSS 选不中</td><td class="no">不能</td></tr>
+      <tr><td>DOM 注入（侧栏徽标同路线）</td><td>MutationObserver + 私有类名</td><td>不接管渲染器，但依赖哈希类名与 React 重渲染，跨版本必坏</td><td class="yes">能，但不稳</td></tr>
+      <tr><td>气泡 + 钟（#112 方案）</td><td>整行替换 <code>user</code> / <code>steering</code></td><td>影响全部用户消息；复刻操作行；跨代验证</td><td class="yes">能</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <b>一句话。</b>不接管的话，气泡上什么也改不了；唯一"零成本拿到钟"的办法是把 <code>/later</code> 从「气泡」降级成「通知行」。
+    如果坚持要气泡 + 钟，就绕不开接管。<b>中间地带不存在。</b>
+  </div>
+
+  <footer>
+    docs/ui/29-later-native-options.html · 原生选项预览 · 触发行样式复刻自 0.2.1-rc.2 的 TurnTriggerNodeView
+  </footer>
+</div>
+<script>
+  document.getElementById('theme').onclick = () => {
+    document.body.dataset.theme = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+  };
+</script>
+</body>
+</html>

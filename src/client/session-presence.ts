@@ -17,6 +17,10 @@
  * （ui-workspace 会话行的行数据，实测深度 3）。**禁止**依赖 `YDXeBa_*` 等
  * 构建期 hash 类名；探测失败时安静跳过（badge 缺失，绝不误标）。
  *
+ * 安静跳过的代价由**漂移自检**兜住：摘要里有提醒、而会话行选择器命中 0 行时，
+ * 按 `console.warn` 提示一次「宿主 DOM 可能已改版」（每轮漂移一次，命中即复位），
+ * 免得整块消失被读成「用户就是没有提醒」。全部宿主结构字符串见 `HOST_DOM` 块。
+ *
  * 插入策略：行首子元素是状态 slot —— slot 内已有 svg（进行中 orb）时 badge
  * 插在 slot 之后（`.ss-presence-beside`），否则塞进 slot 内（与 orb 同位）。
  * badge 元素带 `.ss-presence` 类，全部状态用 data-state 表达；React 重渲染
@@ -78,11 +82,106 @@ const BADGE_CLASS = 'ss-presence';
 const HOVER_ROW_CLASS = 'ss-hover-status';
 /** fiber 探测的最大上溯层数（实测深度 3；留余量到 8）。 */
 const FIBER_MAX_DEPTH = 8;
+
+/**
+ * ## 宿主 DOM 结构耦合：唯一清单
+ *
+ * 本模块靠结构探测定位宿主的会话行与悬浮卡片，**以下每一项都是一处对宿主实现
+ * 的假设**（散落在函数里时跨宿主代次排查极易漏看，故集中于此）。语义一律不变，
+ * 这里只是「搬家」：改动任何一条都必须同步 tests/presence-drift.test.mjs。
+ *
+ * 探测不到的处置是安静跳过（绝不误标），代价由 {@link reportSidebarDrift} 的
+ * 漂移告警兜住——会话行那一条至少有信号，其余各条仍会静默降级。
+ */
+const HOST_DOM = Object.freeze({
+  /**
+   * 侧栏树里的行：会话行与工作区行都会命中，靠下面的 `workspaceRowAttr` 区分。
+   *
+   * ⚠️ 这里原来还要求 `[draggable="true"]`，**那个假设已经被实测证伪**：0.1.7 起宿主把
+   * 会话行改成 `draggable="false"`，于是只剩工作区行命中、再被排除规则剔干净，badge 在
+   * 6 个受支持代次里的 4 个上整块不出现（2026-10-28 真 GUI 矩阵：selectorRows=11 /
+   * badgeable=0 / badges=0，而同轮 indexSize=1 说明数据面根本没漂——纯 DOM 假设过期）。
+   *
+   * 现在只押**一个**假设：`aria-expanded` 区分会话行与工作区行，它在全部 6 代都成立。
+   * 被删掉的 `draggable` 正是断掉的那一个。放宽后可能误命中的其它 treeitem 由
+   * `sessionIdOfRow` 的 fiber 反查自然过滤——拿不到会话 id 就不标注，宁可不标也不误标。
+   */
+  sessionRow: '[role="treeitem"]',
+  /**
+   * 工作区行带这个属性、会话行不带：用它把工作区行排除掉。
+   * ⚠️ 这是**排除**规则，命中即 `continue`，不是筛选条件。
+   */
+  workspaceRowAttr: 'aria-expanded',
+  /** 行首 slot 内的「进行中」orb 图标：存在即 badge 插到 slot 之后，否则塞进 slot。 */
+  slotIcon: 'svg',
+  /** 悬浮卡片状态行的前导状态点：该标签名 + 该属性值（用于识别宿主状态行）。 */
+  statusDotTag: 'SPAN',
+  statusDotAttr: 'aria-hidden',
+  statusDotValue: 'true',
+  /** fiber 反查：React 内部 key 的前缀与会话 id 的前缀。 */
+  fiberKeyPrefix: '__reactFiber$',
+  sessionIdPrefix: 'session-',
+});
+
 /** 扫描去抖（流式输出期间 mutation 密集，合并到每帧级别足够）。 */
 const SCAN_DEBOUNCE_MS = 60;
 /** badge 状态重算周期（本地时钟，零网络）。 */
 const STATE_TICK_MS = 30_000;
 
+/**
+ * 漂移告警是否已在本轮发出（**模块级**：跨 mount 共享，宿主热重载插件也不会再刷一条）。
+ * 恢复时由扫描循环置回 false，见 {@link reportSidebarDrift} 的恢复条件。
+ */
+let sidebarDriftWarned = false;
+
+/**
+ * 有提醒却一行都不能标注 → 宿主 DOM 漂移告警（每轮漂移只报一次）。
+ *
+ * **判据**（两个条件同时成立才报）：
+ * 1. `remindedSessions > 0`——摘要索引里确实有带定时提醒的会话，排除「用户就是没有提醒」
+ *    这一最常见也最无害的解释；
+ * 2. **排除工作区行之后**可标注行为 0。注意是"排除后"，不是"选择器命中 0"：
+ *    2026-10-28 那次真漂移就是选择器命中 11 行（全是工作区行）、排除后 0 行，
+ *    用"命中 0 行"当判据正好错过它。
+ *
+ * 两者同时成立几乎只有一种解释：宿主侧栏改版，badge 整块静默消失。这正是本模块
+ * 「探测不到就安静跳过」策略唯一的盲区（其余降级仍静默，见 HOST_DOM 块说明）。
+ *
+ * **只报一次**：扫描由 60ms 去抖的 MutationObserver 驱动，逐次刷屏会打死控制台，
+ * 也会把真问题淹在噪音里（同 `group-status-facet` / `schedule-compat` 的克制法）。
+ *
+ * **恢复条件**：后续任意一次扫描有 ≥1 行可标注即把标志置回 false。于是
+ * 「漂移 → 告警 → 修好（或宿主自己回来了） → 再次漂移」这条链上每一轮漂移各告警
+ * 一次，而不是整个页面生命周期只告警一次——后者会让第二次改版重新变成静默失效。
+ *
+ * **已知代价**：侧栏尚未挂载（首屏极早期、侧栏收起）同样命中「有提醒 + 可标注 0 行」，
+ * 此时会多出一条告警。刻意不加「树容器必须存在」这类额外前置条件：加了就会稀释上面
+ * 那条判据、把真漂移也一起吞掉。权衡后接受——它一次只多一行、文案点名的是具体
+ * 选择器与两个计数，而 badge 缺失本就是用户需要知道的降级。
+ *
+ * **fail-open**：整段包在 try/catch 里（控制台可能被 stub 或抛错），告警失败绝不影响
+ * badge 渲染路径；调用点也在渲染循环之外，不改变任何探测语义。
+ *
+ * @param remindedSessions - 本次摘要索引的条目数（`index.size`）。
+ * @param matched - 选择器命中的行数（排除前）。
+ * @param badgeable - 排除工作区行后可标注的行数。
+ */
+function reportSidebarDrift(remindedSessions: number, matched: number, badgeable: number): void {
+  if (sidebarDriftWarned) return;
+  sidebarDriftWarned = true;
+  try {
+    console.warn(
+      `dsh-later: 侧栏 badge 未注入——选择器 \`${HOST_DOM.sessionRow}\` 命中 ${matched} 行，`
+        + `但排除带 \`${HOST_DOM.workspaceRowAttr}\` 的工作区行后**可标注 0 行**（badgeable=${badgeable}），`
+        + `而摘要里有 ${remindedSessions} 个带定时提醒的会话。这不是「用户没有提醒」，`
+        + '而是本模块的结构探测对不上宿主 DOM（宿主侧栏很可能已改版）。'
+        + `排查只看 src/client/session-presence.ts 顶部的 HOST_DOM 耦合块：逐条核对行选择器与 ${HOST_DOM.workspaceRowAttr} 排除规则。`
+        + '（本轮漂移只提示一次；一旦重新有可标注行即复位，下次改版会再提示。）',
+    );
+  } catch {
+    /* 告警出口本身失败不影响渲染；标志保持已置位，不会因此刷屏 */
+  }
+}
 /** 旧版时钟 glyph（10×10 crispEdges，外圈 8 方块 + 上/右指针，中心留空）。 */
 export const CLOCK_SVG_CLASSIC =
   '<svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true">' +
@@ -157,13 +256,13 @@ function sessionIdOfHoverCard(card: Element): string | undefined {
 /** 共享的 fiber 反查：向上 ≤8 层取 `memoizedProps.node.id`（session- 前缀）。 */
 function sessionIdOfNode(element: Element): string | undefined {
   const host = element as unknown as Record<string, unknown>;
-  const fiberKey = Object.keys(host).find((key) => key.startsWith('__reactFiber$'));
+  const fiberKey = Object.keys(host).find((key) => key.startsWith(HOST_DOM.fiberKeyPrefix));
   if (fiberKey === undefined) return undefined;
   let fiber = host[fiberKey] as FiberNodeLike | undefined;
   for (let depth = 0; fiber !== undefined && depth < FIBER_MAX_DEPTH; depth += 1, fiber = fiber.return) {
     const node = fiber.memoizedProps?.node;
     const id = node?.id;
-    if (typeof id === 'string' && id.startsWith('session-')) return id;
+    if (typeof id === 'string' && id.startsWith(HOST_DOM.sessionIdPrefix)) return id;
   }
   return undefined;
 }
@@ -224,9 +323,25 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     index = currentIndex(summary);
     const dict = dictForNow();
     const now = Date.now();
-    for (const row of Array.from(document.querySelectorAll<HTMLElement>('[role="treeitem"][draggable="true"]'))) {
-      // 工作区行带 aria-expanded；会话行没有。探测失败安静跳过。
-      if (row.hasAttribute('aria-expanded')) continue;
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(HOST_DOM.sessionRow));
+    /**
+     * 排除工作区行之后、真正能挂 badge 的行数。
+     *
+     * ⚠️ 漂移判据必须看这个数，**不能看排除前的 `rows.length`**。上一版写的是
+     * `if (rows.length > 0) 复位`，注释还写着「命中过行 = 结构探测仍然对得上」——
+     * 而真漂移的形态恰恰是「还命中一堆（工作区行），排除后一个不剩」。实测后果：
+     * badge 自 0.1.7 起在 4 个代次整块不出现，这条自检一条都没告，等于它最该说话的时候
+     * 沉默。判据错位比没有判据更糟，因为它提供虚假的安全感。
+     */
+    const badgeable = rows.filter((row) => !row.hasAttribute(HOST_DOM.workspaceRowAttr));
+    // 漂移自检（fail-open，唯一副作用是一条 console.warn，见 reportSidebarDrift）。
+    if (badgeable.length > 0) {
+      // 确实有行可标注 = 结构探测仍然对得上：复位，让下一轮漂移还能告出来。
+      sidebarDriftWarned = false;
+    } else if (index.size > 0) {
+      reportSidebarDrift(index.size, rows.length, badgeable.length);
+    }
+    for (const row of badgeable) {
       applyBadge(row, now, dict);
     }
     // 悬浮卡片只有在弹出时才存在于 DOM；未弹出时是零开销的空查询。
@@ -284,7 +399,7 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     }
     const slot = row.firstElementChild;
     if (slot === null) return;
-    const beside = slot.querySelector('svg') !== null;
+    const beside = slot.querySelector(HOST_DOM.slotIcon) !== null;
     const badge = document.createElement('span');
     badge.className = beside ? `${BADGE_CLASS} ${BADGE_CLASS}-beside` : BADGE_CLASS;
     badge.dataset.state = state;
@@ -338,8 +453,8 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
         return (
           child.children.length >= 2 &&
           dot !== null &&
-          dot.tagName === 'SPAN' &&
-          dot.getAttribute('aria-hidden') === 'true'
+          dot.tagName === HOST_DOM.statusDotTag &&
+          dot.getAttribute(HOST_DOM.statusDotAttr) === HOST_DOM.statusDotValue
         );
       });
       if (!hasStatusRow) continue;
@@ -380,6 +495,8 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     row.className = HOVER_ROW_CLASS;
     row.dataset.state = state;
     const dot = document.createElement('span');
+    // 这里是**产出**宿主同构形状（刻意不进 HOST_DOM 块：那块只描述「读」侧耦合），
+    // 但要与 HOST_DOM.statusDot* 保持一致，否则我们的行自己也不满足识别条件。
     dot.setAttribute('aria-hidden', 'true');
     dot.className = 'ss-hover-status-dot';
     const text = document.createElement('span');
