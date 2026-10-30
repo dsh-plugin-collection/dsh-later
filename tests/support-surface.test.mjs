@@ -94,7 +94,7 @@ test('别的 tuple 上的预发布必须被拦住（这次收紧的实际内容�
     '0.1.6-alpha.1',
     '0.1.7-alpha.1',   // alpha 低于 rc：同 tuple 的更早预发布也拦
     '0.2.0-rc.1',
-    '0.2.2-alpha.2',
+    '0.2.3-alpha.1',   // 新 tuple：0.2.2-alpha.2 已入表，但上界照样拦到 0.2.3-0
     '0.3.0-rc.1',
   ];
   for (const version of rejected) {
@@ -103,9 +103,11 @@ test('别的 tuple 上的预发布必须被拦住（这次收紧的实际内容�
 });
 
 test('同 tuple 向后放行是**契约**而非漏洞（range 写不出白名单）', () => {
-  // 0.2.1-rc.3 / rc.4 已实测 mount GREEN（但未进 KERNEL_GENERATIONS，见模块头说明）：
-  // 它们能被放行靠的就是这条语义，不是靠把它们塞进 engines 字符串。
-  for (const version of ['0.2.1-rc.3', '0.2.1-rc.4', '0.1.7-rc.3', '0.2.0-rc.3']) {
+  // 0.2.1-rc.3 / rc.4 已经在 KERNEL_GENERATIONS 里（各自走了四面入表），这里保留它们
+  // 作为「同 tuple 更晚的版本也会被放行」的例子：放行靠的是 range 的区间语义，不是把它们
+  // 塞进 engines 字符串。
+  // 0.2.2-alpha.3 / 0.2.2 也是同一段：alpha.2 入表后，同 tuple 更晚的预发布与该段正式版一并放行。
+  for (const version of ['0.2.1-rc.3', '0.2.1-rc.4', '0.1.7-rc.3', '0.2.0-rc.3', '0.2.2-alpha.3', '0.2.2']) {
     assert.equal(admitted(version, pkg.engines.dsh), true, `${version} 应随同 tuple 向后放行`);
   }
   // 各 tuple 的正式版同样放行——这是 range 语法的固有结果。
@@ -132,7 +134,8 @@ test('peer 侧逐代枚举且**每枚都带上界**（peer 是老内核唯一有
 
 test('peer 语义下别的版本段的预发布也必须被拒绝（收紧必须在两侧都成立）', () => {
   const peer = pkg.peerDependencies['@deepseek-ai/dsh-schedule'];
-  for (const version of ['0.1.3-alpha.2', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.5-rc.1', '0.2.2-alpha.2']) {
+  // 0.2.2-alpha.2 已入表且 peer 收在同一条区间里，不能再列在这儿（否则等于要求「入表了还得被拒」）。
+  for (const version of ['0.1.3-alpha.2', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.5-rc.1', '0.2.3-alpha.1']) {
     assert.equal(admitted(version, peer), false, `peer 语义仍放行 ${version} —— 这些运行时只读 peer`);
   }
   for (const gen of KERNEL_GENERATIONS) {
