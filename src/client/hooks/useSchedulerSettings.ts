@@ -17,6 +17,10 @@
  */
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { sanitizeSmartWindowConfig, DEFAULT_SMART_WINDOW, type SmartWindowConfig } from '../../smart-window.js';
+import { resolveBubbleMarker, type BubbleMarkerStyle } from '../../bubble-marker.js';
+
+export { resolveBubbleMarker };
+export type { BubbleMarkerStyle };
 
 /** 设置面需要的最小快照形状（与 dsh-client-runtime 的 SettingsScope 快照兼容）。 */
 export interface SchedulerSettingsSnapshot {
@@ -42,6 +46,8 @@ export interface ResolvedSchedulerSettings {
   ready: boolean;
   /** 是否显示输入框右侧的定时按钮（默认 true；仅显式 false 隐藏）。 */
   showButton: boolean;
+  /** 定时消息气泡标记档位。 */
+  bubbleMarker: BubbleMarkerStyle;
   /** 智能时段配置（非法字段已逐项回落默认）。 */
   smartWindow: SmartWindowConfig;
   /** 提示字符上限（allowLong=false 时恒等于 1000）。 */
@@ -59,6 +65,7 @@ const FALLBACK_PROMPT: ResolvedPromptLimits = {
 const FALLBACK: ResolvedSchedulerSettings = {
   ready: false,
   showButton: true,
+  bubbleMarker: 'left',
   smartWindow: sanitizeSmartWindowConfig(undefined),
   promptLimits: FALLBACK_PROMPT,
 };
@@ -81,6 +88,7 @@ function resolveFromSnapshot(snap: SchedulerSettingsSnapshot): ResolvedScheduler
     return {
       ready: false,
       showButton: true,
+      bubbleMarker: 'left',
       smartWindow: FALLBACK.smartWindow,
       promptLimits: FALLBACK_PROMPT,
     };
@@ -90,6 +98,7 @@ function resolveFromSnapshot(snap: SchedulerSettingsSnapshot): ResolvedScheduler
     ready: true,
     // 仅显式 false 隐藏；缺失/非法一律回退显示（与 schema 默认 true 同源）。
     showButton: value['showButton'] !== false,
+    bubbleMarker: resolveBubbleMarker(snap),
     smartWindow: sanitizeSmartWindowConfig(
       value as Partial<Record<keyof SmartWindowConfig, unknown>>,
     ),

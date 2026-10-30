@@ -726,6 +726,38 @@ const COMPONENTS = [
 '  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);',
 '  border-radius: 999px; corner-shape: round; white-space: nowrap;',
 '}',
+/* ==================== 定时消息气泡标记（issue #112） ==================== */
+/* 行容器复刻官方 userRow：列向、右对齐、间距 6px。 */
+'.ss-later-row { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }',
+/* display:contents 让工厂输出继续当行容器的直接 flex item（尺寸/对齐口径不变），只借它做测量。 */
+'.ss-later-stackwrap { display: contents; }',
+'.ss-later-main { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; width: 100%; }',
+/* left / hover：气泡左外侧的钟。margin-top 由组件按附件行高度现算（默认 13px）。 */
+'.ss-later-mark { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-top: 13px; color: var(--dsw-alias-label-tertiary); }',
+'.ss-later-mark:hover { color: var(--dsw-alias-label-secondary); }',
+/* meta：气泡上方一行 12px 文案；16px 行高 + 6px 间距 - 4px 负边距 = 总高 +18px。 */
+'.ss-later-meta { display: flex; align-items: center; gap: 6px; align-self: flex-end; margin-bottom: -4px; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }',
+'.ss-later-meta svg { width: 13px; height: 13px; }',
+/* hover：默认隐形，行悬停 / 聚焦淡入；触屏没有 hover，常显。 */
+'.ss-later-row[data-ss-marker="hover"] .ss-later-mark { opacity: 0; transition: opacity 120ms ease; }',
+'.ss-later-row[data-ss-marker="hover"]:hover .ss-later-mark, .ss-later-row[data-ss-marker="hover"]:focus-within .ss-later-mark { opacity: 1; }',
+'@media (hover: none) { .ss-later-row[data-ss-marker="hover"] .ss-later-mark { opacity: 1; } }',
+'@media (prefers-reduced-motion: reduce) { .ss-later-row[data-ss-marker="hover"] .ss-later-mark { transition: none; } }',
+/* tooltip：标记左侧，带 6px 箭头。 */
+'.ss-later-mark[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: calc(100% + 9px); top: 50%; transform: translateY(-50%); background: var(--dsw-alias-tooltip-bg); color: var(--dsw-alias-tooltip-label, #fff); font-size: 12px; line-height: 16px; white-space: nowrap; padding: 5px 9px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); pointer-events: none; z-index: 3; }',
+'.ss-later-mark[data-tip]:hover::before { content: ""; position: absolute; right: calc(100% + 4px); top: 50%; width: 6px; height: 6px; transform: translateY(-50%) rotate(45deg); background: var(--dsw-alias-tooltip-bg); pointer-events: none; z-index: 3; }',
+/* 操作行：复刻官方 MessageIconActions（时间 + 复制），尺寸随宿主字号变量走。 */
+'.ss-later-actions { height: calc(28px + var(--dsh-content-font-delta, 0px)); display: flex; align-items: center; gap: 8px; }',
+'.ss-later-time { font-size: var(--dsh-content-font-size-secondary, 13px); line-height: calc(24px + var(--dsh-content-font-delta, 0px)); color: var(--dsw-alias-label-tertiary); white-space: nowrap; padding-right: 12px; font-variant-numeric: tabular-nums; }',
+'.ss-later-copy { width: calc(28px + var(--dsh-content-font-delta, 0px)); height: calc(28px + var(--dsh-content-font-delta, 0px)); border-radius: var(--dsw-radius-sm); border: none; background: transparent; color: var(--dsw-alias-label-tertiary); padding: 6px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }',
+'.ss-later-copy svg { width: calc(15px + var(--dsh-content-font-delta, 0px)); height: calc(15px + var(--dsh-content-font-delta, 0px)); }',
+'.ss-later-copy:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }',
+/* 连续两条用户消息时隐藏操作行（与官方同一条规则），悬停 / 聚焦再显示。 */
+':is([data-chat-flow-kind="user"], [data-chat-flow-kind="steering"]):has(~ :is([data-chat-flow-kind="user"], [data-chat-flow-kind="steering"])) .ss-later-actions { opacity: 0; transition: opacity 80ms; }',
+':is([data-chat-flow-kind="user"], [data-chat-flow-kind="steering"]):has(~ :is([data-chat-flow-kind="user"], [data-chat-flow-kind="steering"])):hover .ss-later-actions, :is([data-chat-flow-kind="user"], [data-chat-flow-kind="steering"]):has(~ :is([data-chat-flow-kind="user"], [data-chat-flow-kind="steering"])):focus-within .ss-later-actions { opacity: 1; }',
+'@media (prefers-reduced-motion: reduce) { .ss-later-actions { transition: none; } }',
+/* 工厂缺席时的兜底气泡：宁可不如官方好看，也不能让消息消失。 */
+'.ss-later-fallback { max-width: min(calc(var(--dsh-chat-content-width, 748px) * .702), 82%); background: var(--dsw-specific-bubble); color: var(--dsw-alias-label-primary); border-radius: var(--dsw-radius-xl); padding: 10px 16px; font-size: var(--dsh-content-font-size, 14px); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; word-break: break-word; }',
 ].join('\n');
 
 export function injectStyles(): () => void {

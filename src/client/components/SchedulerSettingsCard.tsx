@@ -61,6 +61,8 @@ export interface SchedulerSettings {
   confirmDelivery?: boolean;
   onUnconfirmed?: 'keep' | 'discard';
   clockIconStyle?: 'auto' | 'modern' | 'classic';
+  /** 定时消息气泡标记档位（issue #112）。 */
+  bubbleMarker?: 'off' | 'left' | 'meta' | 'hover';
   /** 高级语法（Beta）：多次写法开关，默认开。 */
   advancedSyntax?: boolean;
   /** 是否解除提示字符的默认上限（1000）。**默认关**，开启后 maxPromptChars 才生效。 */
@@ -91,7 +93,7 @@ type FieldDef =
       readonly requiresEnabled?: 'allowLongPrompts';
     }
   | { readonly kind: 'time'; readonly key: 'workStart' | 'workEnd' | 'lunchStart' | 'lunchEnd' | 'eveningEnd'; readonly labelKey: string; readonly hintKey?: string }
-  | { readonly kind: 'enum'; readonly key: 'steerDelivery' | 'onUnconfirmed' | 'clockIconStyle'; readonly labelKey: string; readonly hintKey?: string; readonly options: readonly string[]; readonly defaultValue: string };
+  | { readonly kind: 'enum'; readonly key: 'steerDelivery' | 'onUnconfirmed' | 'clockIconStyle' | 'bubbleMarker'; readonly labelKey: string; readonly hintKey?: string; readonly options: readonly string[]; readonly defaultValue: string };
 
 /** Section 分组（对齐官方插件设置页的 section 结构）。 */
 interface SectionDef {
@@ -133,6 +135,14 @@ const SECTIONS: readonly SectionDef[] = [
         hintKey: 'clockIconStyleHint',
         options: ['auto', 'modern', 'classic'],
         defaultValue: 'auto',
+      },
+      {
+        kind: 'enum',
+        key: 'bubbleMarker',
+        labelKey: 'bubbleMarkerLabel',
+        hintKey: 'bubbleMarkerHint',
+        options: ['left', 'meta', 'hover', 'off'],
+        defaultValue: 'left',
       },
       { kind: 'number', key: 'maxSchedules', labelKey: 'maxSchedulesLabel', hintKey: 'maxSchedulesHint', defaultValue: 100 },
       {

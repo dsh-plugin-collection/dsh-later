@@ -113,6 +113,26 @@ const zh = {
   attachmentPendingSend: '发送后可见',
   attachmentUnavailable: '图片不可用',
   attachmentMore: '另有 {n} 个附件未列出',
+  /** 定时消息气泡标记（issue #112）：设置项与四种档位。 */
+  bubbleMarkerLabel: '定时消息标记',
+  bubbleMarkerHint:
+      '在 /later 到点送出的消息上加一个时钟标记。left 在气泡左侧常显，meta 在气泡上方加一行小字，'
+      + 'hover 只在悬停消息行时出现；关闭后不接管渲染，与官方原样一致。标记只在 0.2.1 及以上的内核生效。',
+  bubbleMarkerOption_off: '关闭',
+  bubbleMarkerOption_left: '气泡左侧',
+  bubbleMarkerOption_meta: '气泡上方',
+  bubbleMarkerOption_hover: '悬停显示',
+  /** 标记的 a11y 文案与 tooltip（{time} 是送达时刻）。 */
+  laterMarkerAria: '定时发送的消息，{time} 送达',
+  laterMarkerTooltip: '定时发送 · {time} 送达',
+  laterMarkerTooltipBatch: '定时发送 · {time} 送达 · {count} 条合并',
+  laterMarkerMeta: '定时发送 · {time}',
+  /** 复刻操作行的文案（与官方 chat 的 copy/copied 同义）。 */
+  actionCopy: '复制',
+  actionCopied: '已复制',
+  /** 复刻官方 formatMessageClock 的两段格式（仅同年/跨年用得到）。 */
+  clockMd: '{m}月{d}日',
+  clockYmd: '{y}年{m}月{d}日',
 } as const;
 
 /** 客户端本地错误令牌：hook 层抛出、组件层经字典翻译（避免 hook 依赖 locale）。 */
@@ -193,6 +213,23 @@ const en: { [K in keyof typeof zh]: string } = {
   attachmentPendingSend: 'Available after send',
   attachmentUnavailable: 'Image unavailable',
   attachmentMore: '{n} more attachment(s)',
+  bubbleMarkerLabel: 'Scheduled message marker',
+  bubbleMarkerHint:
+      'Add a clock marker to messages delivered by /later. left shows it beside the bubble, '
+      + 'meta adds a small line above, hover reveals it when the row is hovered; off leaves the '
+      + 'official renderer untouched. Only available on kernel 0.2.1 and later.',
+  bubbleMarkerOption_off: 'Off',
+  bubbleMarkerOption_left: 'Beside bubble',
+  bubbleMarkerOption_meta: 'Above bubble',
+  bubbleMarkerOption_hover: 'On hover',
+  laterMarkerAria: 'Scheduled message, delivered {time}',
+  laterMarkerTooltip: 'Scheduled · delivered {time}',
+  laterMarkerTooltipBatch: 'Scheduled · delivered {time} · {count} merged',
+  laterMarkerMeta: 'Scheduled · {time}',
+  actionCopy: 'Copy',
+  actionCopied: 'Copied',
+  clockMd: '{m}/{d}',
+  clockYmd: '{y}-{m}-{d}',
 };
 
 /** 单语言文案字典类型（宽化为 string，zh/en 通用）。 */
