@@ -25,7 +25,8 @@ import type { SettingsNamespace } from '@deepseek-ai/dsh-settings';
 // Type-only：把 ctx.attachments 的 Context merge 引入本程序（同上两行的用法）。
 // 只为拿到 `AttachmentStore.imageHostPath` 的真实签名，不新增运行时依赖。
 import type {} from '@deepseek-ai/dsh-attachment';
-import { setImageHostPathResolver, userSchedulesProjectionUnit } from './projection.js';
+import { setImageHostPathResolver } from './projection.js';
+import { registerUserSchedulesProjection } from './projection-registration.js';
 import { registerUserScheduleCommands } from './commands.js';
 import { UserScheduleRuntime } from './runtime.js';
 import {
@@ -529,14 +530,27 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
   });
 
   // 1b. `userSchedules` 会话投影（GUI 读状态）。
-  // `as never`：本插件 dev 依赖解析到的 @deepseek-ai/dsh-session-projection
-  // 可能是旧版（rc.1，契约 `schema`+顶层 `view`），而宿主运行时是 rc.2
-  // （契约 `stateSchema`+`wire{viewSchema,view}`）。两者在类型层冲突，
-  // 直接类型化注册会被旧版契约拒掉；运行时又必须按 rc.2 传。故此处保留
-  // `as never` 显式声明「运行时契约以宿主为准」，并用
-  // `tests/projection-unit.test.mjs` 在运行时锁定 rc.2 形状，防止回归。
+  //
+  // **跨代收敛点已搬到 `src/projection-registration.ts`**：本插件 dev 依赖解析到的
+  // @deepseek-ai/dsh-session-projection 可能是旧版（rc.1，契约 `schema`+顶层 `view`），
+  // 而宿主运行时可能更晚（rc.2 起契约 `stateSchema`+`wire{viewSchema,view}`；
+  // 0.2.2-alpha.2 起 `register` 还改成了 `Promise<ProjectionHandle>`）。两代在类型层
+  // 冲突、运行时契约以宿主为准，投影注册处的 `as never` 显式转换现在只留在
+  // projection-registration.ts 里；注册单元的运行时形状由
+  // `tests/projection-unit.test.mjs` 锁定，防止回归。
+  //
+  // **为什么包 `ctx.effect` 且 body 是 async**：0.2.2-alpha.2 的契约是
+  // *Callers must await registration before publishing consumers*——注册完成之前
+  // 不得对外发布消费方。cordis 4.0.1 的 `Effect` 接受 `Promise<Disposable>`
+  // （`effect()` 在 fiber 激活前 await 异步 body），于是「await 完注册才让消费方可见」
+  // 由框架保证；`@deepseek-ai/cordis` 是全代次同一个 `^4.0.1` peer，老代次同样支持。
+  // 别改成 `.then()`——那会把时序丢掉，而装配面照样 GREEN，问题要到用户侧才显形。
+  // 运行期失败（返回值形状未知 / 注册被拒）在收敛点 warn 并降级，不从这里抛。
   ctx.inject(['sessionProjections'], (projectionCtx) => {
-    projectionCtx.sessionProjections.register(userSchedulesProjectionUnit as never);
+    projectionCtx.effect(
+      () => registerUserSchedulesProjection(projectionCtx.sessionProjections, (m) => ctx.logger.warn(m)),
+      'later.userSchedulesProjection()',
+    );
   });
 
   // 2. 注册 settings namespace（设置 - 插件 配置 UI）。
