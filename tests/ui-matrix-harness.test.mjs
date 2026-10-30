@@ -209,6 +209,29 @@ test('createInstance：插件副本跟着 package.json 的 files 白名单走（
     assert.ok(existsSync(join(copy, 'SKILL.md')), 'SKILL.md 必须在副本里');
     assert.ok(existsSync(join(copy, 'SKILL.en.md')), 'SKILL.en.md 必须在副本里');
     assert.ok(existsSync(join(copy, 'lib', 'skill.js')), 'provider 产物必须在副本里');
+    /**
+     * `package.json` **不在** `files` 里（npm 发布时自动带上，所以没人需要列），但它必须在副本里。
+     *
+     * 缺了它会怎样（2026-10-30 在 `0.2.2-alpha.2` 上实测）：宿主 `dsh-app-boot` 解析不到该
+     * profile bundle → 日志 `skipping profile bundle "dsh-later": cannot resolve profile bundle`
+     * → 插件压根不加载 → UI 面量到「按钮=N dock=0 面板=N」。那看起来像**插件在这一代坏了**，
+     * 实际是矩阵自己没把包装对。所以白名单只能决定「发布物复制哪些」，不能决定
+     * 「宿主解析 bundle 需要哪些」——`package.json` 属于后者，无条件复制。
+     */
+    assert.equal(
+      declared.includes('package.json'),
+      false,
+      '前置：files 本来就不含 package.json（npm 会自动带），所以它必须靠「无条件复制」进来',
+    );
+    assert.ok(
+      existsSync(join(copy, 'package.json')),
+      'package.json 必须进副本：缺它宿主会 cannot resolve profile bundle 并整插件 skip',
+    );
+    assert.equal(
+      JSON.parse(readFileSync(join(copy, 'package.json'), 'utf8')).name,
+      'dsh-later',
+      '副本里的 package.json 要是本插件那份（不是空文件或占位）',
+    );
     // 副本必须是实体文件：软链仓库目录会让插件解析到自己那份宿主包（矩阵失真的老根因）。
     assert.equal(
       [...readFileSync(join(copy, 'SKILL.md'), 'utf8')].length > 0,

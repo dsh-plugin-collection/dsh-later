@@ -118,14 +118,28 @@ export function createInstance({ version, versionsRoot, pluginDir, home, profile
   }
 
   // ② 插件用**实体副本**：挂仓库目录会让它 import 到自己 node_modules 里那份宿主包，矩阵当场失真。
-  //    复制清单**以 package.json 的 `files` 白名单为准**，不再手写第二份。这里原来是手写的
-  //    四条，于是往 `files` 里加了 `SKILL.md` / `SKILL.en.md` 之后，副本里根本没有它们：
+  //    复制清单**以 package.json 的 `files` 白名单为准 + 几项运行期必需件**，不再手写第二份。这里
+  //    原来是手写的四条，于是往 `files` 里加了 `SKILL.md` / `SKILL.en.md` 之后，副本里根本没有它们：
   //    provider 每次读盘都失败，skill 在所有实例里静默缺席（退化是安全的，但矩阵与任何
-  //    隔离实例都测不到这一面）。`files` 之外只补两个非发布、运行期要用的目录。
+  //    隔离实例都测不到这一面）。`files` 之外要补的是：`package.json`（宿主解析 bundle 必需，
+  //    见下）与两个非发布、运行期要用的目录。
   const copy = join(nm, pkg.name);
   mkdirSync(copy, { recursive: true });
+  /**
+   * `package.json` **必须**进副本，而它偏偏不在 `files` 里（npm 发布时总自动带上，所以没人列）。
+   *
+   * 因果链（2026-10-30 在 `0.2.2-alpha.2` 上实测）：副本缺 `package.json` → 宿主的
+   * `dsh-app-boot` 解析不到 profile bundle，日志 `dsh: skipping profile bundle "dsh-later":
+   * cannot resolve profile bundle` → 插件压根没被加载 → UI 面看到「按钮=N dock=0 面板=N」，
+   * 那看起来像**插件坏了**，实际是**矩阵自己没把包装对**。在 0.1.7 及更早的代次上它同样会
+   * 静默 skip，只是之前的轮次没有遇到（`files` 白名单化之后才把它漏掉）。
+   *
+   * 所以 `files` 白名单只描述「发布物有哪些」，不描述「宿主解析 bundle 需要什么」；
+   * 后者是不可省略的运行期前提，这里无条件补上。
+   */
+  const ALWAYS_COPY = ['package.json'];
   const RUNTIME_ONLY_DIRS = ['locale', 'assets'];
-  for (const entry of [...(Array.isArray(pkg.files) ? pkg.files : []), ...RUNTIME_ONLY_DIRS]) {
+  for (const entry of [...ALWAYS_COPY, ...(Array.isArray(pkg.files) ? pkg.files : []), ...RUNTIME_ONLY_DIRS]) {
     const src = join(pluginDir, entry);
     if (!existsSync(src)) continue;
     cpSync(src, join(copy, entry), lstatSync(src).isDirectory() ? { recursive: true } : undefined);
