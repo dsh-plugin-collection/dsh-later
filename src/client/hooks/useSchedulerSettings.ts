@@ -16,10 +16,9 @@
  * @module dsh-later/client/hooks/useSchedulerSettings
  */
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { sanitizeSmartWindowConfig, DEFAULT_SMART_WINDOW, type SmartWindowConfig } from '../../smart-window.js';
+import { sanitizeSmartWindowConfig, type SmartWindowConfig } from '../../smart-window.js';
 import { resolveBubbleMarker, type BubbleMarkerStyle } from '../../bubble-marker.js';
 
-export { resolveBubbleMarker };
 export type { BubbleMarkerStyle };
 
 /** 设置面需要的最小快照形状（与 dsh-client-runtime 的 SettingsScope 快照兼容）。 */
