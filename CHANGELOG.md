@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 1.11.0 — 2026-11-02
+
 - **feat(kernel)** 支持内核 `0.2.2-alpha.2`。这不是"顺手多认一代"，而是两条**硬约束**，缺任一条这一代就装不上或时序不对：
   - **声明面上界**：`engines.dsh` 原为 `… <0.2.2-0`，按 semver §11 天然排除 `0.2.2-alpha.2`；而 0.2.1 起内核**单独按这行判定**（peer 不再兜底），于是插件被门禁直接 disable、`gate` 本代与最新都 reject。现在追加 `>=0.2.2-alpha.2 <0.2.3-0`，8 个 kernel-scoped peer 同步追加同一条（两侧执行者不同，都得收）。
   - **注册时序**：这一代 `register()` 的返回契约从同步 disposer 换成 `Promise<ProjectionHandle<S>>`，并要求 *callers must await registration before publishing consumers*。插件现在把注册包进 async `ctx.effect` body，cordis 在 fiber 激活前 await 它。别改成 `.then()`：那会绕过契约要求的 await。**这是契约对齐，不是修一个可观测 bug** —— 实测在这一代上不 await 也没有可见差异（注册表写入在 `acquire()` 的同步段，消费者读面全是同步读），照契约做是为了上游取掉 callable 兜底时不被动。
