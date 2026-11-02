@@ -216,7 +216,7 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 
 六代逐代验过四个面（基线 `main@28ca1dc`，即 1.8.0，2026-10-26 实测）：装配（真内核冷启动挂上插件）、功能（到点真实投递的事件形状）、类型（整条 `@deepseek-ai/dsh*` 依赖线换成该代次后两个 tsconfig 零错误）、UI（真 GUI 里定时按钮 / dock / 面板逐代截图留档）。前三个面复跑 `npm run verify:kernels:all`，UI 面复跑 `npm run verify:ui`。实测口径、逐代结论与方法归 [docs/verification.md](./docs/verification.md) 和 [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md)，本表只报结论。
 
-上一段是 **1.8.0 那轮的基线记录，「六代」就是当时实际跑过的数量**，不随后来加代次改写（历史即证据）。本轮另为 `0.2.2-alpha.2` 补测四面，结论单独记在 [docs/verification.md 的 §0.2.2-alpha.2](./docs/verification.md)，代次表因此从 8 条变 9 条；在该节回填之前，本表不为它写结论。
+上一段是 **1.8.0 那轮的基线记录，「六代」就是当时实际跑过的数量**，不随后来加代次改写（历史即证据）。本轮另为 `0.2.2-alpha.2` 补测四面，代次表因此从 8 条变 9 条；结论已回填进 [docs/verification.md 的 §0.2.2-alpha.2](./docs/verification.md)（9 代次 × 四面全绿，UI 面逐代结论见 [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md)），所以上面那张表现在给它写的是「支持」，不是预支。
 
 随包分发的 `SKILL.md` 那个曝光位不在这份基线里。它按**装配**而非代次决定有无（宿主装配里没有 skills 服务时静默缺席，见上文），跨代证据在 `tests/skill-provider.test.mjs`：真 `SkillRegistry` 的用例默认只跑 `0.2.1-rc.2`，其它代次要用 `DSH_LATER_SKILL_PKG` 指认该代的 `dsh-skill/lib/index.js`。
 
