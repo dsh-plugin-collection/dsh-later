@@ -89,7 +89,14 @@
   「一个隐蔽的构建耦合」：**任何类型错误都会让 `build.mjs` 从 tsc 回退到 esbuild bundle**，
   而 bundle 会内联本地模块、产生双副本，进而改变运行时语义。故 typecheck 干净
   不只是代码整洁问题，**它是构建产物形态的前置条件**。
-- **独立实例线上 E2E（Playwright 无头真点 UI）**：按钮渲染→开面板→自定义时间→确认→芯片出现→任务列表可见→**到期真触发（≈计划 75s，实测 72s）→对话出现 `user/message`（source=plugin:later）**；磁盘日志逐条确认 create→owned→dispatch→followup 全持久化、无重复触发。
+- **独立实例线上 E2E（Playwright 无头真点 UI）**（**2026-09-08 的记录，不是现状态口径**；
+  「≈计划 75s，实测 72s」是那一轮的单次观测，别当 SLA 读）：按钮渲染→开面板→自定义时间→确认→
+  芯片出现→任务列表可见→到期真触发→对话出现 `user/message`。
+  ⚠️ 那句里的 `source=plugin:later` **已随 issue #75 过时**：`kind:'plugin'` 从 `0.1.7-rc.1` 起被
+  v4 准入拒绝，注入消息一律用 `kind:'schedule'`，更早的代次才是 `plugin` —— 判定在
+  `src/schedule-compat.ts`，逐代结论见下文「已解决（2026-10-23，issue #75）」。
+  要拿当前的端到端证据，跑 `npm run verify:kernels`（装配 + 真投递事件形状）与
+  `npm run verify:ui`（真 GUI），这两条命令的产物才是活的。
 - **内核代次兼容（2026-09-07 实测）**：`0.1.1-rc.2` 与 `0.1.2-rc.1` 两代均通过 host 入口链接（运行时符号 17/17 存在）、headless 真实启动（停在 `MISSING_CREDENTIAL`，在插件加载之后）与 web 真实启动（`lib/client.js` HTTP 200）。跨代做法有三处：
   1. **peer 枚举完整覆盖**：除了 `dsh-schedule / dsh-session / dsh-session-projection`，把宿主直接 import 的 `@deepseek-ai/{cordis,dsh-agent,dsh-commands,dsh-llm,dsh-settings,dsh-tools,schemastery}` 全部列入 peer + dev——`0.1.1-rc.2` 经 `dsh-schedule` 传递提升到顶层 `node_modules/@deepseek-ai/` 时这些包是可达的；`0.1.2-rc.1` 的 hoisting 策略变化把它们留在 `.pnpm/`，**未声明 peer 的会运行时报 `ERR_MODULE_NOT_FOUND`**（已实测 `lib/runtime.js` import `@deepseek-ai/dsh-llm` 在 0.1.2 直接崩）。
   2. **设置命名空间**写作 `'dsh-later' as SettingsNamespace`（`settingsNamespace()` helper 在 `0.1.2` 已删除，运行时导入会让整个模块链接失败）。
