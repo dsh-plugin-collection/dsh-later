@@ -142,19 +142,20 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
         /** 用户创建的、当前活动的定时提醒列表。 */
         userSchedules: UserScheduleProjectionValue;
     }
-    interface SessionProjectionStateMap {
-        /**
-         * 投影内部折叠状态（plain JSON：owned/active 用数组承载，
-         * 满足持久化投影缓存的 plain-JSON 前提）。
-         */
-        userSchedules: UserScheduleProjectionState;
-    }
 }
 /**
  * 投影内部折叠状态（plain JSON）。与 `src/projection.ts` 中的同名接口
- * 结构一致；在 domain.ts 里用结构化类型承载是因为合并的
- * `SessionProjectionStateMap` 需要在这里给出 —— 而 projection.ts 依赖
+ * 结构一致；在 domain.ts 里用结构化类型承载是因为 projection.ts 依赖
  * domain.ts，反向 import 会形成环。
+ *
+ * ⚠️ 这里**不再**声明 `SessionProjectionStateMap`（0.2.2-alpha.2 起该接口已从
+ * 上游删除）。留着的后果不是编译失败而是**静默死声明**：TypeScript 的 module
+ * augmentation 允许新增一个不存在的 interface，tsc 一个错都不报，但那块声明
+ * 没有任何代码在读——它看起来像兼容，实际是一段假契约。
+ *
+ * 现在状态类型由单元自身的 `stateSchema` 泛型承载（`src/projection.ts` 的
+ * `userSchedulesProjectionUnit`），跨代边界收敛在 `src/projection-registration.ts`
+ * 的一处显式转换里，不再靠全局合并表。
  */
 export interface UserScheduleProjectionState {
     /** 会话 id（init 时由 header 注入；apply 据此查询所有权 sidecar 缓存）。 */

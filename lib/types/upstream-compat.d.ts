@@ -167,8 +167,62 @@ export declare const KERNEL_GENERATIONS: readonly [{
     readonly id: "0.2.1-rc.3";
     readonly sessionApi: "own-events";
 }, {
-    /** 见上一条 `0.2.1-rc.3` 的实证说明；同样四面全绿。本代是当前的 dev 固定代次。 */
+    /** 见上一条 `0.2.1-rc.3` 的实证说明；同样四面全绿。本代是 `0.2.1` tuple 的最后一代。 */
     readonly id: "0.2.1-rc.4";
+    readonly sessionApi: "own-events";
+}, {
+    /**
+     * `0.2.2` 代次（首个预发布 `0.2.2-alpha.2`，issue #118）。
+     *
+     * **本次适配的形状是「声明面缺失 + 运行时契约变化」，不是「修一个已经炸掉的编译错误」。**
+     * issue 里那条「`src/domain.ts` 的 StateMap 声明在 alpha.2 上会让 tsc 报错」的前提实测
+     * 不成立：module augmentation 允许新增一个**不存在**的 interface，所以 tsc 一个错都不报。
+     * 静默无效比报错更危险——那块声明没有任何代码在读，只是看起来像兼容。
+     *
+     * 逐项核对（实证见 docs/verification.md「0.2.2-alpha.2 兼容核对」）：
+     *
+     * 1. **`SessionProjectionStateMap` 移除**：alpha.2 的类型包里该接口已不存在
+     *    （`grep -c SessionProjectionStateMap lib/types/*.d.ts` 两个文件都是 0；rc.2 上是
+     *    7 + 1 处）。落点：删除 `src/domain.ts` 的整个 augmentation 分支（**保留**
+     *    `SessionProjectionMap`，客户端 wire 视图类型仍靠它）。状态类型改由投影单元自身的
+     *    `stateSchema` 泛型承载，跨代边界收敛在 `src/projection-registration.ts`。
+     *
+     * 2. **`register()` 返回契约变更**：≤0.2.1 返回同步 disposer（`() => void`）；
+     *    alpha.2 起返回 `Promise<ProjectionHandle<S>>`，契约明确要求
+     *    *Callers must await registration before publishing consumers*。⚠️ alpha.2 实际返回的是
+     *    `Object.assign(dispose, { then, catch, finally, [Symbol.toStringTag]: 'Promise' })`
+     *    ——**可调用且是 thenable**，所以形状判定必须 thenable 优先，否则会命中兜底 disposer
+     *    并静默丢掉 await（`dsh-session-projection/lib/index.js:80-109`）。落点：
+     *    `src/projection-registration.ts`（投影注册唯一的 `as never` 边界 + 形状判定）与
+     *    `src/index.ts` 的异步 effect body（cordis 4.0.1 的 `Effect` 接受
+     *    `Promise<Disposable>`，在 fiber 激活前 await 它）。老代次走同一入口，不新增版本分支。
+     *
+     * 3. `registry.stateOf(session, key)` 标 `@deprecated`（改读 awaited 注册拿到的
+     *    `handle.stateOf(session)`）：本插件**未直接调用**过它（`grep -n stateOf src/` 无命中），
+     *    知悉即可，不改调用点。
+     *
+     * 4. **`wire.summary?: boolean` / `SessionProjectionSummaryExcluded<T>` 本次不采纳**
+     *    （有意识的「不做」，不是漏了）。理由两条：
+     *    - 类型层跨代不可表达：`SessionProjectionSummaryExcluded<T>` 只在 alpha.2 才有，
+     *      把 map 条目包成它会让更早的 8 个代次（表内共 9 条）在对端 tsc 上全部报
+     *      「找不到名字」——TypeScript 没有「某代次没有就退化成 `T`」的写法，除非在
+     *      `upstream-shims.ts` 另造一个 `LookupSummaryExcluded<T>` 条件类型；而**运行时**
+     *      `summary:false` 又会被老代次当未知字段忽略，两边语义不对等。
+     *    - 现状即目标状态：alpha.2 的擦除层是 `wire.summary !== false`
+     *      （`lib/index.js:121`），本插件不写该字段 ⇒ 等价 `true`，wire 形状与本代之前完全一致。
+     *      真要排除 summary 再单开 issue，连老代次语义一起处理。
+     *
+     * 5. Session 读日志的形状**未变**：`ownEvents(): readonly SessionEvent[]` 与
+     *    `inheritedEventCount: SessionLogOffset` 都在（alpha.2 `dsh-session` 类型声明实测），
+     *    故 `sessionApi` 仍是 `own-events`，`readOwnEvents` / `readInheritedEventCount` 原样可用。
+     *
+     * 本次入表**不移动 devDependencies 基线**：`sync-peer-matrix` 只在「值缺失或仍是范围串」
+     * 时才把 dev 改写成最新代次，而这里已是具体版本（0.2.1-rc.2），保持稳定的本地编译基线，
+     * alpha 不进 dev。所以新增这一代只改 `engines.dsh` 与 8 枚 kernel-scoped peer 的范围串。
+     *
+     * 实证：见 docs/verification.md（四面 mount/function/type/gate 的结论由 verify-kernels 回填）。
+     */
+    readonly id: "0.2.2-alpha.2";
     readonly sessionApi: "own-events";
 }];
 /**
@@ -207,7 +261,9 @@ export declare function peerMatrixEntries(): ReadonlyArray<{
  * 那条「逐代留痕，不借用更早下界」）——那是**证据台账**。engines 侧要解决的是另一个
  * 问题：node-semver **不把预发布算进普通范围**，所以 `>=0.1.2-rc.1 <0.2.0-0` 这种写法
  * 会把别的 tuple 上的预发布也放进来（实测 `0.1.3-alpha.2`、`0.1.6-alpha.1`、
- * `0.1.7-alpha.1`、`0.2.2-alpha.2`、`0.1.5-rc.1/rc.2` 全判「支持」，而这几个我们一次都没跑过）。
+ * `0.1.7-alpha.1`、`0.2.2-alpha.2`、`0.1.5-rc.1/rc.2` 全判「支持」，而这些当时一次都没跑过；
+ * 其中 `0.2.2-alpha.2` 已在 issue #118 里四面跑通并正式入表，故现在**确实**该被支持——
+ * 这句留的是当时的判定历史，别拿它当「alpha.2 该被拦住」的依据）。
  * 逐代 `^id` 拼进 engines 同样不行：`^0.2.1-rc.2` 本身就吃下整个 0.2.1 tuple。
  * 所以这里按 tuple 收口：**下界 = 该 tuple 里最早已验证的那一代，上界 = 下一个 patch 的 `-0`**。
  *

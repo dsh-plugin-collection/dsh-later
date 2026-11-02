@@ -65,6 +65,7 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
 |---|---|---|---|---|
 | 2026-10-26 | `main@28ca1dc` | 0.1.2-rc.1 / 0.1.5-rc.3 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-rc.2 | **6/6 通过**：按钮在、dock 各 1 行（正文带代次）、面板打开、控制台 0 条真实错误 | [`docs/media/ui-matrix/manifest.json`](../media/ui-matrix/manifest.json) + `matrix.png` + 每代 `-dock.png` |
 | 2026-10-28 | `test/ui-face@d4a7895`（插件 1.9.0） | 同上六代 | **结构性三面 6/6 通过**（按钮在、dock 各 1 行、面板打开、`consoleErrors`=0）；**但侧栏 badge 自 0.1.7 起四代全 FAIL**，且本轮新加的漂移自检**一条都没告**（假阴性，见 §7）。退出码按仓内约定应为 **1（有红）**，不是全绿 | [`docs/media/ui-matrix-2026-10-28-realgui/`](../media/ui-matrix-2026-10-28-realgui/README.md)：`matrix.json` + `badge-probe.json` + 每代 PASS/FAIL 图 |
+| 2026-10-30 | `test/118-kernel-022@ffb322d`（插件 1.10.0 + issue #118） | `0.2.2-alpha.2` | **1/1 通过**：按钮=Y · dock=1 行（正文含代次） · 面板=Y · badge=1 · `consoleErrors`=0 · 警告=0，官方入口 `npm run verify:ui -- --versions 0.2.2-alpha.2` exit **0**。**但这条绿是在修掉 §10 的副本缺陷之后才拿到的**：修之前同一代是「按钮=N dock=0 面板=N」，看着像插件坏了 | [`docs/media/ui-matrix-2026-10-30-realgui/0.2.2-alpha.2-dock.png`](../media/ui-matrix-2026-10-30-realgui/README.md) + `.verify/ui-matrix/matrix.json`（gitignore，可复跑） |
 
 > 更早一次（2026-10-26 上午）的临时脚本只跑到 **5/6**：0.1.5 的 GUI 起不来（就是上面第 2 条
 > 模块回退清单那个 `ENOENT`，加上启动器形态那条）。那次结论没有进仓，因为脚本本身不可复跑；
@@ -241,3 +242,49 @@ PASS/FAIL 成对留在 `.verify/ui-matrix/`；人工核对过的两帧为 `0.1.7
 进度条 CSS 相位、暂停/恢复视觉冻结、插话命令往返、`prefers-reduced-motion`、焦点与键盘导航、
 en locale、侧栏收起/多工作区折叠）本轮**一条都没测**；设置卡 `loading→ready` 翻转路径仍未被
 真 GUI 触发过（首帧即 ready），因此 §7 那条"运行时未复现"的定性不变。
+
+## 10. 2026-10-30 修复：插件副本缺 `package.json`（宿主解析不到 bundle）
+
+**现象**：`npm run verify:ui -- --versions 0.2.2-alpha.2` 走**官方入口**时 exit 1，
+量到「按钮=N、dock=0、面板=N」。看着像插件在这一代坏了，实际插件根本没被加载 ——
+隔离实例的日志里是：
+
+```
+dsh: skipping profile bundle "dsh-later": cannot resolve profile bundle
+```
+
+**根因在矩阵自己身上**：`scripts/ui-matrix/instance.mjs` 的副本清单在 `9b84101`
+（2026-10-27 18:54，「隔离实例的副本跟着 `files` 白名单走」）里改成了
+`package.json#files` 驱动的循环，而 `files` **不含 `package.json` 自身**（npm 发布时总自动
+带上它，所以没人需要列）。副本缺 `package.json` → 宿主的 `dsh-app-boot` 解析不到该
+profile bundle → 整插件 skip。三代的 `dsh-app-boot` 里都有这条 `cannot resolve profile
+bundle` 路径（0.1.2-rc.1 / 0.2.1-rc.4 / 0.2.2-alpha.2 各 grep 到 1 处），所以这不是某一代
+的问题，是**清单缺项**的问题。
+
+**为什么之前的结论不用翻案**：上一轮全量 UI（2026-10-28，基线 `test/ui-face@d4a7895`）的
+代码树**不含** `9b84101`（`git merge-base --is-ancestor 9b84101 d4a7895` 为假），用的还是
+「手写四条清单」那版，`package.json` 在副本里；那轮 8/8 绿是**真实加载**的结果。
+也就是说缺陷在 10-27 深夜就被引入，只是到本轮才有一次 UI 运行落在含它的树上 ——
+本轮新发现的缺陷，不是旧结论要翻案。
+
+**修法**：副本清单变成「**无条件** `package.json` + `files` 白名单 + 两个运行期目录」。
+理由写进代码注释：`files` 只描述「发布物有哪些」，不描述「宿主解析 bundle 需要什么」；
+后者是不可省略的运行期前提，不该被白名单顺手挡掉。
+判据补在 `tests/ui-matrix-harness.test.mjs` 的既有用例里：断言 `package.json` 必须进副本，
+并写明它**不是** `files` 成员却必须复制。
+
+**复验**（同日，官方入口，未绕过）：
+
+```
+PLAYWRIGHT_MODULE=<…>/playwright npm run verify:ui -- --versions 0.2.2-alpha.2
+### 0.2.2-alpha.2 … HTTP 401 按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0
+汇总：通过 1 / 不通过 0
+exit 0
+```
+
+（`HTTP 401` 是正常输出，见 §9.1；`badge=1` 与 `matched=15 / badgeable=1` 说明侧栏注入也在。）
+截图入库：[`docs/media/ui-matrix-2026-10-30-realgui/`](../media/ui-matrix-2026-10-30-realgui/README.md)。
+
+**口径变化一句话**：矩阵口径自本轮起包含 `package.json`，此前各代结果**不受影响**
+（缺陷只在缺少它时导致宿主 skip；之前没有一代因此被误判为绿 —— 这是本轮新发现的缺陷，
+不是旧结论要翻案）。

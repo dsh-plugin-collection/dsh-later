@@ -362,6 +362,114 @@
     这也补上了 #54 交接里"0.2.1 内核下的最终 typecheck 未验"那一项 —— 该错误码是在真实 0.2.1
     类型面下编译通过的，不是在 0.2.0 上"看起来没问题"。
 
+### 0.2.2-alpha.2：投影注册契约变更（issue #118）
+
+这一代对本插件是**两条契约变更**：一条在类型层"静默失效"，一条在运行时要求 await 时序。
+装配面本身没坏（见下面的对照组），所以改法的形状不是"修一个炸掉的 bug"。
+
+代次表因此从 **8 条变 9 条**。本文档上面各处写的「六代」是 **1.8.0 那轮基线实际跑过的数量**，
+属于历史记录，不随本轮改写；本节给的是这一代的新数字。
+
+| 变更 | `0.2.2-alpha.2` 的形状 | 本仓落点 |
+|---|---|---|
+| `SessionProjectionStateMap` 移除 | 类型包里已无该接口（`grep -c SessionProjectionStateMap lib/types/*.d.ts` 两个文件都是 0）；状态类型改由单元自身的 `stateSchema` 泛型承载 | `src/domain.ts`（删掉死的 `declare module` StateMap 块，**保留**同块里的 `SessionProjectionMap`）、`src/upstream-compat.ts` 的代次注释 |
+| `register()` 返回 `Promise<ProjectionHandle<S>>` | 附一条时序要求 *Callers must await registration before publishing consumers*；handle 提供 `stateOf` / `readerFor` / `dispose` | `src/projection-registration.ts`（唯一的跨代收敛点，含 `as never` 边界转换）+ `src/index.ts`（注册包进 async `ctx.effect`） |
+
+**先别把它读成"修编译错误"。** 类型包里 `SessionProjectionStateMap` 确实被删了，但 TypeScript 的
+module augmentation 允许**新增**一个不存在的 interface，所以 `tsc` 不报错 —— 它是**静默无效**
+（一段没人读的死声明），而不是编译失败。静默无效比报错更危险，这也正是 issue 前提里
+"类型层破坏 tsc"一条实测不成立的原因。
+
+**`register()` 的返回形状是"可调用 + thenable"，而且**两代都是**。** `0.2.2-alpha.2` 的实现返回
+`Object.assign(dispose, { then, catch, finally, [Symbol.toStringTag]: 'Promise' })`
+（`~/dsh-versions/0.2.2-alpha.2/node_modules/@deepseek-ai/dsh-session-projection/lib/index.js:80-109`），
+即**不 await 也照样 `typeof === 'function'`**。老代次也不是裸函数：`0.2.1-rc.4` 的 `register()`
+直接 `return this.ctx.effect(...)`（`…/dsh-session-projection/lib/index.js:68`），而 cordis 的 effect
+返回带 `.then` 的 AsyncDisposable（`cordis/lib/index.js:1239/1274`）。所以收敛点必须**两步判**：
+
+1. **thenable 优先** —— 先看 `typeof value?.then === 'function'` 并 `await`。先判函数会静默走
+   老分支、跳过 await 且**不报错**（上游同时把 callable 形态标了 deprecated，方向一致）。
+2. **按 await 的解析值分岔** —— 两代是"同一种形状、两种解析值"，这一步不能省：
+
+| 代次 | `typeof`（await 前） | thenable | **await 解析值** | 正确处置 |
+|---|---|---|---|---|
+| ≤0.2.1（代次表里其余 8 条） | `function` | 是 | **函数**（disposer 本身），`.dispose` 为 `undefined` | 当老代次 disposer 用 |
+| `0.2.2-alpha.2` | `function` | 是 | **对象** `{dispose, stateOf, readerFor}` | 用 `handle.dispose()` |
+
+只写第一步（"thenable 就当 handle"）会在**全部老代次**上静默回归：解析出的函数被当成"缺 dispose
+的 handle"，于是每次加载 warn 一次、且**注册永不被释放**（泄漏一个 registration）。这个错在装配面
+看不出来，只有 `tests/projection-registration.test.mjs` 里"thenable 解析为函数（rc.2/rc.4 真实形状）"
+那条能判红 —— 变异验证：把实现换成"只判 thenable、不判解析值"后，9 条里只红这一条。
+
+**`stateOf` 已 `@deprecated`。** 这一代起 `registry.stateOf(session, key)` 每个 key 首次读会 warn 一次，
+推荐改用 awaited registration 的 `handle.stateOf(session)`（或所属领域服务）；本插件没有直接调用
+（`grep stateOf src/` 无命中），知悉即可。
+
+**`wire.summary` / `SessionProjectionSummaryExcluded<T>` 本次不采纳。** 佐证不是"它是可选参数所以不做"：
+这一代的擦除层在 `wire.summary !== false` 时**默认按 true** 落进 registration
+（`lib/index.js` 的 `acquire()`：`summary: wire.summary !== false`），也就是本插件现状（根本不声明
+`summary`）在该代已经是"参与摘要"的语义，运行时行为不变。而把 map 条目包成
+`SessionProjectionSummaryExcluded<T>` 会让其余老代次的跨代 tsc 报"找不到名字"（类型层没有
+"某代次没有就退化成 T"的写法，除非在 `upstream-shims.ts` 里造条件类型），而运行时 `summary:false`
+又会被老代次当未知字段忽略 —— 两边语义不对等。这是一个有意识的"不做"，记在这里免得后人以为漏了。
+
+#### 对照组：只放开声明面就 GREEN（2026-10-30 实测）
+
+只把 `engines.dsh` 与 8 个 kernel-scoped peer **临时**各加一条 `>=0.2.2-alpha.2 <0.2.3-0`，
+**不改任何代码**，同一个脚本立刻变成：
+
+```
+### 0.2.2-alpha.2 … GREEN
+    内核=0.2.2-alpha.2 · 同源=same · 投递 spliced=1 dispatch=Y · at 形状 5/5 · gate 本代=pass 最新=pass
+```
+
+（合并前的对照组在 `/tmp/repro-118c` 跑过、package.json 已还原。那是一次性临时目录，复查不要
+指望它还在 —— 用本节的复跑命令重新生成 `.verify/` 产物。）结论要这么读：
+
+- 本 issue 在装配/投递面上**不是"坏了"，而是"被门禁关在门外"** —— 真正的阻断只有声明面
+  （`engines.dsh` 上界原为 `<0.2.2-0`，按 semver §11 排除 `alpha.2`；0.2.1 起内核**单独按
+  `engines` 判定**，peer 不再兜底）；
+- 因此 `register()` 的 await 改动是**契约对齐**，不是"修一个已经炸掉的 bug"；
+- 而且**不 await 在这一代上实测也没有可观测差异**：注册表写入发生在 `acquire()` 的**同步段**
+  （`dsh-session-projection/lib/index.js:127-151`，由 `ctx.effect` 同步执行），唯一的 `await` 在
+  :153，其后只剩 `fiber.assertActive()` 与 handle 构造；消费者读面（`summaryKeys()` /
+  `snapshot()`）全是同步读注册表，注册过程中**没有任何"发布消费方"点**。同 turn 探针实测：
+  `register()` 返回后立刻 `summaryKeys()` 就已包含 `userSchedules`；端到端连「只改 engines、
+  lib 仍是不 await 的 HEAD 代码」也是 mount+function GREEN、投递 5/5、首读即见。
+- 所以本文档与 CHANGELOG、PR 描述里**都不许**写"不 await 会读不到投影 / 会掉 dock" —— 那是
+  虚假因果，一句"你复现了吗"就能打穿。这条改动真正的价值是：照上游契约做（callable 形态已
+  deprecated），上门取掉兜底时不被动；`tests/projection-registration.test.mjs` 钉住的是
+  **"我们真的在 await"** 这个实现事实，而不是"修了一个可观测 bug"。
+
+#### 实测结论
+
+2026-10-30 测，插件基线 `ffb322d`，由 verify-kernels 在 `verify/118-integration` 上跑。原始产物：
+`.verify/task4-full/across-kernels-2026-10-30T09-34-49-655Z.json`（9 代次全量）与
+`.verify/task4-alpha2/across-kernels-2026-10-30T09-36-09-882Z.json`（`0.2.2-alpha.2` 单独一轮）。
+两者都在 gitignore 的 `.verify/` 下，**不存在于仓库**，复查请用本节末尾的命令重新生成。
+
+| 面 | 结论 |
+|---|---|
+| mount + function（9 代次，各自独立进程） | **9/9 GREEN**；`同源=same` 9/9、`投递 spliced=1 dispatch=Y`、`at 形状 5/5`；总退出码 **0**（单代 17–19s，9 代共 161s，全程 `--no-install`） |
+| type（9 代次，两个 tsconfig） | **9/9 绿、0 错误** |
+| gate（该代自己的 `evaluatePluginCompatibility`） | 7 代 **pass**；`0.1.2-rc.1` / `0.1.5-rc.3` 是**结构性未判定** —— 那两代的 `dsh-app-boot` 根本不导出该函数，**不是**插件被判过，不许记成绿 |
+| gate（最新语义） | **9/9 pass** |
+| UI（真 GUI，官方入口 `npm run verify:ui -- --versions 0.2.2-alpha.2`） | 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0，exit **0**；`0.2.2-alpha.2` 单独一轮同样 exit 0、GREEN。截图入库：[`docs/media/ui-matrix-2026-10-30-realgui/`](./media/ui-matrix-2026-10-30-realgui/README.md) |
+| 投影物化探针（本 issue 要求的判据，见 §1.0） | `summaryKeys()` 含 `userSchedules`；`snapshot().values.userSchedules` 存在（`schedules=0, asOfSeq=2`）；建一条 `after_seconds=2` 后 `schedules 0→1` 且含该 prompt（`asOfSeq=5`）；到点投递后回 0（`asOfSeq=10`）；显式 `snapshot(['userSchedules'])` 正常；`pluginWarns=[]` |
+| 全量单测 | **747 tests / 743 pass / 0 fail / 4 skipped**（71 文件）。4 条 skip 是 `dsh-group-status` 可选对端缺席的老 skip，与本轮无关 |
+
+复跑命令（逐条落 JSON 到 `.verify/`）：
+
+```
+node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install
+node scripts/verify-across-kernels.mjs --versions 0.2.2-alpha.2 --steps mount,function,type,gate --no-install
+PLAYWRIGHT_MODULE=<playwright 模块目录> npm run verify:ui -- --versions 0.2.2-alpha.2
+```
+
+**devDependencies 不动**（仍固定 `0.2.1-rc.2`）：alpha 不进本地编译基线，新代次靠 `--steps type`
+与真内核四面覆盖。`0.2.2-alpha.2` 在本仓算"支持"要**两侧声明**（`engines.dsh` + kernel-scoped
+peer 各追加 `>=0.2.2-alpha.2 <0.2.3-0`）**与**四面实测共同成立，缺一不算。
+
 ## 会话日志兼容：`session-scheduler/user-schedule`（#58，2026-10-20 定案）
 
 插件在 1.4.0 之前把「定时任务所有权」写进会话日志（自定义事件类型），之后改存 sidecar。

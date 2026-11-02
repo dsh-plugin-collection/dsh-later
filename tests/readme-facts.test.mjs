@@ -52,11 +52,17 @@ function matrixSection(text, heading) {
   return { section, cells: rows.slice(2).map((row) => row.split('|')[1] ?? '') };
 }
 
-/** 第一列里出现的全部 semver 串（`` `0.1.7-rc.1` / `0.1.7-rc.2` `` 这种并排写法会取到两个）。 */
+/**
+ * 第一列里出现的全部 semver 串（`` `0.1.7-rc.1` / `0.1.7-rc.2` `` 这种并排写法会取到两个）。
+ *
+ * 预发布标记写成整个族（`rc` / `alpha` / `beta`），不只 `rc`：代次表的 id 从 issue #118 起
+ * 含 `0.2.2-alpha.2`，正则只认 `-rc.N` 的话表格明明写对了，断言却会以「表里少了一代」
+ * 的**假红**形式失败 —— 那时最容易被误改成去动表格。
+ */
 function idsFromCells(cells) {
   const found = [];
   for (const cell of cells) {
-    for (const match of cell.matchAll(/`(\d+\.\d+\.\d+(?:-rc\.\d+)?)`/g)) found.push(match[1]);
+    for (const match of cell.matchAll(/`(\d+\.\d+\.\d+(?:-(?:rc|alpha|beta)\.\d+)?)`/g)) found.push(match[1]);
   }
   return found;
 }
