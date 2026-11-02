@@ -322,7 +322,9 @@ export declare function readInheritedEventCount(session: SessionLogSurface | Ses
  * fork / 子代理会话的 `inheritedEventCount > 0`，于是每次都走
  * `Object.freeze(log.slice(...))`——**每次调用都分配一份新数组**。任何「比较数组引用」
  * 的缓存判据在这类会话上恒不命中：缓存等于不存在，而且每次判定本身还要先拷一份全量
- * 日志。表内六代（0.1.2-rc.1 起）都同时有 `seq` 与 `inheritedEventCount`，实测一致。
+ * 日志。表内**各代**（`0.1.2-rc.1` 起，直到 `0.2.2-alpha.2`）都同时有 `seq` 与
+ * `inheritedEventCount`，实测一致。这里刻意**不写代数**：那个数字每入表一代就漂一次
+ * （issue #118 那轮从「六代」变成 9 条，注释里的旧数字当时就成了假现状）。
  *
  * `seq` 与 `inheritedEventCount` 都是 getter 级读取、零分配；日志 append-only，
  * 两者不变就不可能意味着内容变过——这比「引用没变」是**更强**的判据（引用比较只是
@@ -365,7 +367,7 @@ export declare function readFoldInput(session: SessionLogSurface | Session): {
 /**
  * 按**绝对 seq** 读单条事件（零分配，配合 {@link readLogCursor} 做增量扫描）。
  *
- * 表内六代都导出 `eventAt(seq)`，实测一致；它是内核推荐的面（`ownEvents()` 已被标
+ * 表内各代都导出 `eventAt(seq)`，实测一致；它是内核推荐的面（`ownEvents()` 已被标
  * `@deprecated`，理由正是「同步读整份日志」）。
  *
  * 回落面的索引口径要分清，否则会读错一条：

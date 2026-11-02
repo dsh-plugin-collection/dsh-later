@@ -9,7 +9,8 @@
  *  3. `3-panel`    — 点按钮展开的面板。
  *
  * 为什么用命令造数据而不是点面板表单：面板的快捷档会随"现在"漂移，而命令的 `+30m` 是相对量，
- * 六代跑下来行为一致；同时它验证的是**命令通道 + dock 投影**这条主链路。
+ * 历代跑下来行为一致（不写死代数：这个数字每入表一代就变一次）；同时它验证的是
+ * **命令通道 + dock 投影**这条主链路。
  *
  * @module scripts/ui-matrix/capture
  */
@@ -115,7 +116,7 @@ export async function captureUi({ port, outDir, version, prompt }) {
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(4500);
 
-    // 「预览版说明」遮罩会盖住整页，不关掉任何点击都点不到（六代都有，0.1.2 起）。
+    // 「预览版说明」遮罩会盖住整页，不关掉任何点击都点不到（已验证的各代都有，0.1.2 起）。
     await page.evaluate(() => {
       const again = [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '继续');
       again?.click();

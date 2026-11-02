@@ -155,7 +155,7 @@ export function createInstance({ version, versionsRoot, pluginDir, home, profile
   writeFileSync(join(profileDir, 'cordis.yml'), '[]\n');
   // hmr 必须**显式开启**：0.1.2 的 `watchUserPatches()` 在没有 hmr 服务时直接抛
   // "user patch-layer watching requires the Cordis HMR service"（实测两次，第一次是把它 disable 了）。
-  // 不写配置、只写 enabled，六代同样的语义；矩阵要的是"这一版长什么样"，不靠热重载。
+  // 不写配置、只写 enabled，各代同样的语义（代次表加到 9 条也没变）；矩阵要的是"这一版长什么样"，不靠热重载。
   writeFileSync(
     join(profileDir, 'cordis.patch.yml'),
     `# 由 scripts/ui-matrix/instance.mjs 生成（DSH ${version}）\n- id: hmr\n  disabled: false\n`,

@@ -65,21 +65,38 @@
 > `src/client/workspace-path-compat.ts`（fileMediaUrl）、`src/upstream-shims.ts`（宿主侧类型缺口），
 > 以及 0.1.2 运行期把文件附件降级成文本的说明。
 >
-> 新的**入表标准 = 装配/功能 + 跨代类型编译两面都过**；表里现存六代
+> 新的**入表标准 = 装配/功能 + 跨代类型编译两面都过**；表里**当时**六代
 > （`0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.2`）两面都已通过。
+> （这句是 1.8.0 前后的记录，数量保留不改；**现状是 9 条**，逐代结论见下文「跨内核代次」各节与
+> §0.2.2-alpha.2。）
 > `0.1.5` 列 rc.3 而非 rc.1：rc.1 的默认安装会 caret 混装 rc.3 组件、装配即失败（与本插件无关），
 > 用户实际拿到的就是统一 rc.3。
 
 
-- **单元/集成测试**：**183 个全绿**（2026-09-28 复核；host + client 双端构建通过，`tsc --noEmit` **0 错误**）。
-  此前记录的「typecheck 有预存依赖类型噪音」已随 `0.1.7` 适配一并消除 —— 噪音的真实后果见下文
+- **单元/集成测试（2026-11-02 复核，基线 `main@33c76b3`，取代此前的 183 与 620）**：
+  **747 条 / 747 passed / 0 failed / 0 skipped**（`npm test`，71 个文件），
+  `node scripts/typecheck-all.mjs` 两个 tsconfig 都通过，`npm run build` 幂等（重跑后 `lib/` 零脏改）。
+  ⚠️ **同一份代码在隔离 worktree 里报的是 743 passed / 4 skipped**，这不是回归：那 4 条是
+  `tests/peer-facet-integration.test.mjs` 的**真对端**用例，skip 条件是「逐级向上找不到
+  `dsh-group-status` 仓」。主仓 `dsh-plugins/dsh-later` 旁边就放着那个仓 → 真跑；
+  建在 `~/dsh-worktrees/<x>` 的 worktree 找不到 → skip。
+  **报测试数请连带说明在哪棵树上跑的**（issue #103 的落点就是这句没写清楚）。
+- **历史数量（保留原文，别当现状读）**：2026-09-28 复核 **183 个全绿**；2026-10-27 复核
+  **620 条 / 613 passed / 0 failed / 7 skipped**（基线 `main@4ef6af5`，含 `SKILL.md` provider 那 30 条；
+  那 7 条 skip 全在构建端到端用例，条件 `skip: !existsSync('<repo>/node_modules/esbuild')`，
+  在没装依赖的 worktree 里跑会跳，CI 装齐依赖时会跑）。
+  更早「typecheck 有预存依赖类型噪音」的记录已随 `0.1.7` 适配一并消除 —— 噪音的真实后果见下文
   「一个隐蔽的构建耦合」：**任何类型错误都会让 `build.mjs` 从 tsc 回退到 esbuild bundle**，
   而 bundle 会内联本地模块、产生双副本，进而改变运行时语义。故 typecheck 干净
   不只是代码整洁问题，**它是构建产物形态的前置条件**。
-- **单元/集成测试（2026-10-27 复核，取代上一句的 183）**：**620 条 / 613 passed / 0 failed / 7 skipped**（`node --test "tests/*.test.mjs"`，基线 `main@4ef6af5`，含 `SKILL.md` provider 那 30 条），`node scripts/typecheck-all.mjs` 两个 tsconfig 都通过。
-  7 条 skip 全在构建端到端用例，条件是 `skip: !existsSync('<repo>/node_modules/esbuild')`：本轮在没装依赖的 worktree 里跑，
-  所以它们跳过，CI 装齐依赖时会跑。skip 的成因与本轮改动无关，但**如实记在这里**，免得日后被读成"已通过"。
-- **独立实例线上 E2E（Playwright 无头真点 UI）**：按钮渲染→开面板→自定义时间→确认→芯片出现→任务列表可见→**到期真触发（≈计划 75s，实测 72s）→对话出现 `user/message`（source=plugin:later）**；磁盘日志逐条确认 create→owned→dispatch→followup 全持久化、无重复触发。
+- **独立实例线上 E2E（Playwright 无头真点 UI）**（**2026-09-08 的记录，不是现状态口径**；
+  「≈计划 75s，实测 72s」是那一轮的单次观测，别当 SLA 读）：按钮渲染→开面板→自定义时间→确认→
+  芯片出现→任务列表可见→到期真触发→对话出现 `user/message`。
+  ⚠️ 那句里的 `source=plugin:later` **已随 issue #75 过时**：`kind:'plugin'` 从 `0.1.7-rc.1` 起被
+  v4 准入拒绝，注入消息一律用 `kind:'schedule'`，更早的代次才是 `plugin` —— 判定在
+  `src/schedule-compat.ts`，逐代结论见下文「已解决（2026-10-23，issue #75）」。
+  要拿当前的端到端证据，跑 `npm run verify:kernels`（装配 + 真投递事件形状）与
+  `npm run verify:ui`（真 GUI），这两条命令的产物才是活的。
 - **内核代次兼容（2026-09-07 实测）**：`0.1.1-rc.2` 与 `0.1.2-rc.1` 两代均通过 host 入口链接（运行时符号 17/17 存在）、headless 真实启动（停在 `MISSING_CREDENTIAL`，在插件加载之后）与 web 真实启动（`lib/client.js` HTTP 200）。跨代做法有三处：
   1. **peer 枚举完整覆盖**：除了 `dsh-schedule / dsh-session / dsh-session-projection`，把宿主直接 import 的 `@deepseek-ai/{cordis,dsh-agent,dsh-commands,dsh-llm,dsh-settings,dsh-tools,schemastery}` 全部列入 peer + dev——`0.1.1-rc.2` 经 `dsh-schedule` 传递提升到顶层 `node_modules/@deepseek-ai/` 时这些包是可达的；`0.1.2-rc.1` 的 hoisting 策略变化把它们留在 `.pnpm/`，**未声明 peer 的会运行时报 `ERR_MODULE_NOT_FOUND`**（已实测 `lib/runtime.js` import `@deepseek-ai/dsh-llm` 在 0.1.2 直接崩）。
   2. **设置命名空间**写作 `'dsh-later' as SettingsNamespace`（`settingsNamespace()` helper 在 `0.1.2` 已删除，运行时导入会让整个模块链接失败）。
@@ -456,7 +473,7 @@ module augmentation 允许**新增**一个不存在的 interface，所以 `tsc` 
 | gate（最新语义） | **9/9 pass** |
 | UI（真 GUI，官方入口 `npm run verify:ui -- --versions 0.2.2-alpha.2`） | 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0，exit **0**；`0.2.2-alpha.2` 单独一轮同样 exit 0、GREEN。截图入库：[`docs/media/ui-matrix-2026-10-30-realgui/`](./media/ui-matrix-2026-10-30-realgui/README.md) |
 | 投影物化探针（本 issue 要求的判据，见 §1.0） | `summaryKeys()` 含 `userSchedules`；`snapshot().values.userSchedules` 存在（`schedules=0, asOfSeq=2`）；建一条 `after_seconds=2` 后 `schedules 0→1` 且含该 prompt（`asOfSeq=5`）；到点投递后回 0（`asOfSeq=10`）；显式 `snapshot(['userSchedules'])` 正常；`pluginWarns=[]` |
-| 全量单测 | **747 tests / 743 pass / 0 fail / 4 skipped**（71 文件）。4 条 skip 是 `dsh-group-status` 可选对端缺席的老 skip，与本轮无关 |
+| 全量单测 | **747 tests / 743 pass / 0 fail / 4 skipped**（71 文件）。4 条 skip 是 `tests/peer-facet-integration.test.mjs` 的真对端用例：它的 skip 条件是「逐级向上找不到 `dsh-group-status` 仓」，这轮跑在 `~/dsh-worktrees/` 的隔离树上所以跳；同一份代码在主仓 `dsh-plugins/` 下跑是 **747/747/0/0**（那个仓就在旁边） |
 
 复跑命令（逐条落 JSON 到 `.verify/`）：
 
@@ -469,6 +486,28 @@ PLAYWRIGHT_MODULE=<playwright 模块目录> npm run verify:ui -- --versions 0.2.
 **devDependencies 不动**（仍固定 `0.2.1-rc.2`）：alpha 不进本地编译基线，新代次靠 `--steps type`
 与真内核四面覆盖。`0.2.2-alpha.2` 在本仓算"支持"要**两侧声明**（`engines.dsh` + kernel-scoped
 peer 各追加 `>=0.2.2-alpha.2 <0.2.3-0`）**与**四面实测共同成立，缺一不算。
+
+#### 发布前的老代次回归复核（2026-11-02，基线 `main@33c76b3`）
+
+上面那张表跑在合并**前**的分支上，而这次改动动的是**所有代次共用**的注册路径，所以发布前在
+合并后的 `main` 上又补了一轮，专门回答「会不会把老代次弄坏」：
+
+| 判据 | 结果 |
+|---|---|
+| 声明面 | `git diff 2043c81..33c76b3 -- package.json`：**8 枚 peer 与 `engines.dsh` 的旧条款逐字未变**，只在末尾各追加一条 `>=0.2.2-alpha.2 <0.2.3-0`。老内核评估自己那个版本时的判定与发布前一致 |
+| 框架假设 | 异步 effect body 需要 cordis await `Promise<Disposable>`。九棵版本树里的 cordis 是 **4.0.2 ~ 4.0.6-alpha.1**（peer 声明 `^4.0.1`，全代次同一 major）；最低那版 4.0.2 的产物里 `wrapper.then`（`lib/index.js:1274`）与 `_execute` 的 await（`:1355`）都在 |
+| 投影物化探针 × **5 代** | `0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` / `0.2.1-rc.2` / `0.2.2-alpha.2`：`snapshot().values.userSchedules` 全存在、建一条后 `schedules 0→1` 且 nonce 命中、**`pluginWarns` 全空**。最后那列是关键——两步判若在老代次取错分支（把 await 出的 disposer 函数当「缺 dispose 的 handle」），必然在这里冒一条 warn |
+| UI 面官方入口 × **3 个老代次** | `0.1.2-rc.1` / `0.1.7-rc.2` / `0.2.1-rc.2`：按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0，汇总 exit **0**（补上「上一轮六代 UI 矩阵跑在本次改动之前」这个缺口） |
+| `npm test` 在主仓 | **747 / 747 passed / 0 failed / 0 skipped**；隔离 worktree 里同一份代码是 743 + 4 skipped（真对端用例找不到 `dsh-group-status` 仓才跳，见上文「验证状态」） |
+
+**一处行为变化，方向是改善**：老代次过去把 `register()` 的返回值丢掉，而那条注册 effect 挂在
+`sessionProjections` **服务自己的** context 上，插件卸载/重载时不释放；现在由我们的子 fiber 持有，
+卸载即释放。重复注册在老代次本来就容忍（只有 `stateVersion` 不一致才抛），所以这不是修崩溃，
+是修滞留。
+
+**仍未覆盖，别读成已覆盖**：`0.2.2` 段只验了 `alpha.2`（range 语义会连带放行同段更晚的 rc 与
+`0.2.2` 正式版，那是既有契约，不是本次验过的结论）；UI 面本轮只补跑 3 个老代次，
+`0.1.5-rc.3` / `0.1.7-rc.1` / `0.2.0-rc.2` / `0.2.1-rc.3` / `rc.4` 的 UI 结论仍是 10-28 那轮（改动前）。
 
 ## 会话日志兼容：`session-scheduler/user-schedule`（#58，2026-10-20 定案）
 
