@@ -8,13 +8,17 @@
  * 不含参数的通道，于是表现为「带参不执行、空参报『缺少 JSON 载荷。』」。
  * `/schedule`、`/later` 声明了 `input`，所以一直是好的——七条 dock 命令漏了。
  *
- * 本文件钉三件事：
+ * 本文件钉四件事：
  *  1. 工厂产出的七条 `user-schedule-*` 定义都带 `input.hint`（认领开关）；
  *  2. `coercePayload` 四种输入的行为（空 / 合法 JSON 对象 / 裸 schedule id / 坏 JSON）；
  *  3. `-list` 不引入任何载荷要求：它的 hint 明说「无需载荷」，且 handler 对
  *     空参数与带参数都不报错（实现照旧完全忽略 rawInput，与修复前一致）。
  *     ——之所以仍给它 `input`，是为了让 `/user-schedule-list 随便什么` 这一行
  *     也被命令认领而不是发给模型；这是认领面的修复，不是载荷语义的改动。
+ *  4. 已知约束（不是 bug）：GUI 手敲 `-list` 现在要**两次**回车——第一次认领、
+ *     第二次执行。内核的 `CommandInputDescriptor` 没有「参数可选」这一面，声明了
+ *     `input` 的命令一律是这个顺序；本仓不能改，只能由 hint 文案对用户明说。
+ *     判据见 `3b` 段：handler 单次调用即出结果 + hint 里写着两次回车。
  *
  * 另外补一条端到端：经 `-create` 建一条，再用**裸 id** 调 `-pause`，验证容错
  * 真的接进了 handler（不只是纯函数单测）。
@@ -136,6 +140,52 @@ test('#10 -list：hint 声明无需载荷，空参数与带参数都不报错（
   const withArgs = await list.handler(invocation('随便写点什么'));
   assert.equal(withArgs.kind, 'success', '-list 完全忽略 rawInput，不解析载荷');
   assert.deepEqual(JSON.parse(withArgs.text), []);
+});
+
+// ── 3b. 已知约束：GUI 侧手敲 -list 需要两次回车 ──────────────────────────────
+
+/**
+ * 这不是 bug，本仓也修不掉，钉成已知约束：
+ *
+ * 内核 `CommandInputDescriptor`（`dsh-commands/lib/types/types.d.ts:20-31`）只有
+ * `hint` 与 `attachments` 两个字段，**没有「参数可选」的声明面**；而客户端命令机
+ * `matchEnter()` 的顺序是「先查只适用于裸命令的分支 → `if (desc.input !== void 0)
+ * return { claim: … }` → 只有既没声明 input 又是裸命令才走 detached 执行」。
+ * 结论：**凡声明了 input 的命令，裸回车一律是「第一次回车认领、第二次回车执行」**，
+ * `/schedule` 与 `/later` 一直如此。`-list` 拿到 input 是这条取舍的代价（修复前一次
+ * 回车就出结果）；不收 input 的代价更大——手敲带参整行回给模型，正是 issue #10。
+ *
+ * 所以：handler 侧一次调用就必须出结果（下面第一条断言），两次回车纯属认领顺序，
+ * 由 hint 文案对用户明说（第二条断言）。
+ */
+test('#10 已知约束：-list 的 handler 一次调用即出结果，GUI 侧需两次回车归因于内核认领顺序', async () => {
+  freshOwnershipDir();
+  const list = defOf('user-schedule-list');
+
+  // handler 层：一次调用 = 一次结果，没有「先认领」这一步（本仓能控的只有这里）。
+  const once = await list.handler({
+    commandId: 'cmd-list-once',
+    agent: fakeAgent(new FakeSession()),
+    rawInput: '',
+    signal: new AbortController().signal,
+  });
+  assert.equal(once.kind, 'success', '单次调用即出结果：两次回车不是 handler 需要被多喂一次');
+  assert.deepEqual(JSON.parse(once.text), []);
+
+  // 定义层：文案必须把两次回车说出来，而不是让用户以为命令没响应。
+  assert.match(list.input.hint, /无需载荷/, '-list 不引入载荷要求');
+  assert.match(
+    list.input.hint,
+    /回车一次.{0,3}认领.{0,3}再回车一次执行/,
+    '-list 的 hint 要明说认领 + 执行两次回车（内核约束，用户看得见）',
+  );
+
+  // 七条一视同仁：不存在「只有 -list 需要两次回车」的特殊性，别的 input 命令同样是
+  // 认领 + 执行两段式——把这条写出来，防止后来者以为可以靠 hint 绕过。
+  for (const name of ['schedule', 'later']) {
+    const def = defs().find((d) => d.name === name);
+    assert.ok(def?.input?.hint, `${name} 同样声明了 input，裸回车也是两次（认领 + 执行）`);
+  }
 });
 
 // ── 4. 端到端：裸 id 真接进了 handler ───────────────────────────────────────

@@ -956,7 +956,17 @@ export function userScheduleCommands(
     name: `${PREFIX}-list`,
     description: t.cmdListDesc,
     input: {
-      hint: '无需载荷，直接回车即可（参数一律忽略）',
+      // 内核约束（不是本仓的选择）：`CommandInputDescriptor` 只有 `hint` 与
+      // `attachments` 两面（dsh-commands/lib/types/types.d.ts:20-31），**没有
+      // 「参数可选」的声明面**；`matchEnter()` 的顺序是「先查 bare 专属分支 →
+      // `if (desc.input !== void 0) return { claim }` → 只有既无 input 又 bare
+      // 才 detached 执行」。于是凡声明了 input 的命令，裸回车必然「第一次认领、
+      // 第二次才执行」，`/schedule`、`/later` 一直如此。
+      //
+      // 对 `-list` 这是净代价（原来裸回车一次出结果）。收窄 input 能让它回到一次
+      // 回车，但代价是手敲 `/user-schedule-list {}` 整行又发给模型——那是 issue #10
+      // 的正主，不能为一次回车把它换回来。权衡后的取舍，所以文案里把两次回车直说。
+      hint: '无需载荷。回车一次认领命令、再回车一次执行（内核的 input 命令都这样）',
     },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {

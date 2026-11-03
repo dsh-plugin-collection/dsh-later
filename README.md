@@ -94,6 +94,8 @@
 
 dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-list` `-delete` `-edit` `-pause` `-resume` `-steer-now` 这几条命令（参数是一段 JSON），手动敲也能用；只是它们按"被点"设计，不面向手打。手敲时**需要带载荷**：除 `-list`（无需参数，参数一律忽略）外都要跟一段 JSON，例如 `/user-schedule-delete {"id":"schedule-…"}`；`-delete` / `-pause` / `-resume` / `-steer-now` 也接受裸 id，`/user-schedule-pause schedule-…` 与 `{"id":"schedule-…"}` 等价。
 
+手敲这些命令（连同 `/schedule`、`/later`）都是**两次回车**：第一次回车把整行认领成命令，第二次回车才执行。这是内核「带参数的命令」的统一顺序，不是本插件的额外步骤——内核的命令入参描述里没有「参数可选」这一面，所以一次回车就把整行交出去的话，带参手敲会当成普通聊天消息发给模型。副作用是 `/user-schedule-list` 从一次回车变成两次：点按钮和面板刷新不受影响，只有手敲这条会觉得多按一下。
+
 ### 带图片 / 文件
 
 `/later` 可以带附件：先在输入框贴图或拖文件，再敲 `/later +10m 看下这张图` 回车。到点会**连同附件**以你的身份发出，消息形状和你手动发「文字 + 图」完全一致。
