@@ -7,8 +7,20 @@
  *    用其导出的 `decodeScheduleChange` 解码；
  *  - `session-scheduler/user-schedule`：本插件自有的所有权记录（哪种来源）。
  *
- * fork 隔离：`session/end-seed` 标记派生会话的耐久边界。投影在遇到该事件时
- * 重置自身状态（清空 owned/active），因此子会话不继承父会话的提醒（AC-07）。
+ * 「哪些事件属于本会话」按 **seq 切点**判，不按 `session/end-seed` 事件判。
+ * 宿主把**整份**日志（含继承前缀）从 seq 0 折进本单元，并在
+ * `init(header, inheritedEventCount)` 的第二参数给出前缀长度——那个长度就是这里的
+ * `seedSeq`，`seq < seedSeq` 的事件一律不进状态，因此派生会话不继承父会话的提醒
+ * （AC-07）。投递通道 `foldUserState`（`src/user-tools.ts` → `readFoldInput`）吃的
+ * 是**同一个数字**，两条通道对「本会话的历史」的口径由此一致。
+ *
+ * 为什么不能拿 `session/end-seed` 当边界（issue #11 的缺陷本体）：内核**每次冷恢复
+ * 会话**都会在日志尾部补一条 `session/end-seed {}`（`dsh-session/lib/index.js:1428`，
+ * 0.1.2-rc.1 是 `:1322`，措辞略异但同样只发 `{}`）——它标记的是「本会话自己历史的
+ * 重放结束」，不是归属边界。旧实现见该事件即清空 active，于是投影被抹空而投递通道
+ * 照常工作：提醒到点照发，dock 倒计时条与侧栏却是空的，用户看不见也就取消不掉。
+ * 也不能改按 `data.inherited === true` 分派：`0.1.2-rc.1` 的 fork 边界也只发 `{}`
+ * （那代根本没有 `inherited` 这个字段），按 data 形状判会把那一代的 fork 隔离弄坏。
  *
  * 注意 `apply` 为增量 fold：无关事件必须返回同一状态引用，否则会误触发推送。
  * @module dsh-later/projection
@@ -216,7 +228,11 @@ export const userSchedulesStateSchema = z.object({
   owned: z.array(z.string()),
   /** 当前活动记录（保持首现顺序，view 侧再排序）。 */
   active: z.array(scheduleRecordStateSchema),
-  /** 已见 `session/end-seed` 的 seq；更早的继承前缀一律忽略。 */
+  /**
+   * 继承前缀切点（seq）：由 `init` 的第二参数 `inheritedEventCount` 带入，
+   * `seq < seedSeq` 的事件属于祖先会话，一律不进状态。正常 `init` 只产出 `>= 0`；
+   * 负值只可能来自手搓的状态，含义是「切点未知」，一条事件都不忽略。
+   */
   seedSeq: z.number(),
   /** sidecar 暂停留档镜像（v4）。 */
   paused: z.array(pausedStateSchema).default([]),
@@ -247,7 +263,10 @@ export interface UserScheduleProjectionState {
   readonly owned: readonly string[];
   /** 当前活动记录（按 schedule/change 严格 fold）。 */
   readonly active: readonly StoredScheduleRecord[];
-  /** 已见 `session/end-seed` 的 seq；更早的继承前缀一律忽略。 */
+  /**
+   * 继承前缀切点（= `init` 第二参数 `inheritedEventCount`，与投递通道同源）：
+   * `seq < seedSeq` 的事件属于祖先会话，一条都不进状态。
+   */
   readonly seedSeq: number;
   /** sidecar 暂停留档镜像。 */
   readonly paused: readonly PausedEntry[];
@@ -258,9 +277,33 @@ function pausedFromSidecar(sessionId: string): readonly PausedEntry[] {
   return Object.values(allPaused(sessionId));
 }
 
-/** 初始状态：按会话 id 从所有权 sidecar 装载（进程重启后恢复 GUI 归属）。 */
+/**
+ * 继承前缀切点的规范化：只接受「非负安全整数」，其余（`undefined` / `null` /
+ * 非数字 / 负数）一律折成 `0`。
+ *
+ * 为什么折成 `0` 而不是退回旧的「见到 end-seed 就清空」：`0` 是内核给**非派生会话**
+ * 的诚实答案（`dsh-session` 构造器有 `if (!header.isSeeded && inheritedEventCount !== 0)
+ * throw`，表内 9 代都在），拿不到数字时按最可能的真值办。旧的「按 data 形状猜边界 +
+ * 见 end-seed 就清」正是 issue #11 的成因，不给它留兜底分支——留了就是把 bug 写成
+ * 防御代码。
+ */
+function normalizeInheritedCount(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+/** 初始状态：按会话 id 从所有权 sidecar 装载（进程重启后恢复 GUI 归属）。
+ *
+ * 第二个参数是宿主 `ProjectionDefinition.init(header, inheritedEventCount)` 契约里的
+ * **继承前缀长度**（fork 点之前那些条目的条数）。表内 9 代（`0.1.2-rc.1` …
+ * `0.2.2-alpha.2`）都在 `def.init(session.header, session.inheritedEventCount)` 处传它
+ * ——逐代 grep 各自 `dsh-session-projection/lib/index.js` 的调用点核实，本模块因此
+ * **不依赖任何只在较新代次出现的字段**。本模块把它折成 `seedSeq`，作为「哪些事件
+ * 属于本会话」的**唯一**判据——与投递通道 `foldUserState` → `readFoldInput` 吃的是
+ * 同一个数字。
+ */
 export function initUserScheduleProjection(
   header?: { readonly id?: string },
+  inheritedEventCount?: number,
 ): UserScheduleProjectionState {
   const sessionId = typeof header?.id === 'string' && header.id.length > 0 ? header.id : '';
   const entries = sessionId.length > 0 ? allOwnership(sessionId) : {};
@@ -268,7 +311,7 @@ export function initUserScheduleProjection(
     sessionId,
     owned: Object.keys(entries),
     active: [],
-    seedSeq: -1,
+    seedSeq: normalizeInheritedCount(inheritedEventCount),
     paused: pausedFromSidecar(sessionId),
   };
 }
@@ -349,31 +392,22 @@ export function applyUserScheduleProjection(
   state: UserScheduleProjectionState,
   event: SessionEvent,
 ): UserScheduleProjectionState {
-  // 派生会话边界：重置自身，忽略继承前缀（AC-07 fork 隔离）。
-  if (event.type === 'session/end-seed') {
-    if (
-      state.seedSeq === event.seq &&
-      state.owned.length === 0 &&
-      state.active.length === 0 &&
-      state.paused.length === 0
-    ) {
-      return state;
-    }
-    // 派生会话（fork）：sidecar 以 sessionId 隔离，派生 id 天然空表；此处再清一次
-    // 兜底「同 id 重播种」场景，保持 AC-07 语义。
-    const owned =
-      state.sessionId.length > 0
-        ? Object.keys(allOwnership(state.sessionId))
-        : [];
-    return {
-      sessionId: state.sessionId,
-      owned,
-      active: [],
-      seedSeq: event.seq,
-      paused: pausedFromSidecar(state.sessionId),
-    };
-  }
+  // 继承前缀：一条都不进状态（AC-07 fork 隔离的实际执行处）。判据是 seq 与切点的
+  // 比较，与投递通道 `readFoldInput` 切掉前缀的判据同构。
   if (seedIsBefore(state, event)) return state;
+
+  // `session/end-seed` 对本单元是**无关事件**：返回同一引用，不触发推送帧。
+  //
+  // 内核在两种完全不同的场合追加这个事件，而两者在日志里的形状无法靠 `data`
+  // 区分（`0.1.2-rc.1` 的 fork 边界也只发 `{}`）：
+  //  1. fork 切点标记——落在 `seq === seedSeq` 处，前缀已经被上面那条判据整段丢掉，
+  //     这里无事可做；
+  //  2. 每次冷恢复在**尾部**补的重放边界（`dsh-session/lib/index.js:1428`，
+  //     0.1.2-rc.1 是 `:1322`）——落在 `seq > seedSeq` 处，它后面本会话的自有事件
+  //     还得继续 fold，清空就把用户的提醒从 GUI 上抹掉了（issue #11）。
+  // 于是两条通道口径分叉：投递通道（`foldUserState`）不看这个事件，提醒照发；投影
+  // 却空了，用户看不见也取消不掉。这里统一成「不看」，边界由 seq 切点负责。
+  if (event.type === 'session/end-seed') return state;
 
   if (event.type === OWNED_EVENT) {
     const data = event.data as unknown as UserScheduleOwnedChange;
@@ -504,6 +538,12 @@ export function applyUserScheduleProjection(
   return state;
 }
 
+/**
+ * 该事件是否落在继承前缀里（属于祖先会话，本会话不该有它）。
+ *
+ * `seedSeq < 0` 只可能来自手搓的状态（正常 `init` 经 `normalizeInheritedCount` 只会
+ * 给出 `>= 0`），含义是「切点未知」，此时不忽略任何事件。
+ */
 function seedIsBefore(state: UserScheduleProjectionState, event: SessionEvent): boolean {
   return state.seedSeq >= 0 && typeof event.seq === 'number' && event.seq < state.seedSeq;
 }
@@ -554,5 +594,12 @@ export const userSchedulesProjectionUnit = {
     view: viewUserScheduleProjection,
   },
   // v3：sessionId + 所有权 sidecar；v4：paused[] 镜像（暂停/恢复）
-  stateVersion: 4,
+  // v5：继承前缀切点改由 `init` 的第二参数 `inheritedEventCount` 供给（issue #11）。
+  // 必须升版而不是只改 fold：**v4 的缓存 cell 很可能就是被旧的「见 end-seed 就清空」
+  // 抹空的那份状态**。宿主 `restore()` 只在行可用（`ver` 相等）时才从行的水位往后折
+  // （dsh-session-projection/lib/index.js:286-300），尾部那条重放 end-seed 过了新 fold
+  // 也只是 no-op，历史 create 事件**再也不会被重看**——升版前修好的口径对已中毒的
+  // 会话永远不生效，用户重启后仍然看不见自己的提醒。版本失配时 `restoreFloor()` 返回
+  // 0，宿主整段重折（同一文件 223-231 行），中毒行随之作废。
+  stateVersion: 5,
 } as const;

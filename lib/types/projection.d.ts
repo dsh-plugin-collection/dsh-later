@@ -7,8 +7,20 @@
  *    用其导出的 `decodeScheduleChange` 解码；
  *  - `session-scheduler/user-schedule`：本插件自有的所有权记录（哪种来源）。
  *
- * fork 隔离：`session/end-seed` 标记派生会话的耐久边界。投影在遇到该事件时
- * 重置自身状态（清空 owned/active），因此子会话不继承父会话的提醒（AC-07）。
+ * 「哪些事件属于本会话」按 **seq 切点**判，不按 `session/end-seed` 事件判。
+ * 宿主把**整份**日志（含继承前缀）从 seq 0 折进本单元，并在
+ * `init(header, inheritedEventCount)` 的第二参数给出前缀长度——那个长度就是这里的
+ * `seedSeq`，`seq < seedSeq` 的事件一律不进状态，因此派生会话不继承父会话的提醒
+ * （AC-07）。投递通道 `foldUserState`（`src/user-tools.ts` → `readFoldInput`）吃的
+ * 是**同一个数字**，两条通道对「本会话的历史」的口径由此一致。
+ *
+ * 为什么不能拿 `session/end-seed` 当边界（issue #11 的缺陷本体）：内核**每次冷恢复
+ * 会话**都会在日志尾部补一条 `session/end-seed {}`（`dsh-session/lib/index.js:1428`，
+ * 0.1.2-rc.1 是 `:1322`，措辞略异但同样只发 `{}`）——它标记的是「本会话自己历史的
+ * 重放结束」，不是归属边界。旧实现见该事件即清空 active，于是投影被抹空而投递通道
+ * 照常工作：提醒到点照发，dock 倒计时条与侧栏却是空的，用户看不见也就取消不掉。
+ * 也不能改按 `data.inherited === true` 分派：`0.1.2-rc.1` 的 fork 边界也只发 `{}`
+ * （那代根本没有 `inherited` 这个字段），按 data 形状判会把那一代的 fork 隔离弄坏。
  *
  * 注意 `apply` 为增量 fold：无关事件必须返回同一状态引用，否则会误触发推送。
  * @module dsh-later/projection
@@ -118,15 +130,27 @@ export interface UserScheduleProjectionState {
     readonly owned: readonly string[];
     /** 当前活动记录（按 schedule/change 严格 fold）。 */
     readonly active: readonly StoredScheduleRecord[];
-    /** 已见 `session/end-seed` 的 seq；更早的继承前缀一律忽略。 */
+    /**
+     * 继承前缀切点（= `init` 第二参数 `inheritedEventCount`，与投递通道同源）：
+     * `seq < seedSeq` 的事件属于祖先会话，一条都不进状态。
+     */
     readonly seedSeq: number;
     /** sidecar 暂停留档镜像。 */
     readonly paused: readonly PausedEntry[];
 }
-/** 初始状态：按会话 id 从所有权 sidecar 装载（进程重启后恢复 GUI 归属）。 */
+/** 初始状态：按会话 id 从所有权 sidecar 装载（进程重启后恢复 GUI 归属）。
+ *
+ * 第二个参数是宿主 `ProjectionDefinition.init(header, inheritedEventCount)` 契约里的
+ * **继承前缀长度**（fork 点之前那些条目的条数）。表内 9 代（`0.1.2-rc.1` …
+ * `0.2.2-alpha.2`）都在 `def.init(session.header, session.inheritedEventCount)` 处传它
+ * ——逐代 grep 各自 `dsh-session-projection/lib/index.js` 的调用点核实，本模块因此
+ * **不依赖任何只在较新代次出现的字段**。本模块把它折成 `seedSeq`，作为「哪些事件
+ * 属于本会话」的**唯一**判据——与投递通道 `foldUserState` → `readFoldInput` 吃的是
+ * 同一个数字。
+ */
 export declare function initUserScheduleProjection(header?: {
     readonly id?: string;
-}): UserScheduleProjectionState;
+}, inheritedEventCount?: number): UserScheduleProjectionState;
 /**
  * 增量 fold。返回同一引用当事件无关；返回新状态当 owned/active 发生变化。
  */
@@ -214,6 +238,6 @@ export declare const userSchedulesProjectionUnit: {
         }, z.core.$strict>;
         readonly view: typeof viewUserScheduleProjection;
     };
-    readonly stateVersion: 4;
+    readonly stateVersion: 5;
 };
 export {};

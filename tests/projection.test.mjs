@@ -107,27 +107,62 @@ test('delete 后任务移除', () => {
   assert.equal(viewUserScheduleProjection(state).schedules.length, 0);
 });
 
-test('fork 隔离：session/end-seed 后不继承父会话任务（AC-07）', () => {
-  let state = initUserScheduleProjection();
-  let seq = 0;
-  // 父会话前缀：已有用户任务
-  state = applyUserScheduleProjection(state, createEvent(atSchedule, seq));
-  state = applyUserScheduleProjection(state, { ...ownedEvent('schedule-1', ++seq), seq });
-  // 派生边界（seq=2）
+/**
+ * AC-07 fork 隔离：**继承前缀**必须整段丢弃，子会话看不见父会话的提醒。
+ *
+ * 判据边界（issue #11 之后改过一次，别再改回去）：丢弃的依据是
+ * `init(header, inheritedEventCount)` 送进来的**继承前缀长度**（宿主传的是
+ * `session.inheritedEventCount`，表内 9 代都一样），**不是** `session/end-seed`
+ * 这个事件。原因：内核每次冷恢复会话都会在日志尾部补一条 `end-seed {}`，那是
+ * 「本会话自己历史的重放边界」，不是归属边界——拿它当清空信号就把 dock 抹空了
+ * （issue #11 的缺陷本体）。
+ *
+ * 所以这里刻意构造三条：
+ *  1. 父前缀（seq 0/1）**照旧喂进来**——宿主 fold 的就是整份日志，隔离靠切点丢；
+ *  2. fork 切点标记（seq 2，带 `{inherited:true}` 的现代形状）；
+ *  3. 子会话自有事件（seq 3/4）必须可见。
+ * 结尾那条尾部 `end-seed {}`（seq 5）是 resume 补的：它**不得**再清空，父前缀也
+ * 不得因为「切点标记换了形状」而漏回来。
+ */
+test('fork 隔离：按 inheritedEventCount 切点丢前缀，尾部重放不清空（AC-07）', () => {
+  const prefixLength = 2; // seq 0/1 属于父会话
+  const childHeader = { id: 'session-fork-child' };
+  let state = initUserScheduleProjection(childHeader, prefixLength);
+
+  // 父会话前缀：已有用户任务（照样进 fold——隔离由切点负责）
+  state = applyUserScheduleProjection(state, createEvent(atSchedule, 0));
+  state = applyUserScheduleProjection(state, ownedEvent('schedule-1', 1));
+  assert.equal(viewUserScheduleProjection(state).schedules.length, 0, '继承前缀不该进视图');
+
+  // fork 切点标记（现代形状 `{inherited:true}`；0.1.2-rc.1 这里只发 `{}`，
+  // 所以本单元**不**按 data 形状判边界——换个形状结论必须一样）
   state = applyUserScheduleProjection(state, {
     type: 'session/end-seed',
-    seq: ++seq,
+    seq: prefixLength,
     time: 0,
-    data: {},
+    data: { inherited: true },
   });
-  assert.equal(viewUserScheduleProjection(state).schedules.length, 0);
-  // 子会话自己新建（seq=3,4）
+  assert.equal(viewUserScheduleProjection(state).schedules.length, 0, '切点标记不得把父任务放回来');
+
+  // 子会话自己新建
   const child = { ...atSchedule, id: 'schedule-3' };
-  state = applyUserScheduleProjection(state, { ...createEvent(child), seq: ++seq });
-  state = applyUserScheduleProjection(state, { ...ownedEvent('schedule-3', ++seq), seq });
+  markOwnership(childHeader.id, 'schedule-3', 'context');
+  state = applyUserScheduleProjection(state, createEvent(child, 3));
+  state = applyUserScheduleProjection(state, ownedEvent('schedule-3', 4));
   const view = viewUserScheduleProjection(state);
   assert.equal(view.schedules.length, 1);
   assert.equal(view.schedules[0].id, 'schedule-3');
+
+  // 冷恢复补的尾部重放边界：本会话的自有提醒必须留着（issue #11）
+  state = applyUserScheduleProjection(state, {
+    type: 'session/end-seed',
+    seq: 5,
+    time: 0,
+    data: {},
+  });
+  const afterReplay = viewUserScheduleProjection(state);
+  assert.equal(afterReplay.schedules.length, 1, '尾部 end-seed 是重放边界，清空就是把提醒藏起来（#11）');
+  assert.equal(afterReplay.schedules[0].id, 'schedule-3');
 });
 
 test('无关事件返回同一引用（不触发推送）', () => {

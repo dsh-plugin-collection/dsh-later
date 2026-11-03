@@ -75,6 +75,8 @@ PRD 想在 `schedule/change` 荷载里加 `source: 'user-tool'` 区分创建来�
 
 dsh-schedule 用 `seedLength` 排除派生会话继承前缀；投影框架本身按整条日志 fold。本插件投影在遇到 `session/end-seed` 事件时**重置自身状态**，因此子会话绝不继承父会话的用户提醒。
 
+> **实现更正（2026-11-03，issue #11）**：本节当时把边界描述成「遇 `session/end-seed` 事件就重置状态」。该判据已废——内核**每次冷恢复会话**都会在日志尾部补一条 `session/end-seed {}`（`dsh-session/lib/index.js:1428`，0.1.2-rc.1 是 `:1322`），据此重置会连带抹掉本会话自己那些还没到点的提醒：投影空了，投递通道却照跑，于是用户看不见它、也就取消不掉。现判据是宿主 `init(header, inheritedEventCount)` 送进来的**继承前缀长度**（`seq < 切点` 的事件不进状态），与投递通道 `foldUserState` → `readFoldInput` 同源。为什么不按 `data.inherited` 形状判：0.1.2-rc.1 的 fork 边界也只发 `{}`。**决策本身（fork 不继承父会话提醒，AC-07）不变**，只换判据；判据边界由 `tests/projection-endseed-parity.test.mjs` 与 `tests/projection.test.mjs` 的 AC-07 用例钉住。
+
 ## 4. 发送方式：不操控输入框（AC-06 的取舍）
 
 PRD/dsh-sleep-send 有「发送前草稿变更 → 自动取消」逻辑。本插件按设计采用 `followup()` 注入（提醒内容在创建时固化），草稿后文变更**不会**静默取消一个已明确排定的提醒——否则会与「关网页也要准时触发」（AC-04/AC-05，本插件核心价值）冲突。取消路径由芯片「取消全部」/ 列表「删除单个」提供。这是一个有意的产品取舍，若需要 v1.1 可加回「绑定草稿版本」的可选开关。

@@ -548,7 +548,7 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 | AC-04 | 到期注入消息 | ✅ 线上 E2E 实测：到期（≈计划 75s）后对话出现 user/message（source=plugin）|
 | AC-05 | 关网页重开仍在 | 事件日志持久化 + `userSchedules` 投影冷恢复 |
 | AC-06 | 草稿变更 | 有意取舍：不静默取消（见 [设计决策 §4](./design-decisions.md)） |
-| AC-07 | fork 不继承 | `session/end-seed` 重置 |
+| AC-07 | fork 不继承 | 按 `init(header, inheritedEventCount)` 的**继承前缀长度**丢前缀（`seq < 切点` 不进状态）。**不**按 `session/end-seed` 判：内核每次冷恢复都会在尾部补一条（`dsh-session/lib/index.js:1428`），拿它当边界会把本会话自己的待发提醒抹掉（#11） |
 | AC-08 | 100 并发创建 | agent 事务串行化 + 单 session 上限 100 |
 | AC-20 | 与 dsh-schedule 共存 | `schedule/change` 荷载零改动（严格兼容） |
 

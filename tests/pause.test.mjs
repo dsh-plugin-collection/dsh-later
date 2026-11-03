@@ -275,10 +275,15 @@ test('delete 幂等语义：重复删除同一 uid 返回 deleted:false 而非�
   assert.equal(ghost.deleted, false);
 });
 
-test('投影 stateVersion 为 4 且 wire 带 status', async () => {
+test('投影 stateVersion 为 5 且 wire 带 status', async () => {
   freshOwnershipDir();
   const { userSchedulesProjectionUnit } = await import('../lib/projection.js');
-  assert.equal(userSchedulesProjectionUnit.stateVersion, 4);
+  // 为什么**必须**是 5 而不是 4（issue #11）：宿主的 projcache 行只在 `row.ver ===
+  // stateVersion` 时才复用，复用时只从行的水位往后折新到的事件；而每次冷恢复追加在
+  // 尾部的那条 `session/end-seed {}` 过了新 fold 是 no-op，历史里的 create 事件再也
+  // 不会被重看。于是被旧口径（见 end-seed 就清空）抹空的那些 v4 行，装了新插件仍然
+  // 是空的——不升版，这条修复对已中毒的会话永远不生效。
+  assert.equal(userSchedulesProjectionUnit.stateVersion, 5);
   const agent = fakeAgent();
   const created = await userScheduleCreate(
     { prompt: 'x', after_seconds: 120, time_zone: 'Asia/Shanghai' },
