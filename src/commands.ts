@@ -73,6 +73,31 @@ function parsePayload(rawInput: string): { ok: true; value: unknown } | { ok: fa
   }
 }
 
+/**
+ * 「裸 id 容错」的判据：插件自己的 schedule id 形状（`schedule-compat.ts` 的
+ * `allocateScheduleId` 生成 `schedule-${randomUUID()}`）。只有整串恰好是这个形状
+ * 才归一化成 `{ id }`，其他非 JSON 输入一律照旧报错，不把错误吞成成功。
+ */
+const BARE_ID_RE = /^schedule-[\w-]+$/;
+
+/**
+ * 把命令的 rawInput 归一化成载荷对象。
+ *
+ * 三种情形：
+ * - 空串 → 保留原有「缺少 JSON 载荷。」；
+ * - 合法 JSON 对象 → 与 `parsePayload` 一致；
+ * - 非 JSON 但整串形如裸 schedule id → 归一化成 `{ id }`，让
+ *   `/user-schedule-delete schedule-abc` 这种手敲写法也能用。
+ *
+ * JSON 语法错、数组、null 等仍走原有错误文案。纯函数，无 I/O，可单测。
+ */
+export function coercePayload(rawInput: string): { ok: true; value: unknown } | { ok: false; text: string } {
+  const text = rawInput.trim();
+  if (text.length === 0) return { ok: false, text: '缺少 JSON 载荷。' };
+  if (BARE_ID_RE.test(text)) return { ok: true, value: { id: text } };
+  return parsePayload(text);
+}
+
 /** `parseScheduleSpec` 的结果。 */
 export type ParsedScheduleSpec =
   | { ok: true; kind: 'after'; afterSeconds: number }
@@ -901,12 +926,18 @@ export function userScheduleCommands(
       return false;
     }
   };
+  // `input` 描述符是内核认领整行的开关：`matchEnter()` 见到「带参数但没声明
+  // input」就放弃认领（0.2.1-rc.5 client.js:1661-1665），整行被当普通聊天消息
+  // 发给模型。七条都声明 hint，手敲 `/user-schedule-delete {"id":"…"}` 才走命令。
   const create: CommandDefinition = {
     name: `${PREFIX}-create`,
     description: t.cmdLaterDesc,
+    input: {
+      hint: 'JSON 载荷，例如 {"prompt":"检查构建结果","after_seconds":300}；也可用 {"prompt":"…","at":{"date":"2026-08-21","time":"15:32","time_zone":"Asia/Shanghai"}}',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
-      const parsed = parsePayload(invocation.rawInput);
+      const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const { maxSchedules, limits } = resolveSettings();
       const result = await userScheduleCreate(parsed.value, invocation.agent, ctx, maxSchedules, undefined, limits);
@@ -924,6 +955,9 @@ export function userScheduleCommands(
   const list: CommandDefinition = {
     name: `${PREFIX}-list`,
     description: t.cmdListDesc,
+    input: {
+      hint: '无需载荷，直接回车即可（参数一律忽略）',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const result = await userScheduleList(invocation.agent);
@@ -937,9 +971,12 @@ export function userScheduleCommands(
   const del: CommandDefinition = {
     name: `${PREFIX}-delete`,
     description: t.cmdDeleteDesc,
+    input: {
+      hint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
-      const parsed = parsePayload(invocation.rawInput);
+      const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const id = (parsed.value as Record<string, unknown>)['id'];
       const result = await userScheduleDelete(id, invocation.agent, ctx);
@@ -960,9 +997,12 @@ export function userScheduleCommands(
   const edit: CommandDefinition = {
     name: `${PREFIX}-edit`,
     description: t.cmdEditDesc,
+    input: {
+      hint: 'JSON 载荷，例如 {"id":"schedule-…","prompt":"新的提醒内容"}',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
-      const parsed = parsePayload(invocation.rawInput);
+      const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const value = parsed.value as Record<string, unknown>;
       const { limits } = resolveSettings();
@@ -983,9 +1023,12 @@ export function userScheduleCommands(
   const pause: CommandDefinition = {
     name: `${PREFIX}-pause`,
     description: t.cmdPauseDesc,
+    input: {
+      hint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
-      const parsed = parsePayload(invocation.rawInput);
+      const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const id = (parsed.value as Record<string, unknown>)['id'];
       const result = await userSchedulePause(id, invocation.agent, ctx);
@@ -1005,9 +1048,12 @@ export function userScheduleCommands(
   const resume: CommandDefinition = {
     name: `${PREFIX}-resume`,
     description: t.cmdResumeDesc,
+    input: {
+      hint: 'JSON 载荷，例如 {"id":"schedule-…"}（也可用 {"uid":"…"}）；或直接给裸 id：schedule-…',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
-      const parsed = parsePayload(invocation.rawInput);
+      const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const uid = (parsed.value as Record<string, unknown>)['uid']
         ?? (parsed.value as Record<string, unknown>)['id'];
@@ -1030,12 +1076,15 @@ export function userScheduleCommands(
   const steer: CommandDefinition = {
     name: `${PREFIX}-steer-now`,
     description: t.cmdSteerDesc,
+    input: {
+      hint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+    },
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       if (onUserSteer === undefined) {
         return { kind: 'error', text: '插话处理器未注入。' };
       }
-      const parsed = parsePayload(invocation.rawInput);
+      const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const id = (parsed.value as Record<string, unknown>)['id'];
       if (typeof id !== 'string' || id.length === 0) {

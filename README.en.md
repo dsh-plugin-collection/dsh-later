@@ -92,7 +92,7 @@ One difference between anchor and relative chains (deliberate, not a bug):
 /later +2h+1h+30m 催我交周报
 ```
 
-The dock buttons are not a private channel: they run `/user-schedule-create`, `-list`, `-delete`, `-edit`, `-pause`, `-resume`, `-steer-now` (arguments are a JSON object). You can type them too, but they are designed to be clicked, not typed.
+The dock buttons are not a private channel: they run `/user-schedule-create`, `-list`, `-delete`, `-edit`, `-pause`, `-resume`, `-steer-now` (arguments are a JSON object). You can type them too, but they are designed to be clicked, not typed. When you do type one, it needs a payload: everything except `-list` (no payload needed — any arguments are ignored) takes a JSON object, e.g. `/user-schedule-delete {"id":"schedule-…"}`; `-delete` / `-pause` / `-resume` / `-steer-now` also accept a bare id, so `/user-schedule-pause schedule-…` is the same as `{"id":"schedule-…"}`.
 
 ### Images and files
 

@@ -92,7 +92,7 @@
 /later +2h+1h+30m 催我交周报
 ```
 
-dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-list` `-delete` `-edit` `-pause` `-resume` `-steer-now` 这几条命令（参数是一段 JSON），手动敲也能用；只是它们按"被点"设计，不面向手打。
+dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-list` `-delete` `-edit` `-pause` `-resume` `-steer-now` 这几条命令（参数是一段 JSON），手动敲也能用；只是它们按"被点"设计，不面向手打。手敲时**需要带载荷**：除 `-list`（无需参数，参数一律忽略）外都要跟一段 JSON，例如 `/user-schedule-delete {"id":"schedule-…"}`；`-delete` / `-pause` / `-resume` / `-steer-now` 也接受裸 id，`/user-schedule-pause schedule-…` 与 `{"id":"schedule-…"}` 等价。
 
 ### 带图片 / 文件
 
