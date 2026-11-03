@@ -4,18 +4,9 @@
 
 ## 未发布
 
-- **docs** 把「服务端重启后的触发语义」写准，并新增一条已知限制（issue #11 的未修半面，投递依赖挂在 live agent 上的 runtime）：
-  - 实测判据：重启后不打开会话 → `user/message` 投递 0；打开该会话 → 立刻补发。反向的实测正例：**只关浏览器、服务端进程不动**，到点投递 1，所以 README「关网页也准时触发」在「服务端仍在跑」这一面成立，双语各补一句边界。
-  - `prd.md` 可靠性表把「关网页」与「服务端重启」两行分开写准（前者是投递正例，后者只恢复数据不恢复触发），并指向 issue #128（#11b：宿主级到期扫描）。
-  - `docs/verification.md` 新增「服务端重启后，没人打开过的会话不会按时投递」条目，写明已修的显示半面（#11a / PR #124 / `stateVersion` 5）与未修的投递半面、以及 #11b 落地前必须定的三件事。
-- **fix** 工具描述里不再钉死注册时刻的字符上限（#9 的遗留，见 issue #125）。
-  - 现象：`user_schedule_create` 的 prompt 参数描述是注册时算一次的静态串。hydrate 挂载的会话在插件 apply 阶段注册（早于设置注入），那份描述会永久停在旧值（如「≤1000 字符」），而实际校验已按更新后的上限走 ⇒ 模型看到的上限与真实口径矛盾。
-  - 修法：描述改为说明「上限由插件设置『允许长文本』决定，默认 1000、可放开；超长返回 `invalid_prompt`，错误文案给出当前实际允许值」。判定仍在 `user-tools.validatePrompt`（每次调用现读，本来就对），错误消息带实际数字不变。
-  - 防复发：`tests/settings-live-binding.test.mjs` 第 7 条走真实注册，注册后就地改设置，断言描述里既没有未插值的 `{maxChars}`、也没把 1000 钉成当前上限，且指向设置。
-
 ## 1.12.0 — 2026-11-03
 
-> 三条 GitHub 外部报告的修复：#10 命令认领、#9 设置实时（含 hydrate 会话的投递口径）、#11 显示面。合并后 main 的 `npm test` 778 / 0 fail，typecheck 两面通过，`verify:kernels:all` 9 代全绿（0.1.2-rc.1 与 0.1.5-rc.3 的 gate 面记 `absent`：那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属「声明未被验证」）。
+> 三条 GitHub 外部报告的修复（#10 命令认领、#9 设置实时、#11 显示面），加上 #9 的遗留（工具描述不再钉死注册时刻的字符上限）与「服务端重启后的触发语义」的文档订正。合并后 main 的 `npm test` 778 / 0 fail，typecheck 两面通过，`verify:kernels:all` 9 代全绿（0.1.2-rc.1 与 0.1.5-rc.3 的 gate 面记 `absent`：那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属「声明未被验证」）。
 
 - **fix** 未到期的提醒在**打开那个会话**之后从 dock 与侧栏上消失，到点却照常发送（issue #11 的「投影」那一半）。
   - 现象（实测复现）：投影 `schedules=[]`，40 秒后日志里仍多出一条 `dispatch`——**它还在跑，只是看不见**，于是也取消不掉。现网数据里已抓到实例（`~/.dsh/sessions/…/session-952d4404…`：4 条 create / 2 delete / 2 dispatch，每条 dispatch 都紧跟在一条 `session/end-seed` 之后）。
@@ -60,6 +51,15 @@
   - 顺带加「裸 id 容错」：新增纯函数 `coercePayload(rawInput)`，六个走载荷的 handler 改调它。判据是插件自己的 id 形状 `/^schedule-[\w-]+$/`（`schedule-compat.ts:63` 生成的 `schedule-${randomUUID()}`）：空串 → 保留原「缺少 JSON 载荷。」；合法 JSON 对象 → 照旧；非 JSON 但整串匹配该形状的裸串 → 归一化成 `{ id }`，于是 `/user-schedule-pause schedule-…` 与 `{"id":"schedule-…"}` 等价；坏 JSON、数组、`null`、不像 id 的裸串仍走原有错误文案，不把错误吞成成功。
   - **代价（权衡后的取舍，不是遗漏）**：`-list` 由「一次回车出结果」变成「两次回车」——第一次把整行认领成命令、第二次才执行（真机 A/B 实测于内核 `0.2.1-rc.4`）。内核的 `CommandInputDescriptor` 只有 `hint` 与 `attachments` 两面（`dsh-commands/lib/types/types.d.ts:20-31`），**没有「参数可选」这一面**，而 `matchEnter()` 是「先查只适用于裸命令的分支 → 声明了 `input` 就认领 → 既无 `input` 又是裸命令才直接执行」，所以凡声明 `input` 的命令一律是这个顺序（`/schedule`、`/later` 一直如此），本仓改不掉。不收 `input` 能让 `-list` 回到一次回车，代价是手敲带参整行又回给模型——那正是本条要修的正主，因此保留 `input`，并把两次回车直接写进 `-list` 的 hint 文案与 README，不让用户以为命令没响应。其余六条是净收益：原来裸回车只会报「缺少 JSON 载荷。」。
   - 新增 `tests/slash-command-input.test.mjs`（10 条）：七条定义都带 `input.hint`、hint 文案覆盖 JSON 与裸 id 两种写法、`coercePayload` 四种输入、`-list` 语义未变、`-list` 两次回车钉成**已知约束**（handler 单次调用即出结果 + hint 里写着两次回车 + `/schedule` `/later` 同样声明了 `input`，一视同仁）、以及一条端到端「`-create` 带 JSON 建成 → `-pause` 用裸 id 成功」。README 中英两版手敲那段补上「需要带载荷」与「两次回车」的说明。
+
+- **docs** 把「服务端重启后的触发语义」写准，并新增一条已知限制（issue #11 的未修半面，投递依赖挂在 live agent 上的 runtime）：
+  - 实测判据：重启后不打开会话 → `user/message` 投递 0；打开该会话 → 立刻补发。反向的实测正例：**只关浏览器、服务端进程不动**，到点投递 1，所以 README「关网页也准时触发」在「服务端仍在跑」这一面成立，双语各补一句边界。
+  - `prd.md` 可靠性表把「关网页」与「服务端重启」两行分开写准（前者是投递正例，后者只恢复数据不恢复触发），并指向 issue #128（#11b：宿主级到期扫描）。
+  - `docs/verification.md` 新增「服务端重启后，没人打开过的会话不会按时投递」条目，写明已修的显示半面（#11a / PR #124 / `stateVersion` 5）与未修的投递半面、以及 #11b 落地前必须定的三件事。
+- **fix** 工具描述里不再钉死注册时刻的字符上限（#9 的遗留，见 issue #125）。
+  - 现象：`user_schedule_create` 的 prompt 参数描述是注册时算一次的静态串。hydrate 挂载的会话在插件 apply 阶段注册（早于设置注入），那份描述会永久停在旧值（如「≤1000 字符」），而实际校验已按更新后的上限走 ⇒ 模型看到的上限与真实口径矛盾。
+  - 修法：描述改为说明「上限由插件设置『允许长文本』决定，默认 1000、可放开；超长返回 `invalid_prompt`，错误文案给出当前实际允许值」。判定仍在 `user-tools.validatePrompt`（每次调用现读，本来就对），错误消息带实际数字不变。
+  - 防复发：`tests/settings-live-binding.test.mjs` 第 7 条走真实注册，注册后就地改设置，断言描述里既没有未插值的 `{maxChars}`、也没把 1000 钉成当前上限，且指向设置。
 
 ## 1.11.0 — 2026-11-02
 
