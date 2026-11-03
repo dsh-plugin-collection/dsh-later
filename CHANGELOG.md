@@ -13,6 +13,7 @@
   - **`stateVersion` 4 → 5**，这条不是例行升版：旧缓存 cell 很可能就是被清空过的那份状态，而宿主 `restore()` 只在版本相等时才复用行、复用后只从行的水位往后折（`dsh-session-projection/lib/index.js:286-300`），尾部那条重放 end-seed 过了新 fold 只是 no-op，历史里的 create 事件**再不会被重看**——不升版，本条修复对**已经中毒的会话**永远不生效。代价：版本失配使每个会话的投影整段重折一次（`restoreFloor()` 返回 0，同文件 223-231 行），一次性，之后照常吃缓存。
   - `paused` 语义不动：view 仍以 sidecar 重读为准，重放边界不会让暂停项出现第三种状态（既不变 active 也不消失）。
   - 测试：新增 `tests/projection-endseed-parity.test.mjs`——重放后仍看得见 / 真 fork 继承前缀仍被丢 / **同一份事件序列下两通道的 active 集合相等**（逐场景各断一次，另附一条反例用例证明这条一致性判据不是恒真）；`tests/projection.test.mjs` 的 AC-07 用例改成按切点判，并写明边界来源与「不许换回按事件判」的理由；`tests/pause.test.mjs` 那条 stateVersion 常量断言随之更新。
+  - 文档面：同步更正 `docs/verification.md` 验收对照里 AC-07 的现状行（那行描述的是实现，留着就是假现状），并在 `docs/design-decisions.md` §3 追加「实现更正」标注——**原决策与其原始表述未改写**，只标注判据换了什么、为什么换。
   - 本轮**不含**：sidecar schema（`OwnedEntry` 仍不带到期时刻）、宿主级 sweeper / `agents.resume` 那套装配——那是 #11「会话冷着也能投递」的另一半，另排。
 - **fix** 设置页改「允许长文本 / 上限」后，`/later` 仍按旧的 1000 字符拒绝长内容（issue #9）。
   - 现象：打开「允许长文本」并把上限设成 10000 后，`/later` 发 1204 字仍被拒「提醒内容不能超过
