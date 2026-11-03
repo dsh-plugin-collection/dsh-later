@@ -4,6 +4,11 @@
 
 ## 未发布
 
+- **fix** 工具描述里不再钉死注册时刻的字符上限（#9 的遗留，见 issue #125）。
+  - 现象：`user_schedule_create` 的 prompt 参数描述是注册时算一次的静态串。hydrate 挂载的会话在插件 apply 阶段注册（早于设置注入），那份描述会永久停在旧值（如「≤1000 字符」），而实际校验已按更新后的上限走 ⇒ 模型看到的上限与真实口径矛盾。
+  - 修法：描述改为说明「上限由插件设置『允许长文本』决定，默认 1000、可放开；超长返回 `invalid_prompt`，错误文案给出当前实际允许值」。判定仍在 `user-tools.validatePrompt`（每次调用现读，本来就对），错误消息带实际数字不变。
+  - 防复发：`tests/settings-live-binding.test.mjs` 第 7 条走真实注册，注册后就地改设置，断言描述里既没有未插值的 `{maxChars}`、也没把 1000 钉成当前上限，且指向设置。
+
 ## 1.12.0 — 2026-11-03
 
 > 三条 GitHub 外部报告的修复：#10 命令认领、#9 设置实时（含 hydrate 会话的投递口径）、#11 显示面。合并后 main 的 `npm test` 778 / 0 fail，typecheck 两面通过，`verify:kernels:all` 9 代全绿（0.1.2-rc.1 与 0.1.5-rc.3 的 gate 面记 `absent`：那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属「声明未被验证」）。

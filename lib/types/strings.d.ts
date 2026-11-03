@@ -13,7 +13,7 @@ declare const zh: {
     readonly toolCreateDesc: string;
     readonly toolListDesc: "列出当前会话内用户创建的活动定时提醒（含 id、UTC 目标、scheduled/overdue 状态、投递模式）。";
     readonly toolDeleteDesc: "按 user_schedule_create / user_schedule_list 返回的精确 id 删除一条活动提醒；未知或已结束返回 deleted:false。";
-    readonly paramPromptDesc: "提醒内容（trim 后非空，≤{maxChars} 字符；超过会返回 invalid_prompt）。";
+    readonly paramPromptDesc: "提醒内容（trim 后非空）。长度上限由插件设置的「允许长文本」决定：默认 1000 字符，可在设置里放开；超长会返回 invalid_prompt，错误文案里给出当前实际允许的字符数。";
     readonly paramAfterSecondsDesc: "正整数延时秒数。";
     readonly paramEverySecondsDesc: "固定间隔秒数，至少 300；无结束条件（有次数上限请改为逐条创建 at）。";
     readonly paramAtDesc: string;

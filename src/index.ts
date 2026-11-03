@@ -359,7 +359,10 @@ export function registerUserScheduleTools(
 
   try {
     const t = hostDictFor(getLocale());
-    const maxChars = resolveSchedulerPromptLimits(getSettings()).maxChars;
+    // 注意：这里**不再**取注册时刻的 maxChars 快照。工具 description 与 parameters
+    // 是注册时算一次的静态串，而注册发生在挂载时（hydrate 挂载的会话早于设置注入），
+    // 快照会永久停留成旧值 ⇒ 描述与实际校验口径可能不一致。改由文案本身说明「上限随设置
+    // 变化、错误文案给出实际值」，实际判定仍在 user-tools.validatePrompt（每次调用现读）。
     /**
      * 重驱该 agent 的调度器。
      * @returns 调度器是否在位（false == 这条提醒不会被触发，必须告诉用户）。
@@ -383,7 +386,7 @@ export function registerUserScheduleTools(
             prompt: {
               type: 'string',
               required: true,
-              description: hostFormat(t.paramPromptDesc, { maxChars }),
+              description: t.paramPromptDesc,
             },
             after_seconds: { type: 'number', description: t.paramAfterSecondsDesc },
             every_seconds: { type: 'number', description: t.paramEverySecondsDesc },
