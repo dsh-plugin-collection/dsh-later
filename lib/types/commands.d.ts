@@ -35,6 +35,24 @@ export type UserSteerHandler = (agent: Agent, id: string) => Promise<{
     readonly code: string;
     readonly message: string;
 }>;
+/**
+ * 把命令的 rawInput 归一化成载荷对象。
+ *
+ * 三种情形：
+ * - 空串 → 保留原有「缺少 JSON 载荷。」；
+ * - 合法 JSON 对象 → 与 `parsePayload` 一致；
+ * - 非 JSON 但整串形如裸 schedule id → 归一化成 `{ id }`，让
+ *   `/user-schedule-delete schedule-abc` 这种手敲写法也能用。
+ *
+ * JSON 语法错、数组、null 等仍走原有错误文案。纯函数，无 I/O，可单测。
+ */
+export declare function coercePayload(rawInput: string): {
+    ok: true;
+    value: unknown;
+} | {
+    ok: false;
+    text: string;
+};
 /** `parseScheduleSpec` 的结果。 */
 export type ParsedScheduleSpec = {
     ok: true;
