@@ -568,7 +568,23 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     // Beta 功能默认开：语法已经过 38 个单测，关闭它只会把用户推向报错。
     advancedSyntax: true,
   };
-  let getSettings: () => SchedulerSettings = () => startSettings;
+  // 稳定读取入口（GitHub issue #9）。`getSettings` 的**函数身份永不变**，三处注册点
+  // （runtimeRegistry.create 的 :692、registerUserScheduleTools 的 :703、
+  // registerUserScheduleCommands 的 :757）按值传进去的就是这个恒定引用；注入路径只
+  // 重新赋值内部的 `readLive`。
+  //
+  // 为什么不能写成 `let getSettings`（改动前那样）：cordis 的 `ctx.effect` **同步**执行、
+  // 而 `ctx.inject(['settings'], …)` 回调延后一个微任务（`fiber.ts` 的 `_reload()` 先
+  // `await Promise.resolve()` 再 `_execute`）。于是 effect 里读到的 `getSettings` 仍是
+  // 此刻那个 `() => startSettings`——被当参数按值冻结进命令/工具/runtime，之后回调再怎么
+  // 重新赋值都追不回来。后果不止斜杠命令：`src/runtime.ts:168/:183` 把它存成实例字段，
+  // 连插件 apply 时就存在、走 `hydrate()` 挂载的会话的投递口径（onUnconfirmed /
+  // steerDelivery / confirmDelivery）都一起冻结。
+  //
+  // 选「稳定入口」而不是在 :692/:703/:757 各包一层 `() => getSettings()`：后者能修但脆弱，
+  // 以后新增第四个消费者会重踩同一个坑；这里让所有消费者天然共享同一个实时读取点。
+  let readLive: () => SchedulerSettings = () => startSettings;
+  const getSettings = (): SchedulerSettings => readLive();
   ctx.inject(['settings'], (settingsCtx) => {
     // 0.1.7 移除了整个 `settings.yaml` 体系：`SettingsProvider.register()` 不复存在，
     // `ctx.settings` 变成 `SettingsForms`（只有 configure/describe/prepareDocument），
@@ -636,7 +652,8 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     // 因此这一代**无需注册**：字段已在 `Config` 上声明，宿主自会渲染设置页。
     // 插件侧只需读取「当前生效配置」。但 `Config` 的默认值由 cordis 在构造时
     // 填充，运行中热改需从 describe() 快照取——故这里订阅 document 更新事件，
-    // 把最新值同步进 getSettings，实现与 0.1.5 相同的 `applies: 'live'` 语义。
+    // 把最新值同步进 `readLive`（`getSettings` 的稳定入口每次读取都走它），实现与
+    // 0.1.5 相同的 `applies: 'live'` 语义。
     const forms = settingsCtx.settings as unknown as {
       describe?: (options?: { redactSecrets?: boolean }) => readonly SettingsDescriptorLike[];
       register?: unknown;
@@ -655,12 +672,12 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
           return undefined;
         }
       };
-      getSettings = () => readSettings(describeValue());
+      readLive = () => readSettings(describeValue());
 
       // 文档更新 → 重新取值（宿主在 describe 检测到变化时发该事件）。
       settingsCtx.on('settings/document-updated', (ns: unknown) => {
         if (ns !== ENTRY_ID && ns !== SETTINGS_NAMESPACE) return;
-        getSettings = () => readSettings(describeValue());
+        readLive = () => readSettings(describeValue());
       });
       return;
     }
@@ -674,7 +691,7 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
       SchedulerSettingsSchema,
       { applies: 'live' },
     );
-    getSettings = () => {
+    readLive = () => {
       try {
         return readSettings(scope.get() as SettingsRawValue | undefined);
       } catch {
