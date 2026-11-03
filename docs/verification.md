@@ -554,6 +554,18 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 
 ## 已知限制
 
+### 服务端重启后，没人打开过的会话不会按时投递（issue #11 → #128）
+
+**现象**（真进程重启实测，0.2.1-rc.4 + dsh-later）：`/later +2m` 建好提醒 → 停掉 dsh 进程 → 用同一 `DSH_HOME` 重启 → 全程不连浏览器，到期后再等 90s：会话日志里 `user/message` 投递计数 **0**，sidecar 与 `schedule/change create` 都还在；打开那条会话，**立刻补发**（`delivered=1`）。
+
+**成因**：投递依赖每个 root agent 的 runtime，而 runtime 只挂在「已存在的 live agent」上（`src/index.ts` 的 `hydrate()` 只遍历 `ctx.agents.roots()`，`agent/created` 才补挂）。重启时没有会话被拉起 ⇒ 一个 runtime 都不挂 ⇒ 没有 timer 源。另外 `arm()` 前还有一道 `agent.state === 'running'` 闸门，所以**不重启、只把 agent 回收掉**同样命中。
+
+**已修的半面（issue #11a / PR #124，1.12.0）**：投影与投递两条通道原来口径不同——宿主每次冷恢复会话都会追加一条 `session/end-seed {}`（内核 `dsh-session/lib/index.js:1428`），旧投影据此把 `active` 抹空，于是提醒**照发但看不见、取消不掉**。现在两通道同按 `init(header, inheritedEventCount)` 的继承前缀切点判，`stateVersion` 升到 5 让旧的中毒缓存行作废。
+
+**未修的半面（issue #128）**：到点主动解析并唤醒会话（官方 `@deepseek-ai/dsh-schedule` 的做法是宿主级单 runtime + 到点 `ctx.sessionController.resolveAgent(sessionId)`）。落地前要定三件事：`sessionController` 只有 `dsh-web-app` 挂载（顶层 `inject` 会让整条 fiber pending）、sidecar 的 `OwnedEntry` 不含到期时刻、冷 resume 会真的跑出一个 turn。
+
+**因此本文件之外的那些承诺请按这句读**：README 的「关网页也准时触发」= 服务端在跑、会话仍 live；不含「服务端重启后无人打开也准时」。
+
 ### `0.1.7` 下设置页不可用
 
 `0.1.7` **删除了整个 `settings.yaml` 体系**：

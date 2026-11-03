@@ -167,7 +167,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 - **`/later` delayed send**: deliver *the text you are typing right now* later, as yourself (see [the difference](#reminders-vs-delayed-sends-whats-the-difference)).
 - **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
 - **Works across nine kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-alpha.2`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
-- **Fires with the page closed**: reminders persist server-side and arrive on time across devices.
+- **Fires with the page closed**: reminders persist server-side and arrive on time across devices (as long as the server process is still running; after a **server restart**, a session nobody has opened yet delivers only once it is opened - see the known limitation and issue #128).
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
 - **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
 - **Multilingual**: follows the DSH UI language (Chinese / English), live without reload.
