@@ -4,6 +4,10 @@
 
 ## 未发布
 
+## 1.12.0 — 2026-11-03
+
+> 三条 GitHub 外部报告的修复：#10 命令认领、#9 设置实时（含 hydrate 会话的投递口径）、#11 显示面。合并后 main 的 `npm test` 778 / 0 fail，typecheck 两面通过，`verify:kernels:all` 9 代全绿（0.1.2-rc.1 与 0.1.5-rc.3 的 gate 面记 `absent`：那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属「声明未被验证」）。
+
 - **fix** 未到期的提醒在**打开那个会话**之后从 dock 与侧栏上消失，到点却照常发送（issue #11 的「投影」那一半）。
   - 现象（实测复现）：投影 `schedules=[]`，40 秒后日志里仍多出一条 `dispatch`——**它还在跑，只是看不见**，于是也取消不掉。现网数据里已抓到实例（`~/.dsh/sessions/…/session-952d4404…`：4 条 create / 2 delete / 2 dispatch，每条 dispatch 都紧跟在一条 `session/end-seed` 之后）。
   - 根因是「哪些事件属于本会话」这件事在两条通道上各有一套判据：投影 `applyUserScheduleProjection` 见 `session/end-seed` 就把 `active` 清空（只从 sidecar 恢复归属），而投递通道 `foldUserState` 按 `inheritedEventCount`（继承前缀长度）排除，**不看这个事件**。
