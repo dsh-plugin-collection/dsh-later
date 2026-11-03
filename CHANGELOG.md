@@ -4,6 +4,31 @@
 
 ## 未发布
 
+- **fix** 设置页改「允许长文本 / 上限」后，`/later` 仍按旧的 1000 字符拒绝长内容（issue #9）。
+  - 现象：打开「允许长文本」并把上限设成 10000 后，`/later` 发 1204 字仍被拒「提醒内容不能超过
+    1000 字符。」，而**工具**路径能收。校验逻辑一直是对的（`resolvePromptLimits` 正确读设置），
+    问题在宿主入口的**装配时序**。
+  - 根因：`src/index.ts` 里 `getSettings` 原本是一个会被重新赋值的 `let`，初值 `() => startSettings`
+    硬编码 `allowLongPrompts:false` / `maxPromptChars:1000`。cordis 的 `ctx.effect` **同步**执行 body、
+    而 `ctx.inject(['settings'], cb)` 的回调延后一个微任务（`fiber.ts` 的 `_reload()` 先
+    `await Promise.resolve()` 再 `_execute`）。于是 effect 读到并**按值传进三个注册点**的永远是那一刻的
+    `() => startSettings`，设置服务到位后再重新赋值追不回来。三个捕获点：命令注册 `:757`（报告人只发现
+    这一处）、`runtimeRegistry.create` 的 `:692`、工具注册 `:703`。后两处只在**插件 apply 时已存在、走
+    `hydrate()` 挂载**的会话上触发，后果比报告更广：`runtime.ts:183` 把该 getter 存成实例字段，投递口径
+    （steerDelivery / confirmDelivery / onUnconfirmed）**连会话一起冻结**。
+  - 修法：改成**永不重新赋值的稳定入口** `const getSettings = () => readLive()`，注入路径只更新内部
+    `readLive`（轨道 1 的 `describe()` 初值与 `document-updated` 订阅、轨道 2 的 `scope.get()` 都改到
+    `readLive` 上）；三个调用点**一行不改**，类型仍兼容。没选「在三处各包一层 `() => getSettings()`」：
+    那能修但脆弱，以后新增第四个消费者会重踩同一个坑——稳定入口让所有消费者天然共享同一个实时读取点。
+  - 两条代次轨道语义保住：轨道 1（0.2.0+ `SettingsForms`，靠 `describe()` + `settings/document-updated`）
+    的 `applies:'live'` 热改、轨道 2（0.1.5 及更早 `settings.yaml`）的 `scope.get()`，探测逻辑本身不动。
+  - 新增 `tests/settings-live-binding.test.mjs`：本仓**第一次驱动真实装配**（真 cordis `Context` + 真 `lib/`
+    起假宿主、走完整 `apply()`、让 `ctx.inject` 回调真的执行，再在注册**之后**改设置读回注册出来的命令 /
+    工具 / runtime 实际拿到的 getter）。6 条用例覆盖两个就绪时序、两条轨道、三个捕获点；写成正向断言即
+    反证——把改动 revert 回 `let getSettings` 时 6 条全挂（实测），修复后全过。
+  - **遗留（本轮不动，明确记录）**：工具 description 里的 `maxChars` 仍是**注册时刻**快照（`src/index.ts:362`
+    与 `:386`），三处修完后 hydrate 会话上模型看到的说明仍可能写「≤1000 字符」而实际能收 1200。要彻底
+    对齐需延迟生成描述或改设置后重注册，属另一件事。
 - **fix(commands)** 七条 `/user-schedule-*` 在输入框手敲时整行被当普通聊天消息发给模型（issue #10）。
   - 现象（Web 输入框实测）：敲 `/user-schedule-delete {"id":"schedule-…"}` → 命令没执行，抓到的是 `POST /api/session/prompt`（那一行原样进了模型）；敲不带参数的 `/user-schedule-delete` → 命令执行了，但报「缺少 JSON 载荷。」。对照 `/schedule`、`/later` 带参数一切正常。
   - 根因在内核客户端命令机 `@deepseek-ai/dsh-client-ui-commands/lib/client.js` 的 `matchEnter()`（`0.2.1-rc.5` 与 `0.2.1-rc.4` 都在 :1661 与 :1665）：:1661 只有 `desc.input !== void 0` 才走「认领整行」分支，:1665 对「带参数但没声明 `input`」直接 `return void 0` 落回普通消息，裸命令虽执行、走的也是不含参数的通道。菜单/Tab 路径同理（`matchPick` :1578 同样要求 `desc.input !== void 0`）。插件侧只有 `schedule` / `later` 声明了 `input`，dock 用的七条没有。
