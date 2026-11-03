@@ -40,7 +40,7 @@
  *  - 三个捕获点：命令（:757）、工具（:703）、runtime（:709，投递口径）。
  *
  * 没覆盖（诚实标注）：
- *  - 工具 description 里的 `maxChars` 仍是**注册时刻**快照（`:362`），本轮不动；
+ *  - 工具 description 不再插值注册时刻的 `maxChars`（改由文案说明上限随设置变化，见 fix/tool-desc-no-stale-limit）；
  *    所以这里断言的是工具 `execute` 在**调用时**读的实时校验口径，不是那条写死的描述。
  *  - 真 `dsh` 冷启动（完整内核树）由 `scripts/verify-across-kernels.mjs` 负责，不在单测里。
  * @module tests/settings-live-binding
@@ -305,6 +305,30 @@ test('稳定入口：同一个 apply 里注册出来的命令与工具，读取�
     // LONG+1 仍应拒：证明读到的是 1204 这个**更新值**，而不是「开长文本=无上限」。
     const over = await runLater(defs, agent, 'x'.repeat(LONG.length + 1));
     assert.equal(over.kind, 'error', '超过更新后的 maxPromptChars 应拒');
+  } finally {
+    await fiber.dispose();
+  }
+});
+
+// ── 7. 工具描述不再带注册时刻的硬编码上限（fix/tool-desc-no-stale-limit）──────
+
+test('注册出来的 user_schedule_create 描述里不含注册时刻的数字上限', async () => {
+  freshOwnershipDir();
+  // 注册时设置是「关长文本、1000」，注册后就地放开到 10000：
+  // 若描述仍是注册时刻快照，模型会看到「≤1000 字符」而实际能收 10000。
+  const raw = { maxSchedules: 20, allowLongPrompts: false, maxPromptChars: 1000 };
+  const { defs, agent, fiber } = await bootAssembly(track1Service(raw), true);
+  try {
+    raw.allowLongPrompts = true;
+    raw.maxPromptChars = 10000;
+    const tool = defs.get('tool:user_schedule_create');
+    assert.ok(tool, '工具应已注册');
+    const promptDesc = String(tool.parameters?.properties?.prompt?.description ?? '');
+    const text = `${String(tool.description ?? '')} ${promptDesc}`;
+    assert.ok(text.length > 0, '描述不应为空');
+    assert.doesNotMatch(text, /\{\s*maxChars\s*\}/, '描述里不应残留未插值的 {maxChars} 占位符');
+    assert.doesNotMatch(text, /[≤<>]=?\s*\d+\s*(字符|characters)/i, '描述不应把注册时刻的数字当成当前硬上限');
+    assert.match(promptDesc, /设置|允许长文本|allow long|plugin setting/i, '应说明上限随插件设置变化');
   } finally {
     await fiber.dispose();
   }
