@@ -4,6 +4,14 @@
 
 ## 未发布
 
+- **fix(commands)** 七条 `/user-schedule-*` 在输入框手敲时整行被当普通聊天消息发给模型（issue #10）。
+  - 现象（Web 输入框实测）：敲 `/user-schedule-delete {"id":"schedule-…"}` → 命令没执行，抓到的是 `POST /api/session/prompt`（那一行原样进了模型）；敲不带参数的 `/user-schedule-delete` → 命令执行了，但报「缺少 JSON 载荷。」。对照 `/schedule`、`/later` 带参数一切正常。
+  - 根因在内核客户端命令机 `@deepseek-ai/dsh-client-ui-commands/lib/client.js` 的 `matchEnter()`（`0.2.1-rc.5` 与 `0.2.1-rc.4` 都在 :1661 与 :1665）：:1661 只有 `desc.input !== void 0` 才走「认领整行」分支，:1665 对「带参数但没声明 `input`」直接 `return void 0` 落回普通消息，裸命令虽执行、走的也是不含参数的通道。菜单/Tab 路径同理（`matchPick` :1578 同样要求 `desc.input !== void 0`）。插件侧只有 `schedule` / `later` 声明了 `input`，dock 用的七条没有。
+  - 修法：七条 `user-schedule-*` 各补 `input: { hint }`，hint 写明载荷形状。七条都**不涉及** `attachments`（跨代次字段面见 `src/upstream-shims.ts` 与 `laterInput` 那段注释），只写 `hint`。`-list` 同样拿到 hint 以便被认领，但**不引入任何载荷要求**——它照旧完全忽略 `rawInput`，空参数与带参数都不报错。
+  - 顺带加「裸 id 容错」：新增纯函数 `coercePayload(rawInput)`，六个走载荷的 handler 改调它。判据是插件自己的 id 形状 `/^schedule-[\w-]+$/`（`schedule-compat.ts:63` 生成的 `schedule-${randomUUID()}`）：空串 → 保留原「缺少 JSON 载荷。」；合法 JSON 对象 → 照旧；非 JSON 但整串匹配该形状的裸串 → 归一化成 `{ id }`，于是 `/user-schedule-pause schedule-…` 与 `{"id":"schedule-…"}` 等价；坏 JSON、数组、`null`、不像 id 的裸串仍走原有错误文案，不把错误吞成成功。
+  - **代价（权衡后的取舍，不是遗漏）**：`-list` 由「一次回车出结果」变成「两次回车」——第一次把整行认领成命令、第二次才执行（真机 A/B 实测于内核 `0.2.1-rc.4`）。内核的 `CommandInputDescriptor` 只有 `hint` 与 `attachments` 两面（`dsh-commands/lib/types/types.d.ts:20-31`），**没有「参数可选」这一面**，而 `matchEnter()` 是「先查只适用于裸命令的分支 → 声明了 `input` 就认领 → 既无 `input` 又是裸命令才直接执行」，所以凡声明 `input` 的命令一律是这个顺序（`/schedule`、`/later` 一直如此），本仓改不掉。不收 `input` 能让 `-list` 回到一次回车，代价是手敲带参整行又回给模型——那正是本条要修的正主，因此保留 `input`，并把两次回车直接写进 `-list` 的 hint 文案与 README，不让用户以为命令没响应。其余六条是净收益：原来裸回车只会报「缺少 JSON 载荷。」。
+  - 新增 `tests/slash-command-input.test.mjs`（10 条）：七条定义都带 `input.hint`、hint 文案覆盖 JSON 与裸 id 两种写法、`coercePayload` 四种输入、`-list` 语义未变、`-list` 两次回车钉成**已知约束**（handler 单次调用即出结果 + hint 里写着两次回车 + `/schedule` `/later` 同样声明了 `input`，一视同仁）、以及一条端到端「`-create` 带 JSON 建成 → `-pause` 用裸 id 成功」。README 中英两版手敲那段补上「需要带载荷」与「两次回车」的说明。
+
 ## 1.11.0 — 2026-11-02
 
 - **feat(kernel)** 支持内核 `0.2.2-alpha.2`。这不是"顺手多认一代"，而是两条**硬约束**，缺任一条这一代就装不上或时序不对：

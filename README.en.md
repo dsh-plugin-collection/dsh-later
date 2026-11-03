@@ -92,7 +92,9 @@ One difference between anchor and relative chains (deliberate, not a bug):
 /later +2h+1h+30m 催我交周报
 ```
 
-The dock buttons are not a private channel: they run `/user-schedule-create`, `-list`, `-delete`, `-edit`, `-pause`, `-resume`, `-steer-now` (arguments are a JSON object). You can type them too, but they are designed to be clicked, not typed.
+The dock buttons are not a private channel: they run `/user-schedule-create`, `-list`, `-delete`, `-edit`, `-pause`, `-resume`, `-steer-now` (arguments are a JSON object). You can type them too, but they are designed to be clicked, not typed. When you do type one, it needs a payload: everything except `-list` (no payload needed — any arguments are ignored) takes a JSON object, e.g. `/user-schedule-delete {"id":"schedule-…"}`; `-delete` / `-pause` / `-resume` / `-steer-now` also accept a bare id, so `/user-schedule-pause schedule-…` is the same as `{"id":"schedule-…"}`.
+
+Typing any of these commands — `/schedule` and `/later` included — takes **two presses of Enter**: the first claims the line as a command, the second runs it. That is the kernel's uniform order for commands that take arguments, not an extra step this plugin adds: the kernel's input descriptor has no "arguments are optional" face, and if a single Enter dispatched the line instead, typing it with arguments would go to the model as an ordinary chat message. The side effect is that `/user-schedule-list` went from one Enter to two — buttons and panel refresh are untouched, only typing that one by hand feels like an extra press.
 
 ### Images and files
 
