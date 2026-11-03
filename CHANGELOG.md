@@ -4,6 +4,16 @@
 
 ## 未发布
 
+- **fix** 未到期的提醒在**打开那个会话**之后从 dock 与侧栏上消失，到点却照常发送（issue #11 的「投影」那一半）。
+  - 现象（实测复现）：投影 `schedules=[]`，40 秒后日志里仍多出一条 `dispatch`——**它还在跑，只是看不见**，于是也取消不掉。现网数据里已抓到实例（`~/.dsh/sessions/…/session-952d4404…`：4 条 create / 2 delete / 2 dispatch，每条 dispatch 都紧跟在一条 `session/end-seed` 之后）。
+  - 根因是「哪些事件属于本会话」这件事在两条通道上各有一套判据：投影 `applyUserScheduleProjection` 见 `session/end-seed` 就把 `active` 清空（只从 sidecar 恢复归属），而投递通道 `foldUserState` 按 `inheritedEventCount`（继承前缀长度）排除，**不看这个事件**。
+  - 为什么每次冷恢复都会多出这条事件：内核 `dsh-session/lib/index.js:1428`（0.1.2-rc.1 是 `:1322`，措辞略异但同样只发 `{}`）——resume 时把整份持久日志当 `seed` 传给 `sessions.prepare`，尾事件不是 end-seed 就补一条。**不是只有 fork 才发**，所以「见 end-seed 即清空」连「本会话自己历史的重放」也一起抹掉了。
+  - 改法：判据统一成宿主 `init(header, inheritedEventCount)` 的**继承前缀长度**，与投递通道同源——`seq < 切点` 的事件一条都不进状态（fork 隔离照旧成立，AC-07 没放宽），`session/end-seed` 本身降级为无关事件（返回同一引用，不多推一帧）。
+  - 为什么**不能**改按 `data.inherited === true` 分派：`0.1.2-rc.1` 的 fork 边界也只发 `{}`，那代根本没有 `inherited` 字段——按 data 形状判会在最老的受支持代上把「子会话不该看见父的提醒」变成「看得见」。新判据也不依赖任何只在较新代次出现的字段：9 代（`0.1.2-rc.1 … 0.2.2-alpha.2`）都在 `def.init(session.header, session.inheritedEventCount)` 处传这个第二参数（逐代 grep `dsh-session-projection/lib/index.js` 的调用点核实）。
+  - **`stateVersion` 4 → 5**，这条不是例行升版：旧缓存 cell 很可能就是被清空过的那份状态，而宿主 `restore()` 只在版本相等时才复用行、复用后只从行的水位往后折（`dsh-session-projection/lib/index.js:286-300`），尾部那条重放 end-seed 过了新 fold 只是 no-op，历史里的 create 事件**再不会被重看**——不升版，本条修复对**已经中毒的会话**永远不生效。代价：版本失配使每个会话的投影整段重折一次（`restoreFloor()` 返回 0，同文件 223-231 行），一次性，之后照常吃缓存。
+  - `paused` 语义不动：view 仍以 sidecar 重读为准，重放边界不会让暂停项出现第三种状态（既不变 active 也不消失）。
+  - 测试：新增 `tests/projection-endseed-parity.test.mjs`——重放后仍看得见 / 真 fork 继承前缀仍被丢 / **同一份事件序列下两通道的 active 集合相等**（逐场景各断一次，另附一条反例用例证明这条一致性判据不是恒真）；`tests/projection.test.mjs` 的 AC-07 用例改成按切点判，并写明边界来源与「不许换回按事件判」的理由；`tests/pause.test.mjs` 那条 stateVersion 常量断言随之更新。
+  - 本轮**不含**：sidecar schema（`OwnedEntry` 仍不带到期时刻）、宿主级 sweeper / `agents.resume` 那套装配——那是 #11「会话冷着也能投递」的另一半，另排。
 - **fix** 设置页改「允许长文本 / 上限」后，`/later` 仍按旧的 1000 字符拒绝长内容（issue #9）。
   - 现象：打开「允许长文本」并把上限设成 10000 后，`/later` 发 1204 字仍被拒「提醒内容不能超过
     1000 字符。」，而**工具**路径能收。校验逻辑一直是对的（`resolvePromptLimits` 正确读设置），
