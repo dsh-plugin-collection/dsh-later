@@ -57,6 +57,16 @@ export const MAX_WAKE_FAILURES = 5;
 /** 退避上限：失败越多次，越不该继续频繁拉起 agent。 */
 export const MAX_BACKOFF_MS = 10 * 60_000;
 
+/**
+ * 一次唤醒之后的「消化宽限期」：这段时间内即使提醒仍在 sidecar 里到期，也不判失败。
+ *
+ * 投递不是同步的——`followup` 之后还有确认窗口与一次 flush，扫描轮次之间往往还没落盘。
+ * 宽限期取 250ms：正常路径的 followup → `user/message` 落盘是同一次宏任务里的事，
+ * 而确认轮询本身也会在毫秒级完成；真投不出去时，第一次退避（1s）立刻接上，既不会把成功
+ * 判成失败，也能让"放弃"在十秒量级内收敛（实测 5 次失败 ≈ 11s）。
+ */
+const WAKE_GRACE_MS = 250;
+
 /** Node timers 能表示的最大延迟（超过会立刻触发，必须夹住）。 */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -120,8 +130,10 @@ export interface ExpirySweeper {
 /** 一个会话的退避状态。 */
 interface BackoffState {
   failures: number;
-  /** 下一次允许尝试的时刻（epoch ms）。 */
+  /** 下一次允许尝试的时刻（epoch ms）：退避到期前扫描器不碰它。 */
   nextAttempt: number;
+  /** 最近一次尝试的起点（epoch ms）——排下一次扫描与后来清算失败都以它为基准。 */
+  attemptAt: number;
   /** 是否已经为「放弃」告过警（只喊一次）。 */
   gaveUp: boolean;
 }
@@ -294,15 +306,33 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     }
   };
 
-  /** 排下一次精确扫描（只排仍存在的最小到期点）。 */
+  /**
+   * 排下一次精确扫描。
+   *
+   * 目标 = 「sidecar 里最近的到期点」与「每个会话的退避下限」中**最近**的那个：
+   * 到期点已经过去时延迟是 0，若不夹上退避下限，一次失败的唤醒会立刻再排 NextTick 的一轮，
+   * 于是退避参数形同虚设、一个会话在一秒内能被叫醒几十次（实测 88 次）。兜底 tick 也覆盖
+   * 到了这部分时间，所以这里**只在有活可干时才排**。
+   */
   const reschedule = (): void => {
     if (stopped) return;
     clearArmed();
     let nearest: number | undefined;
+    const consider = (value: number | undefined): void => {
+      if (value === undefined) return;
+      nearest = nearest === undefined ? value : Math.min(nearest, value);
+    };
     for (const snapshot of readSnapshots()) {
-      const earliest = earliestOf(snapshot);
-      if (earliest === undefined) continue;
-      nearest = nearest === undefined ? earliest : Math.min(nearest, earliest);
+      const state = backoff.get(snapshot.sessionId);
+      if (state !== undefined) {
+        if (state.gaveUp) continue;
+        // ⚠️ 排的**不是条目自己的到期点**，而是"这个会话下一次真的会被尝试"的时刻。
+        // 一旦尝试过，到期点永远在过去、延迟恒为 0，扫描器就退化成忙循环（实测几百次空转）。
+        // 下一次尝试 = 这次尝试的起点 + 该失败次数对应的退避（首轮尝试是宽限期）。
+        consider(state.attemptAt + Math.max(backoffForFailures(state.failures), WAKE_GRACE_MS));
+        continue;
+      }
+      consider(earliestOf(snapshot));
     }
     if (nearest === undefined) return;
     const at = now();
@@ -315,10 +345,24 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
   };
 
   /** 记一次唤醒失败并排退避；只在「第一次」与「放弃」两处告警（不刷日志）。 */
+  /**
+   * 记一次唤醒失败：失败计数 +1、排下一次退避、把失败时刻记下来。
+   *
+   * 为什么不是"每看到一次仍在到期就 +1"：投递是异步的，`followup` 之后还有确认窗与一次
+   * flush；扫描轮次之间往往还没落盘。以「失败发生在哪一次尝试之后」为唯一口径——
+   * `lastAttemptAt` 只会被 `poll`（真的发起了一次唤醒）和本函数（尝试以异常收场）推进——
+   * 同一个尝试最多只记一次失败，退避也就不会被空转放大（实测曾把一个会话数到 417 次）。
+   */
   const noteFailure = (sessionId: string, detail: string): void => {
+    const attemptAt = now();
     const failures = (backoff.get(sessionId)?.failures ?? 0) + 1;
     const gaveUp = failures >= MAX_WAKE_FAILURES;
-    backoff.set(sessionId, { failures, nextAttempt: now() + backoffForFailures(failures), gaveUp });
+    backoff.set(sessionId, {
+      failures,
+      nextAttempt: attemptAt + backoffForFailures(failures),
+      attemptAt,
+      gaveUp,
+    });
     if (gaveUp) {
       if (warnedGaveUp.has(sessionId)) return;
       warnedGaveUp.add(sessionId);
@@ -338,14 +382,26 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
   /**
    * 对单个会话决定是否唤醒。
    *
-   * 不看 `wake()` 的返回值定成败：投递是异步的（followup 之后还有确认窗口），用
-   * 「下一轮扫描时这条提醒还在不在、还到期不到期」当判据更可靠。`wake()` 抛错则当场记失败。
+   * 成败不看 `wake()` 的返回值（投递是异步的），而看「下一次尝试时这条提醒还在不在、
+   * 还到期不到期」：不在/被推远 = 上次唤醒有效；仍在到期 = 那次没投出去。
+   * `wake()` 抛错当场记一次失败。
    */
   const poll = (snapshot: SweepSnapshot, at: number): void => {
     const sessionId = snapshot.sessionId;
     if (!options.wakeable(sessionId)) return;
     const state = backoff.get(sessionId);
     if (state !== undefined && (state.gaveUp || at < state.nextAttempt)) return;
+    // 记下"刚尝试过"。`attemptAt` 是这一次尝试的起点，`reschedule` 用它算"还要等多久"。
+    //
+    // ⚠️ 这一行不只是记账：`reschedule` 用 `nextAttempt` 排下一次精确扫描。到期点已经过去，
+    // 若这里留下一个过去时刻，`reschedule` 会算出 0 延迟、立刻再来一轮——而那一轮只会看到
+    // "退避未到"什么都不做，退化成逐 tick 空转（实测一个会话百来次唤醒就是从这里来的）。
+    backoff.set(sessionId, {
+      failures: state?.failures ?? 0,
+      nextAttempt: Math.max(state?.nextAttempt ?? 0, at),
+      attemptAt: at,
+      gaveUp: state?.gaveUp ?? false,
+    });
     inFlight.add(sessionId);
     let outcome: Promise<void>;
     try {
@@ -366,70 +422,50 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     );
   };
 
-  /** 结算上一轮的在飞唤醒（见 poll 的注释）。 */
-  const settleInFlight = (byId: ReadonlyMap<string, SweepSnapshot>, at: number): void => {
-    for (const sessionId of [...inFlight]) {
-      // 还在飞：等它落地，不重复计数。
-      if (inFlight.has(sessionId)) continue;
-      const snapshot = byId.get(sessionId);
-      const earliest = snapshot === undefined ? undefined : earliestOf(snapshot);
-      if (earliest === undefined || earliest > at) {
-        // 条目没了 / 被推远了 —— 这次唤醒有效，退避清零。
-        backoff.delete(sessionId);
-        warnedGaveUp.delete(sessionId);
-      }
-    }
-  };
-
   /**
-   * 结算「上一轮唤醒过、这一轮仍然到期」的会话：那次唤醒没把提醒投出去。
+   * 结算「上次唤醒之后是否把它消化掉了」，并据此刻的退避状态决定这一轮要不要再唤醒。
    *
-   * 只处理**已经落地**（不在飞）且**到期点仍在过去**的会话。这是退避的唯一来源，
-   * 也是「反复投不出去」会自己停下来的原因。
+   * 每个会话**每轮至多推进一次**：
+   *  1. 上次尝试以来还没过一个宽限期（{@link WAKE_GRACE_MS}）→ 什么都不做（给投递留时间）；
+   *  2. 提醒已经不在了 / 被推远了 → 上次唤醒有效，退避清零；
+   *  3. 仍在到期且退避窗口已到 → 记一次失败（下次再试的间隔会翻倍）；
+   *  4. 仍在到期、退避窗口未到 → 跳过。
+   * 全部处理完仍然到期、且没在退避里的会话，才是本轮真正要 `poll` 的。
    */
-  const settleUnconsumed = (byId: ReadonlyMap<string, SweepSnapshot>, at: number): void => {
-    for (const [sessionId, state] of [...backoff.entries()]) {
-      if (inFlight.has(sessionId) || state.gaveUp) continue;
-      const snapshot = byId.get(sessionId);
-      if (snapshot === undefined) {
-        backoff.delete(sessionId);
-        continue;
+  const settle = (snapshot: SweepSnapshot, at: number): 'poll' | 'skip' => {
+    const sessionId = snapshot.sessionId;
+    const state = backoff.get(sessionId);
+    const earliest = earliestOf(snapshot);
+    if (state !== undefined) {
+      // 仍在飞：等它落地，本轮不干扰。
+      if (inFlight.has(sessionId)) return 'skip';
+      // 还没到下一次允许尝试的时刻（宽限期或退避窗口）：什么都不做。
+      // 这条必须在「是否仍然到期」之前——投递是异步的，确认窗口内条目当然还在到期，
+      // 先下结论会把**一次成功的唤醒**算成失败。
+      if (at < state.nextAttempt) return 'skip';
+      if (state.gaveUp) return 'skip';
+      const unconsumed = earliest !== undefined && earliest <= at;
+      if (unconsumed) {
+        // 仍然到期 = 上一次唤醒没投出去：这次失败已经"观察到"，`noteFailure` 立刻把等待
+        // 时间翻倍并重新排下一次扫描。
+        noteFailure(sessionId, '唤醒后提醒仍然到期（未投递）');
+        return 'skip';
       }
-      const earliest = earliestOf(snapshot);
-      if (earliest === undefined || earliest > at) {
-        backoff.delete(sessionId);
-        warnedGaveUp.delete(sessionId);
-        continue;
-      }
-      // 仍然到期：说明上一次唤醒没有消化它。只在退避窗口已到时再记一次失败，
-      // 否则同一个失败会被每一轮 tick 重复计数（几轮就"放弃"了，纯属虚报）。
-      if (at < state.nextAttempt) continue;
-      if (settledSessions.has(sessionId)) continue;
-      noteFailure(sessionId, '唤醒后提醒仍然到期（未投递）');
+      // 条目没了 / 被推远 = 上次唤醒有效：退避清零，回到正常节奏。
+      backoff.delete(sessionId);
+      warnedGaveUp.delete(sessionId);
     }
+    if (earliest === undefined || earliest > at) return 'skip';
+    return 'poll';
   };
-
-  /** 本轮已尝试过的会话（每轮每个会话最多记一次失败）。 */
-  const settledSessions = new Set<string>();
 
   /** 一轮扫描。 */
   const runSweep = async (): Promise<void> => {
     const at = now();
     const snapshots = readSnapshots();
-    const byId = new Map<string, SweepSnapshot>();
-    for (const snapshot of snapshots) byId.set(snapshot.sessionId, snapshot);
-    settledSessions.clear();
-
-    settleInFlight(byId, at);
-    settleUnconsumed(byId, at);
-
     for (const snapshot of snapshots) {
       if (stopped) return;
-      if (inFlight.has(snapshot.sessionId)) continue;
-      const earliest = earliestOf(snapshot);
-      if (earliest === undefined || earliest > at) continue;
-      poll(snapshot, at);
-      settledSessions.add(snapshot.sessionId);
+      if (settle(snapshot, at) === 'poll') poll(snapshot, at);
     }
     reschedule();
   };
@@ -444,6 +480,9 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     const run = (async () => {
       do {
         rerun = false;
+        // 每轮之间让出一个宏任务：唤醒是 async 的，落在微任务之后的重入不能被本轮吞掉
+        // （否则一次唤醒会在同一个 `while` 里被反复消费，实测 246 次）。
+        await Promise.resolve();
         try {
           await runSweep();
         } catch (error) {
