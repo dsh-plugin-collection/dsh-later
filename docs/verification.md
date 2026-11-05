@@ -578,7 +578,9 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 **剩余边界（改动前请先读这一节）**：
 
 - **只有产生 root agent 的 profile 支持冷唤醒**：web（`dsh-web-app` 提供 `sessionController`，走 `resolveAgent`）与其余 profile（回退 `agents.resume`）都覆盖；两条都不通时记 `undelivered` 并告警一次，不重试风暴。
-- **被委托子会话（`delegationDepth > 0`）与非 root 一律不唤醒**：上游对子会话的 reminder 投递本来就拒绝（`session/agent-busy`），拉起来只会白跑一轮。
+- **被委托子会话（`delegationDepth > 0`）不冷唤醒**：上游对子会话的 reminder 投递本来就拒绝（`session/agent-busy`），拉起来只会白跑一轮。这条是**硬拒绝**——在扫描器的枚举层就被摘掉，连"失败的唤醒"都不记，避免为一条永远投不出去的子会话提醒反复退避、最后刷出"已停止自动唤醒"的假告警。深度取自会话头的 `delegationDepth` 与运行期 `options.subagentDepth` 的较大者（与上游 `delegationDepthOf` 同义）。
+- **非 root 不冷唤醒**：`ctx.agents.roots()` 里没有它 ⇒ 本插件的 runtime 挂不上 ⇒ 唤醒等于白拉。同样按硬拒绝处理（枚举层摘掉）。注意冷会话在这里看到的是「此刻没有对应 agent」，属正常现象，不算拒绝——判定只在**此刻存在 agent** 时才有信息。
+- **静默期（120s）只对"扫描器主动打开"生效，"确实已到期"可以旁路**：用户关掉某个会话后 120s 内，扫描器不会主动去打开它。但旁路**只对「sidecar 里确实已过期」的条目生效**——判据是 `hasOverdueEntry(sessionId)`（`src/index.ts`，走 `src/due.ts` 的统一判定），即 sidecar 里那条 `scheduledAt <= now`。其余情况（没有到期条目、或到期时刻缺失/非法）**仍按 120s 静默期**，扫描器不会去碰它。被静默期挡下的到期条目记 `undelivered(quiet-window)` 并 warn 一次，宽限后再试——不无声滤掉。
 - **冷唤醒会计一个 turn**：`agents.resume` 是真建 agent。宿主没有 provider 时那一轮以 `turn/end` 错误收尾（`agent "…" has no provider/model`）。扫描器用「1s→2s→4s→8s 退避、连续 5 次放弃并只告警一次」兜住"反复投不出去"，正常投递不受影响。
 - **`every` 周期任务的重挂仍归 runtime**：扫描器只负责叫醒，不搬周期逻辑。
 - **老 sidecar（v1/v2）缺 `scheduledAt` 的条目**：读时从会话日志 `schedule/change create` 回算（`after` = `createdAt + afterSeconds`，`at` = 记录自带的时刻）；回算不出来就**保守跳过并告警一次**——不猜、也不当成"永久逾期"去反复唤醒。回算需要会话句柄，冷会话拿不到时这条只能等会话被打开。
