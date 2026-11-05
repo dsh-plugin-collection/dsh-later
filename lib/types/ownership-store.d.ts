@@ -52,6 +52,17 @@ export interface OwnedEntry {
      * sidecar 是本插件私有存储，加字段天然向后兼容。
      */
     readonly attachments?: readonly ScheduledAttachment[];
+    /**
+     * 本条提醒的**到期时刻**（epoch ms；issue #11b）。
+     *
+     * 为什么必须进 sidecar：宿主级扫描器（`src/expiry-sweeper.ts`）要在**任何会话都没被
+     * 打开**时判断「哪条到期了」，而它拿不到 runtime 的内存 timer、也不该为了读一个时刻
+     * 把每个会话日志都解一遍。sidecar 是进程外唯一能让「一个都没 live」也看得到的索引。
+     *
+     * v3 起新写入必带；v1/v2 老条目缺这个字段，读路径按日志回算（见 {@link resolveScheduledAt}），
+     * 回算不出来的条目**保守跳过**并告警——既不静默丢任务，也绝不把它当成永久逾期去唤醒会话。
+     */
+    readonly scheduledAt?: number;
 }
 /** 暂停留档（仅 kind==='after'；不进会话日志）。 */
 export interface PausedEntry {
@@ -81,8 +92,35 @@ export declare function hasOwnership(sessionId: string, id: string): boolean;
 export declare function getOwnership(sessionId: string, id: string): OwnedEntry | undefined;
 /** 生成稳定插件 uid（pause/resume 跨日志 id 变更）。 */
 export declare function newTaskUid(): string;
-/** 记录（新增或覆盖）一条所有权；幂等。仅显式传入 `uid` 时写入稳定身份。 */
-export declare function recordOwnership(sessionId: string, id: string, delivery: UserScheduleDelivery, uid?: string, windowSeconds?: number, attachments?: readonly ScheduledAttachment[]): OwnedEntry;
+/**
+ * 记录（新增或覆盖）一条所有权；幂等。仅显式传入 `uid` 时写入稳定身份。
+ *
+ * `scheduledAt` 与 `uid`/`windowSeconds`/`attachments` **同一条保留语义**：不传就沿用旧条目
+ * 里的值。这不是省事，是正确性——`pause` 回填 uid、`flush` 失败回滚这类「覆盖写」只关心
+ * 一个字段，若把其余字段当 `undefined` 抹掉，宿主级扫描器（`src/expiry-sweeper.ts`）就会
+ * 突然看不见这条提醒的到期时刻，而那正是「到点了却没人叫醒会话」的静默失败。
+ */
+export declare function recordOwnership(sessionId: string, id: string, delivery: UserScheduleDelivery, uid?: string, windowSeconds?: number, attachments?: readonly ScheduledAttachment[], scheduledAt?: number): OwnedEntry;
+/** 一条 sidecar 文件里挂着的全部所有权条目（扫描器用；只读）。 */
+export interface SidecarSnapshot {
+    /** 会话 id（文件名去 `.json`，可能已被清洗过）。 */
+    readonly sessionId: string;
+    readonly entries: Readonly<Record<string, OwnedEntry>>;
+}
+/**
+ * 枚举**全部**会话的 sidecar 条目（宿主级到期扫描的数据源，issue #11b）。
+ *
+ * 这是本层唯一的「跨会话」读接口：扫描器不知道有哪些会话（冷启动时一个 agent 都没有，
+ * `ctx.agents.roots()` 是空数组），只能从持久化面自己枚举。两个失败面都**不抛**：
+ *  - 目录读不了 → 返回空数组（首启/临时目录被删属正常）；
+ *  - 单个文件读不了 / 坏了 → 跳过该文件并 `warn`，绝不让一个坏文件吃掉整轮扫描
+ *    （「整轮失败」等于所有会话的提醒一起停摆，那正是要消灭的失败形态）。
+ *
+ * 返回值是快照：调用方可以边扫描边改，不会看到半更新。
+ * @param warn - 告警出口（插件侧是 `ctx.logger.warn`；缺省走 console）。
+ * @returns 每个可读 sidecar 的会话 id 与条目快照。
+ */
+export declare function listOwnershipSnapshots(warn?: (message: string) => void): readonly SidecarSnapshot[];
 /** 撤销一条所有权；幂等（不存在时无操作）。 */
 export declare function removeOwnership(sessionId: string, id: string): void;
 /** 按 uid 找当前仍 active 的 schedule id（缺失 undefined）。 */

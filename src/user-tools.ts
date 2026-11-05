@@ -666,6 +666,9 @@ export async function userScheduleCreate(
       newTaskUid(),
       record.kind === 'after' ? record.afterSeconds : undefined,
       trustedAttachments,
+      // 到期时刻进 sidecar：宿主级扫描器靠它判断「哪条到点了」，而那条路径上
+      // 会话可能一次都没被打开过（issue #11b）。
+      Date.parse(record.scheduledAt),
     );
     try {
       agent.session.append('schedule/change', {
@@ -902,6 +905,9 @@ export async function userScheduleEditPrompt(
       // 附件跨「删旧建新」保留：编辑只换文案，随命令提交的图片/文件仍属于这条
       // 提醒。新 id 无旧条目可回退，必须显式带上。
       previousEntry?.attachments,
+      // 新 id 同样没有旧 `scheduledAt` 可继承：编辑会重置倒计时（after）或保留原时刻
+      // （at），两种都由 `record` 自己决定，这里一律取它的。
+      Date.parse(record.scheduledAt),
     );
     try {
       agent.session.append('schedule/change', { version: 1, operation: 'delete', id: scheduleId });
@@ -912,7 +918,19 @@ export async function userScheduleEditPrompt(
     }
     if (!(await flushSession(ctx, agent.session))) {
       removeOwnership(sessionId, record.id);
-      if (previousEntry !== undefined) recordOwnership(sessionId, scheduleId, previousEntry.delivery);
+      // 回滚同样要把 `scheduledAt` 带回去：只恢复 delivery 会让扫描器看不见这条提醒，
+      // 而它此刻仍是 active 的（日志里的 create 没被撤销，flush 失败的只有新写入）。
+      if (previousEntry !== undefined) {
+        recordOwnership(
+          sessionId,
+          scheduleId,
+          previousEntry.delivery,
+          previousEntry.uid,
+          previousEntry.windowSeconds,
+          previousEntry.attachments,
+          previousEntry.scheduledAt,
+        );
+      }
       return persistenceError();
     }
     removeOwnership(sessionId, scheduleId);
@@ -976,7 +994,15 @@ export async function userSchedulePause(
     const delivery = deliveryMap.get(scheduleId) ?? ownership?.delivery ?? 'context';
     // 旧条目无 uid 时补写，保证 pause 后有稳定身份
     if (ownership?.uid === undefined) {
-      recordOwnership(sessionId, scheduleId, delivery, uid);
+      recordOwnership(
+        sessionId,
+        scheduleId,
+        delivery,
+        uid,
+        ownership?.windowSeconds,
+        ownership?.attachments,
+        ownership?.scheduledAt ?? target,
+      );
     }
     /**
      * 进度条总窗口（原间隔），**不能**用 `existing.afterSeconds`。
@@ -1086,6 +1112,7 @@ export async function userScheduleResume(
       uid,
       paused.originalAfterSeconds ?? paused.remainingSeconds,
       paused.attachments,
+      Date.parse(record.scheduledAt),
     );
     try {
       agent.session.append('schedule/change', {

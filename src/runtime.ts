@@ -487,6 +487,9 @@ export class UserScheduleRuntime {
       previous?.uid,
       record.kind === 'after' ? record.afterSeconds : previous?.windowSeconds,
       previous?.attachments,
+      // 补偿重挂保住的是**同一个时刻**（`createAtRecord` 用的就是 `record.scheduledAt`），
+      // 所以到期索引跟着走；漏了它，宿主级扫描器就再也不会来叫醒这条提醒。
+      Date.parse(record.scheduledAt),
     );
 
     let nextRecord;
