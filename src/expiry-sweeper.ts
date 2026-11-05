@@ -25,7 +25,14 @@
  *  - **精确 timer**：内存里记住最近的那个到期点，到点扫一次（正常路径，误差在毫秒级）；
  *  - **兜底 tick**：低频（{@link DEFAULT_SWEEP_INTERVAL_MS}，60s 量级）重扫，覆盖
  *    「别的进程改了 sidecar」「系统时钟跳变」「精确 timer 因故没排上」这些情况。
- * 两级都 `unref`：扫描器不替用户把进程钉住（宿主自己要不要常驻是宿主的事）。
+ * **两级定时器的 ref 语义不同**（这里踩过一个坑，改之前先读完）：
+ *  - 精确 timer **unref**：它是「几秒后的一次性唤醒」，不该单独替用户把进程钉住
+ *    （宿主自己要不要常驻是宿主的事）；
+ *  - 兜底 tick **不 unref**：它是「这个插件的整体闹钟」。per-session 的 runtime timer 可以
+ *    unref（那个会话有活时自然有别的引用），但插件级扫描器本身就是进程该被唤醒的理由之一
+ *    ——一旦它也 unref，宿主在两次活动之间空转时，它排的定时器就永远轮不到。
+ *  另外**启动时要同步扫一轮**（不等任何定时器）：新进程起来时 sidecar 里可能已经有到期
+ *  提醒，那是唯一的同步时机，缺了它「起步时 sidecar 为空」就变成「此后只靠兜底 tick」。
  *
  * ## 唤醒是有代价的（D1：接受）
  *
@@ -47,6 +54,7 @@
  * @module dsh-later/expiry-sweeper
  */
 import type { OwnedEntry } from './ownership-store.js';
+import { dueTargetOf } from './due.js';
 
 /** 兜底 tick 周期：60s 量级（精确 timer 负责正常路径，它只负责"迟早会扫到"）。 */
 export const DEFAULT_SWEEP_INTERVAL_MS = 60_000;
@@ -93,8 +101,16 @@ export interface ExpirySweeperOptions {
    * 因为投递本身是异步的（followup + 确认窗口）。这里只要求**不抛**：抛错计入失败次数。
    */
   wake(sessionId: string): void | Promise<void>;
-  /** 侧会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。 */
+  /** 这个会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。 */
   wakeable(sessionId: string): boolean;
+  /**
+   * 可选：`wakeable` 返回 false 时，给出**软拒绝**的原因（例如 `quiet-window`）。
+   *
+   * 返回原因 = 这条到期提醒被"有意暂缓"⇒ 扫描器把它记成 `undelivered`（留痕、下一轮再试），
+   * 而不是当成一次失败去退避。返回 undefined = 硬拒绝（叫醒也没用），本轮静默跳过。
+   * 没有这个旁路时，"暂缓"与"永远投不出去"在观测上无法区分——前者会被后者拖成假告警。
+   */
+  refuseReason?(sessionId: string): string | undefined;
   /**
    * 给老条目（v1/v2，缺 `scheduledAt`）回算到期时刻。
    * @returns 回算不出来时 `undefined`（扫描器据此**保守跳过**，不猜）。
@@ -125,6 +141,8 @@ export interface ExpirySweeper {
   dispose(): Promise<void>;
   /** 诊断用：某会话当前的连续失败次数。 */
   failuresOf(sessionId: string): number;
+  /** 诊断用：被「有意暂缓」而未投递的条目数，按原因聚合（如 `quiet-window`）。 */
+  undeliveredReasons(): ReadonlyMap<string, number>;
 }
 
 /** 一个会话的退避状态。 */
@@ -233,6 +251,10 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
   const warnedUnresolved = new Set<string>();
   /** 已喊过「放弃」的会话：只喊一次。 */
   const warnedGaveUp = new Set<string>();
+  /** 已喊过「暂缓未投递」的 `会话/原因`：每项只喊一次，不刷日志。 */
+  const warnedUndelivered = new Set<string>();
+  /** 本轮/累计的 undelivered 计数（诊断面）：`原因 → 条数`。 */
+  const undelivered = new Map<string, number>();
 
   const unref = (handle: unknown): void => {
     const candidate = handle as { unref?: () => void } | undefined;
@@ -459,13 +481,49 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     return 'poll';
   };
 
+  /**
+   * 到期的会话被 `wakeable` 挡下时的去向。
+   *
+   * - `refuseReason` 给了原因（如 `quiet-window`）⇒ 记 `undelivered` 并告警**一次**，
+   *   下一轮（或兜底 tick）再试。这不是失败，不该进退避——它只是"现在别打开"。
+   * - 没给原因 ⇒ 硬拒绝（子会话 / 非 root），静默跳过（枚举层通常已经摘掉了它们）。
+   * @returns true 表示本轮已处理完（不要再 poll）。
+   */
+  const noteRefused = (sessionId: string, at: number): boolean => {
+    const reason = options.refuseReason?.(sessionId);
+    if (reason === undefined) return false;
+    const key = `${sessionId}/${reason}`;
+    undelivered.set(reason, (undelivered.get(reason) ?? 0) + 1);
+    if (!warnedUndelivered.has(key)) {
+      warnedUndelivered.add(key);
+      options.warn(
+        `later: 会话 ${sessionId} 的提醒已到期，但按「${reason}」暂缓唤醒（不是丢弃）：` +
+          `它会在本轮之后重试，会话被打开或被用户改动时也会立即补投。`,
+      );
+    }
+    // 暂缓不是失败：只把下一次尝试排到宽限期之后（`reschedule` 读 `nextAttempt`）。
+    const state = backoff.get(sessionId);
+    backoff.set(sessionId, {
+      failures: state?.failures ?? 0,
+      nextAttempt: at + WAKE_GRACE_MS,
+      attemptAt: state?.attemptAt ?? at,
+      gaveUp: state?.gaveUp ?? false,
+    });
+    return true;
+  };
+
   /** 一轮扫描。 */
   const runSweep = async (): Promise<void> => {
     const at = now();
     const snapshots = readSnapshots();
     for (const snapshot of snapshots) {
       if (stopped) return;
-      if (settle(snapshot, at) === 'poll') poll(snapshot, at);
+      if (settle(snapshot, at) !== 'poll') continue;
+      if (options.wakeable(snapshot.sessionId)) {
+        poll(snapshot, at);
+        continue;
+      }
+      noteRefused(snapshot.sessionId, at);
     }
     reschedule();
   };
@@ -501,11 +559,25 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     return run;
   };
 
-  // 起步：先按 sidecar 现状排一次精确 timer，再挂兜底 tick。
+  // 起步顺序是**承重**的（issue #11b 的跨内核用例在这里真红过）：
+  //  1. 先挂兜底 tick，**不 unref**；
+  //  2. 立刻同步扫一轮；
+  //  3. 再按现状排精确 timer。
+  //
+  // 为什么不能反过来"先排 timer，等它触发再扫"：`apply()` 的那一刻 sidecar 往往还是空的
+  // （用户还没建任何提醒），于是排出来的延迟是 0；而 `unref()` 之后这个定时器**不再把
+  // 进程从空转中唤醒**——脚本 `boot()` 之后宿主很快就没事可做，定时器永远不会触发，
+  // 冷用例于是"建了提醒、dispose 了会话、等到天亮也没人叫醒它"（实测 0.2.1-rc.2 真内核）。
+  //
+  // 兜底 tick 同样**不能 unref**：per-session 的 runtime timer 可以 unref（那个会话有活时
+  // 自然有别的引用），但插件级扫描器是「这个插件的闹钟」——它自己就该是进程活着的理由之一。
+  // 撤销时（dispose）两个定时器都清掉，热重载后不会留下第二个扫描器。
   ticker = setTick(() => {
     void sweep();
   }, intervalMs);
-  unref(ticker);
+  // 启动即扫一轮（不等任何定时器）：新进程起来时 sidecar 里已经有到期提醒，这里是唯一的
+  // 同步时机——之后才轮到精确 timer 与兜底 tick。
+  void sweep();
   reschedule();
 
   return {
@@ -533,6 +605,9 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     },
     failuresOf(sessionId: string) {
       return backoff.get(sessionId)?.failures ?? 0;
+    },
+    undeliveredReasons() {
+      return new Map(undelivered);
     },
   };
 }

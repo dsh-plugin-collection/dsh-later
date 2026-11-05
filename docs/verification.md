@@ -554,7 +554,7 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 
 ## 已知限制
 
-### 服务端重启后，没人打开过的会话不会按时投递（issue #11 → #128）
+### 服务端重启后，没人打开过的会话不会按时投递（issue #11 → #128 → **#11b 已修**）
 
 **现象**（真进程重启实测，0.2.1-rc.4 + dsh-later）：`/later +2m` 建好提醒 → 停掉 dsh 进程 → 用同一 `DSH_HOME` 重启 → 全程不连浏览器，到期后再等 90s：会话日志里 `user/message` 投递计数 **0**，sidecar 与 `schedule/change create` 都还在；打开那条会话，**立刻补发**（`delivered=1`）。
 
@@ -562,9 +562,27 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 
 **已修的半面（issue #11a / PR #124，1.12.0）**：投影与投递两条通道原来口径不同——宿主每次冷恢复会话都会追加一条 `session/end-seed {}`（内核 `dsh-session/lib/index.js:1428`），旧投影据此把 `active` 抹空，于是提醒**照发但看不见、取消不掉**。现在两通道同按 `init(header, inheritedEventCount)` 的继承前缀切点判，`stateVersion` 升到 5 让旧的中毒缓存行作废。
 
-**未修的半面（issue #128）**：到点主动解析并唤醒会话（官方 `@deepseek-ai/dsh-schedule` 的做法是宿主级单 runtime + 到点 `ctx.sessionController.resolveAgent(sessionId)`）。落地前要定三件事：`sessionController` 只有 `dsh-web-app` 挂载（顶层 `inject` 会让整条 fiber pending）、sidecar 的 `OwnedEntry` 不含到期时刻、冷 resume 会真的跑出一个 turn。
+**已修（issue #11b / 分支 `feat/11b-host-level-sweep`，1.13.0）**：宿主级到期扫描器 `src/expiry-sweeper.ts` 挂在插件 apply 的顶层 fiber 上，看 sidecar 里每条提醒的到期时刻（v3 起 `OwnedEntry.scheduledAt`），到点用「惰性取 `ctx.get('sessionController')` → 回退 `ctx.agents.resume({ resumeSessionId })`」把会话拉起来，再走**原有** runtime 链路投递（确认窗口、`schedule/change dispatch` 记账、`/later` 代发语义一个字没改）。
 
-**因此本文件之外的那些承诺请按这句读**：README 的「关网页也准时触发」= 服务端在跑、会话仍 live；不含「服务端重启后无人打开也准时」。
+上面那条「停进程重启、不开浏览器、到期后 0 条」现在变成：**到期后由扫描器自己叫醒会话并投递**。判据是事件形状（`agent/inbox/spliced` 的 `inserted[].content` 带 nonce + 随后一条 `schedule/change operation: dispatch`），跨内核 `function` 面每个代次都单列一维（`冷会话 spliced=N`），与热会话分开数——任何一方为 0 都单独判红，不许互相打掩护。
+
+落地时踩到、现在写死在实现里的四条（改动这些之前先读源码注释）：
+
+1. **扫描器启动就要同步扫一轮**。`apply()` 那一刻 sidecar 往往还是空的，若只靠「先排 timer 等它触发」，排出来的延迟是 0、`unref` 之后又不再唤醒进程，等于**整个生命周期只剩 60s 兜底 tick**。
+2. **建/改/暂停/恢复/插话之后必须让扫描器重排**（`activeSweeper?.reschedule()`）。runtime 那边有 `requestDrive()`，扫描器没有第二个知情者，新写进 sidecar 的到期时刻只能等兜底 tick。
+3. **静默期只拦"扫描器猜着去打开"，不拦"确实已到期"**。`agent/disposed` 之后内核会把会话日志封口（实测 `foldUserState` 折出 `active: 0`），所以"到期"这件事只能由 sidecar 这个断点索引回答：`hasOverdueEntry()` 为真时静默期让路。被挡下的条目记 `undelivered(quiet-window)` 并 warn 一次，**不静默丢**。
+4. **到期判定只有一处**（`src/due.ts` 的 `isDue` / `dueTargetOf`），runtime 读折叠记录、扫描器读 sidecar，两边共用同一口径；时刻非法/缺失一律不算到期。
+
+**剩余边界（改动前请先读这一节）**：
+
+- **只有产生 root agent 的 profile 支持冷唤醒**：web（`dsh-web-app` 提供 `sessionController`，走 `resolveAgent`）与其余 profile（回退 `agents.resume`）都覆盖；两条都不通时记 `undelivered` 并告警一次，不重试风暴。
+- **被委托子会话（`delegationDepth > 0`）与非 root 一律不唤醒**：上游对子会话的 reminder 投递本来就拒绝（`session/agent-busy`），拉起来只会白跑一轮。
+- **冷唤醒会计一个 turn**：`agents.resume` 是真建 agent。宿主没有 provider 时那一轮以 `turn/end` 错误收尾（`agent "…" has no provider/model`）。扫描器用「1s→2s→4s→8s 退避、连续 5 次放弃并只告警一次」兜住"反复投不出去"，正常投递不受影响。
+- **`every` 周期任务的重挂仍归 runtime**：扫描器只负责叫醒，不搬周期逻辑。
+- **老 sidecar（v1/v2）缺 `scheduledAt` 的条目**：读时从会话日志 `schedule/change create` 回算（`after` = `createdAt + afterSeconds`，`at` = 记录自带的时刻）；回算不出来就**保守跳过并告警一次**——不猜、也不当成"永久逾期"去反复唤醒。回算需要会话句柄，冷会话拿不到时这条只能等会话被打开。
+- **静默期监听的撤销契约只有单测覆盖了一半**：完整那条（监听挂在 effect 作用域里 ⇒ 拆 fiber 后必须摘掉）由 `tests/11b-cold-delivery.test.mjs` 的「撤销契约」用例钉住；「apply 期间注册的监听会不会被 cordis 拆」**不是**本插件的问题（真 cordis 上顶层注册同样有效，最小实验 `hits=1`），所以这里不记成已知限制。
+
+**因此本文件之外的那些承诺请按这句读**：「关网页也准时触发」现在**两档都成立**——浏览器关掉、服务端在跑：一直以来成立；服务端重启、会话没被打开：**1.13.0 起成立**，边界见上面的「剩余边界」。
 
 ### `0.1.7` 下设置页不可用
 

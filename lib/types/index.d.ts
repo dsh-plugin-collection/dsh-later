@@ -77,6 +77,15 @@ export declare function registerUserScheduleTools(rootCtx: Context, toolCtx: Con
 interface UserWatch {
     /** sessionId → 最近一次「用户动作」的时刻（epoch ms）。 */
     readonly recent: Map<string, number>;
+    /**
+     * sessionId → 被静默期挡下的到期条目（issue #11b 的修正）。
+     *
+     * 静默期的语义是「别主动去**打开**一个用户刚碰过的会话」，**不是**「到期任务可以不发」。
+     * 把两者混在一起，就成了"有一条到期了，因为它刚被关过，所以谁都不知道它没发"——
+     * 正是本仓一直在清理的那类安静失败。所以挡下来的每一条都在这里留痕，由扫描器取走并
+     * 报成 `undelivered`（原因 `quiet-window`），下次到期重排时重试。
+     */
+    readonly suppressed: Map<string, Set<string>>;
 }
 /**
  * 判断一个会话是否**允许**被宿主级扫描器冷唤醒（决策 D3 的拒绝面）。
@@ -88,13 +97,21 @@ interface UserWatch {
  *  2. **非 root**：`ctx.agents.roots()` 里没有它 ⇒ runtime 挂不上 ⇒ 唤醒等于白拉。冷会话在
  *     这里看到的是「此刻没有对应 agent」，属于正常现象，不算拒绝。
  *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
- * what 这一段只在**此刻有 agent** 时才有信息；没有 agent 时只看用户动作表。
+ *     注意这是**优先级最低**的一条：前两条（子会话 / 非 root）是「叫醒了也投不出去」，
+ *     这一条只是「现在别打开」。被它挡下的到期任务必须留痕（见 `UserWatch.suppressed`）。
  * @param ctx - 宿主上下文。
  * @param sessionId - 候选会话。
  * @param watch - 用户动作表。
  * @returns 可唤醒返回 true。
  */
 export declare function canWakeColdSession(ctx: Context, sessionId: string, watch?: UserWatch): boolean;
+/**
+ * 「叫醒也没用」的硬拒绝（与时间无关）：被委托子会话、或此刻是非 root 的活体 agent。
+ * @param ctx - 宿主上下文。
+ * @param sessionId - 候选会话。
+ * @returns 拒绝原因；可唤醒时为 undefined。`quiet-window` **不**是硬拒绝（见下）。
+ */
+export declare function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | 'not-root' | undefined;
 export declare function apply(ctx: Context, config?: {
     maxSchedules?: number;
 }): void;

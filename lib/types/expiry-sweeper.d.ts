@@ -25,7 +25,14 @@
  *  - **精确 timer**：内存里记住最近的那个到期点，到点扫一次（正常路径，误差在毫秒级）；
  *  - **兜底 tick**：低频（{@link DEFAULT_SWEEP_INTERVAL_MS}，60s 量级）重扫，覆盖
  *    「别的进程改了 sidecar」「系统时钟跳变」「精确 timer 因故没排上」这些情况。
- * 两级都 `unref`：扫描器不替用户把进程钉住（宿主自己要不要常驻是宿主的事）。
+ * **两级定时器的 ref 语义不同**（这里踩过一个坑，改之前先读完）：
+ *  - 精确 timer **unref**：它是「几秒后的一次性唤醒」，不该单独替用户把进程钉住
+ *    （宿主自己要不要常驻是宿主的事）；
+ *  - 兜底 tick **不 unref**：它是「这个插件的整体闹钟」。per-session 的 runtime timer 可以
+ *    unref（那个会话有活时自然有别的引用），但插件级扫描器本身就是进程该被唤醒的理由之一
+ *    ——一旦它也 unref，宿主在两次活动之间空转时，它排的定时器就永远轮不到。
+ *  另外**启动时要同步扫一轮**（不等任何定时器）：新进程起来时 sidecar 里可能已经有到期
+ *  提醒，那是唯一的同步时机，缺了它「起步时 sidecar 为空」就变成「此后只靠兜底 tick」。
  *
  * ## 唤醒是有代价的（D1：接受）
  *
@@ -74,8 +81,16 @@ export interface ExpirySweeperOptions {
      * 因为投递本身是异步的（followup + 确认窗口）。这里只要求**不抛**：抛错计入失败次数。
      */
     wake(sessionId: string): void | Promise<void>;
-    /** 侧会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。 */
+    /** 这个会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。 */
     wakeable(sessionId: string): boolean;
+    /**
+     * 可选：`wakeable` 返回 false 时，给出**软拒绝**的原因（例如 `quiet-window`）。
+     *
+     * 返回原因 = 这条到期提醒被"有意暂缓"⇒ 扫描器把它记成 `undelivered`（留痕、下一轮再试），
+     * 而不是当成一次失败去退避。返回 undefined = 硬拒绝（叫醒也没用），本轮静默跳过。
+     * 没有这个旁路时，"暂缓"与"永远投不出去"在观测上无法区分——前者会被后者拖成假告警。
+     */
+    refuseReason?(sessionId: string): string | undefined;
     /**
      * 给老条目（v1/v2，缺 `scheduledAt`）回算到期时刻。
      * @returns 回算不出来时 `undefined`（扫描器据此**保守跳过**，不猜）。
@@ -105,6 +120,8 @@ export interface ExpirySweeper {
     dispose(): Promise<void>;
     /** 诊断用：某会话当前的连续失败次数。 */
     failuresOf(sessionId: string): number;
+    /** 诊断用：被「有意暂缓」而未投递的条目数，按原因聚合（如 `quiet-window`）。 */
+    undeliveredReasons(): ReadonlyMap<string, number>;
 }
 /**
  * 第 `failures` 次失败后的等待时长（1s → 2s → 4s …，封顶 {@link MAX_BACKOFF_MS}）。

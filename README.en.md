@@ -167,7 +167,15 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 - **`/later` delayed send**: deliver *the text you are typing right now* later, as yourself (see [the difference](#reminders-vs-delayed-sends-whats-the-difference)).
 - **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
 - **Works across nine kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-alpha.2`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
-- **Fires with the page closed**: reminders persist server-side and arrive on time across devices (as long as the server process is still running; after a **server restart**, a session nobody has opened yet delivers only once it is opened - see the known limitation and issue #128).
+- **Fires with the page closed — both levels hold now**:
+  - **Browser closed, server running**: always true — reminders live server-side and arrive on time across devices.
+  - **Server restarted, that session was never opened**: true since 1.13.0. A host-level expiry sweeper wakes the session at due time and delivers through the normal runtime path, so delivery no longer depends on somebody happening to open it.
+
+  Remaining bounds (all recorded under "remaining bounds" in [`docs/verification.md`](./docs/verification.md)):
+  - The host must be able to rebuild the session: web profiles go through `sessionController`, every other profile falls back to `agents.resume`. When neither works the reminder is recorded as `undelivered` with a warning instead of being retried forever.
+  - **Delegated child sessions (`delegationDepth > 0`) are never cold-woken** — upstream refuses reminder delivery to subagent sessions, so waking one would only burn a turn.
+  - **A cold wake costs one turn**: `agents.resume` really constructs an agent; on a host without a provider that turn ends with a `no provider/model` error. The sweeper backs off (1s→2s→4s→8s) and gives up after a bounded number of failures, so this never turns into an error storm.
+  - For 120s after you close a session it is not opened proactively — but a reminder that has **already come due** is exempt (it retries after a grace period, and anything suppressed is recorded as `undelivered` with a warning).
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
 - **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
 - **Multilingual**: follows the DSH UI language (Chinese / English), live without reload.
@@ -269,7 +277,7 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 1. Open any conversation — a "Schedule" button appears right of the input box;
 2. Click it → pick a smart slot, or enter a custom time and content;
 3. Confirm → a countdown chip appears next to the button and the dock shows the pending item;
-4. When due, a `Reminder` message lands in the conversation — it fires even if you close the page.
+4. When due, a `Reminder` message lands in the conversation — it fires even if you close the page, and after a server restart it will wake a session nobody has opened (see "Works with the page closed" below for the remaining bounds).
 
 ---
 

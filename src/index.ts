@@ -44,6 +44,7 @@ import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { createRuntimeRegistry } from './runtime-registry.js';
 import { createExpirySweeper, resolveScheduledAtFromLog } from './expiry-sweeper.js';
 import { listOwnershipSnapshots } from './ownership-store.js';
+import { isDue } from './due.js';
 import { readOwnEvents } from './upstream-compat.js';
 import { hostDictFor, hostFormat } from './strings.js';
 import { registerBundledSkill } from './skill.js';
@@ -506,30 +507,59 @@ export function registerUserScheduleTools(
 interface UserWatch {
   /** sessionId → 最近一次「用户动作」的时刻（epoch ms）。 */
   readonly recent: Map<string, number>;
+  /**
+   * sessionId → 被静默期挡下的到期条目（issue #11b 的修正）。
+   *
+   * 静默期的语义是「别主动去**打开**一个用户刚碰过的会话」，**不是**「到期任务可以不发」。
+   * 把两者混在一起，就成了"有一条到期了，因为它刚被关过，所以谁都不知道它没发"——
+   * 正是本仓一直在清理的那类安静失败。所以挡下来的每一条都在这里留痕，由扫描器取走并
+   * 报成 `undelivered`（原因 `quiet-window`），下次到期重排时重试。
+   */
+  readonly suppressed: Map<string, Set<string>>;
 }
 
-/** 用户动作后的静默期：两个扫描周期（120s）内不主动冷唤醒。 */
+/** 用户动作后的静默期：两个扫描周期（120s）内不**主动**冷唤醒。 */
 const COLD_WAKE_QUIET_MS = 120_000;
 
-/** 建一份用户动作表，并把会话生命周期事件接进去（只在 apply 里建一次）。 */
-function createUserWatch(ctx: Context): UserWatch {
-  const recent = new Map<string, number>();
-  const note = (sessionId: unknown): void => {
-    if (typeof sessionId === 'string' && sessionId.length > 0) recent.set(sessionId, Date.now());
+/**
+ * 建一份用户动作表。
+ *
+ * ⚠️ 这里**只造表、不挂监听**。曾经把 `ctx.on('agent/disposed', …)` 放在这里，而本函数在
+ * `apply()` 顶层被调用——那一刻 fiber 还是 `LOADING`，`ctx` 是根上下文，cordis 会把这种
+ * 作用域外的注册**立刻拆掉**（实测：`ctx.on` 返回了、事件也 emit 了，回调一次都没进）。
+ * 结果静默期从未生效过。现在监听由调用方在 `ctx.effect` 里挂，跟着 fiber 的命走。
+ */
+function createUserWatch(): UserWatch {
+  return {
+    recent: new Map<string, number>(),
+    suppressed: new Map<string, Set<string>>(),
   };
-  // 事件名与载荷形状两代一致（`{ agent }`）；监听失败绝不能影响插件加载——它只影响
-  // 「要不要再等一会儿」，等不到就按默认（可唤醒）。
-  // 只挂 `agent/disposed`，**不挂** `agent/created`：后者是「谁在什么时机给会话挂 runtime」的
-  // 事件，本插件在那里只有一个消费者（`later.userToolsLifecycle()`），再挂一个会让那条接线
-  // 从"唯一判定点"退化成"多处判定"。而这里真正要的信息（用户刚动过这个会话）也只缺
-  // disposed 这一半：冷启动时 live agent 天然不存在，扫描器要的就是"没人碰过它"。
-  // 两个监听都只影响「要不要再等一会儿」，任何失败都不得影响插件加载。
+}
+
+/**
+ * 把会话生命周期事件接进用户动作表（**必须在 `ctx.effect` 里调用**，见 {@link createUserWatch}）。
+ *
+ * 只挂 `agent/disposed`，**不挂** `agent/created`：后者是「谁在什么时机给会话挂 runtime」的
+ * 事件，本插件在那里只有一个消费者（`later.userToolsLifecycle()`），再挂一个会让那条接线
+ * 从"唯一判定点"退化成"多处判定"。而这里真正要的信息（用户刚动过这个会话）也只缺
+ * disposed 这一半：冷启动时 live agent 天然不存在，扫描器要的就是"没人碰过它"。
+ *
+ * 监听失败绝不能影响插件加载——它只影响「要不要再等一会儿」，等不到就按默认（可唤醒）。
+ * @param ctx - 宿主上下文（effect 作用域内的）。
+ * @param watch - 用户动作表。
+ * @returns 撤销函数（由 `ctx.effect` 负责调用，这里只是 shape 对齐）。
+ */
+function watchSessionLifecycle(ctx: Context, watch: UserWatch): () => void {
+  const note = (sessionId: unknown): void => {
+    if (typeof sessionId === 'string' && sessionId.length > 0) watch.recent.set(sessionId, Date.now());
+  };
+  // 事件名与载荷形状两代一致（`{ agent }`）。
   try {
-    ctx.on('agent/disposed', ({ agent }: { agent: Agent }) => note(agent?.id));
+    return ctx.on('agent/disposed', ({ agent }: { agent: Agent }) => note(agent?.id)) as unknown as () => void;
   } catch {
     /* 事件面缺席：静默退化 */
+    return () => undefined;
   }
-  return { recent };
 }
 
 /**
@@ -542,22 +572,32 @@ function createUserWatch(ctx: Context): UserWatch {
  *  2. **非 root**：`ctx.agents.roots()` 里没有它 ⇒ runtime 挂不上 ⇒ 唤醒等于白拉。冷会话在
  *     这里看到的是「此刻没有对应 agent」，属于正常现象，不算拒绝。
  *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
- * what 这一段只在**此刻有 agent** 时才有信息；没有 agent 时只看用户动作表。
+ *     注意这是**优先级最低**的一条：前两条（子会话 / 非 root）是「叫醒了也投不出去」，
+ *     这一条只是「现在别打开」。被它挡下的到期任务必须留痕（见 `UserWatch.suppressed`）。
  * @param ctx - 宿主上下文。
  * @param sessionId - 候选会话。
  * @param watch - 用户动作表。
  * @returns 可唤醒返回 true。
  */
 export function canWakeColdSession(ctx: Context, sessionId: string, watch?: UserWatch): boolean {
-  const lastTouch = watch?.recent.get(sessionId);
-  if (lastTouch !== undefined && Date.now() - lastTouch < COLD_WAKE_QUIET_MS) return false;
+  if (coldWakeRefusal(ctx, sessionId) !== undefined) return false;
+  return !isQuiet(sessionId, watch);
+}
+
+/**
+ * 「叫醒也没用」的硬拒绝（与时间无关）：被委托子会话、或此刻是非 root 的活体 agent。
+ * @param ctx - 宿主上下文。
+ * @param sessionId - 候选会话。
+ * @returns 拒绝原因；可唤醒时为 undefined。`quiet-window` **不**是硬拒绝（见下）。
+ */
+export function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | 'not-root' | undefined {
   let live: Agent | undefined;
   try {
     live = ctx.agents.get(sessionId as never);
   } catch {
-    return false;
+    return 'not-root';
   }
-  if (live === undefined) return true;
+  if (live === undefined) return undefined;
   // 深度取自会话头（`delegationDepth`）与运行期 `options.subagentDepth` 的较大者，
   // 与上游 `delegationDepthOf` 同义；后者是宿主内部字段，这里按可选形状读取，两代都安全。
   const headerDepth = (live.session?.header as { delegationDepth?: number } | undefined)?.delegationDepth;
@@ -566,12 +606,40 @@ export function canWakeColdSession(ctx: Context, sessionId: string, watch?: User
     typeof headerDepth === 'number' && Number.isFinite(headerDepth) ? headerDepth : 0,
     typeof runtimeDepth === 'number' && Number.isFinite(runtimeDepth) ? runtimeDepth : 0,
   );
-  if (depth > 0) return false;
+  if (depth > 0) return 'subagent';
   try {
-    return ctx.agents.roots().includes(live);
+    return ctx.agents.roots().includes(live) ? undefined : 'not-root';
+  } catch {
+    return 'not-root';
+  }
+}
+
+/**
+ * 这个会话在 sidecar 里是否有一条**已经过期**的条目（与 live / 静默期无关的硬事实）。
+ *
+ * 为什么用它、而不是问 runtime：真宿主里 `agent.dispose()` 之后内核会把会话日志封口，
+ * `foldUserState` 折出来的 `active` 变成 0（实测 0.2.1-rc.2），runtime 于是说不出"到期"。
+ * sidecar 是本插件自己写的断点索引，不随会话生命周期变化——它是这个问题唯一可靠的答案。
+ * @param sessionId - 候选会话。
+ * @returns 存在已过期条目时为 true。
+ */
+function hasOverdueEntry(sessionId: string): boolean {
+  try {
+    const snapshot = listOwnershipSnapshots().find((entry) => entry.sessionId === sessionId);
+    if (snapshot === undefined) return false;
+    const now = Date.now();
+    // 与 runtime 共用同一个判定（`due.ts`）：sidecar 存的是 epoch ms，runtime 读的是 ISO
+    // 字符串，两者最终都收窄成「epoch ms <= now」。时刻缺失/非法一律不算到期。
+    return Object.values(snapshot.entries).some((entry) => isDue({ scheduledAt: entry.scheduledAt }, now));
   } catch {
     return false;
   }
+}
+
+/** 会话是否处于「用户刚动过」的静默期内（{@link COLD_WAKE_QUIET_MS}）。 */
+function isQuiet(sessionId: string, watch?: UserWatch): boolean {
+  const lastTouch = watch?.recent.get(sessionId);
+  return lastTouch !== undefined && Date.now() - lastTouch < COLD_WAKE_QUIET_MS;
 }
 
 /**
@@ -633,8 +701,15 @@ async function wakeColdSession(
     );
     return;
   }
-  // 回落到「有人打开会话」的同一条链路：mount 幂等，attach 里会 requestDrive。
-  if (watch !== undefined) watch.recent.delete(sessionId);
+  // 回到「有人打开会话」的同一条链路：mount 幂等，attach 里会 requestDrive。
+  //
+  // 这里清掉静默标记是**有意的**：既然本次已经决定唤醒并真的叫起来了，那这条会话就不再是
+  // 「用户刚关掉、先别碰」的状态——留着它只会让下一轮扫描继续把它当静默期内的条目挡住。
+  // （反过来不成立：`agent/disposed` **不能**一律当成用户动作，见 `createUserWatch`。）
+  if (watch !== undefined) {
+    watch.recent.delete(sessionId);
+    watch.suppressed.delete(sessionId);
+  }
   const mounted = registry.mount(agent);
   if (mounted === undefined) {
     // 已经挂着就显式重驱一次：`mount` 对已挂载的会话是空操作（**不会**再 requestDrive），
@@ -925,6 +1000,13 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
    *   不能再给用户一句"将于 X 发送"。（#71 的教训：静默是最贵的部分。）
    */
   const notifyUserChange = (agent: Agent): boolean => {
+    // 宿主级扫描器也重排一次（它有自己的"最近到期点"缓存）。与 runtime 的驱动**并列**、
+    // 不在同一处 try 里：扫描器重排失败不该把"会话已挂上"这个事实说成失败。
+    try {
+      activeSweeper?.reschedule();
+    } catch {
+      /* 重排失败只影响"多快被看见"，兜底 tick 仍会补上 */
+    }
     try {
       return runtimeRegistry.drive(agent);
     } catch {
@@ -945,6 +1027,12 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     const runtime = runtimeRegistry.ensure(agent);
     if (runtime === undefined) {
       return { ok: false, code: 'no_runtime', message: '该会话尚未挂载用户调度器。' };
+    }
+    try {
+      // 插话成功 = 这条提醒出列（sidecar 不再有它），扫描器的最早到期点可能因此变晚。
+      activeSweeper?.reschedule();
+    } catch {
+      /* 同上：只是排程不够及时，不影响本次结果 */
     }
     return runtime.steerById(id);
   };
@@ -991,18 +1079,57 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
   //
   // 生命周期：挂在本 apply 的顶层 fiber 上、由 `ctx.effect` 交回撤销动作，dispose 时清掉
   // 精确 timer 与兜底 tick —— 热重载后不能留下第二个扫描器（同 runtime-registry 的纪律）。
-  const userWatch = createUserWatch(ctx);
+  const userWatch = createUserWatch();
+  /**
+   * 当前活着的扫描器（teardown 后置 undefined）。
+   *
+   * 为什么要一个模块级句柄：用户建/改/暂停/恢复提醒之后，**必须立刻让扫描器重排**
+   * ——否则新写进 sidecar 的那条 `scheduledAt` 只有等 60s 兜底 tick 才会被看见，
+   * 「建完 +2s 的提醒」就会晚几十秒。runtime 那边有 `requestDrive()`，扫描器这边
+   * 目前没有任何人通知它，这是一个真实的设计缺口（跨内核用例第一次跑就撞上了）。
+   */
+  let activeSweeper: { reschedule(): void } | undefined;
   ctx.effect(() => {
+    // 监听必须在 effect 里注册：`apply()` 顶层那一刻 fiber 还是 LOADING，作用域外的
+    // `ctx.on` 会被立刻拆掉（静默期曾经因此从未生效过）。
+    const stopWatching = watchSessionLifecycle(ctx, userWatch);
     const sweeper = createExpirySweeper({
       snapshots: () =>
-        listOwnershipSnapshots((message) => ctx.logger.warn(`later: ${message}`)).filter((snapshot) =>
-          // 被委托子会话的提醒**本就不该由本插件投递**（上游对子会话一律拒绝投递，
-          // `session/agent-busy`）。在**枚举层**就摘掉它们，而不是等到 wake 里再判断：
-          // 后者会把"一条永远投不出去的子会话提醒"当成一次失败的唤醒，反复退避重试，
-          // 最后刷出一条"已停止自动唤醒"的假告警。
-          canWakeColdSession(ctx, snapshot.sessionId, userWatch),
-        ),
-      wakeable: (sessionId) => canWakeColdSession(ctx, sessionId, userWatch),
+        listOwnershipSnapshots((message) => ctx.logger.warn(`later: ${message}`)).filter((snapshot) => {
+          // 只有**硬拒绝**（子会话 / 非 root）在枚举层摘掉：那些会话叫醒了也投不出去，
+          // 留着只会被当成"失败的唤醒"反复退避，最后刷一条"已停止自动唤醒"的假告警。
+          //
+          // ⚠️ 静默期（quiet-window）**不在这里摘**。它只是"现在别主动打开"，
+          // 不是"到期任务可以不发"——摘掉就等于静默丢任务，正是本仓最不想要的那类
+          // 安静失败。静默期内的条目照常进扫描，在 wake 里挡下并记 `undelivered`。
+          return coldWakeRefusal(ctx, snapshot.sessionId) === undefined;
+        }),
+      /**
+       * 能不能唤醒。静默期是**软**拒绝：返回 false，但原因随 `quiet-window` 旁路给扫描器，
+       * 让它在同一轮里把这几条记成 `undelivered`（留痕、下一轮再试），而不是无声滤掉。
+       */
+      /**
+       * 能不能唤醒。
+       *
+       * 静默期是**软**拒绝，而且只拦两种情况：
+       *  1. 扫描器**自己猜**着要打开一个用户刚关过的会话；
+       *  2. 该会话的到期条目**还没到点**（那当然不该现在叫醒）。
+       *
+       * 一旦 sidecar 里确实有一条**已过期**的条目，静默期就让路。理由：静默期的本意是
+       * 「别在用户刚关掉时主动去打开」，不是「到期任务可以不发」。runtime 那里拿不到这个
+       * 信号——真宿主里 `agent.dispose()` 之后会话日志已经被内核封口，`foldUserState` 折出
+       * 来的 `active` 是 0（实测），所以"到期"这件事只能由 sidecar 这个断点索引来回答。
+       * 被它挡下的条目一律记 `undelivered(quiet-window)`，绝不无声滤掉。
+       */
+      wakeable: (sessionId) =>
+        coldWakeRefusal(ctx, sessionId) === undefined &&
+        (!isQuiet(sessionId, userWatch) || hasOverdueEntry(sessionId)),
+      refuseReason: (sessionId) =>
+        coldWakeRefusal(ctx, sessionId) === undefined &&
+        isQuiet(sessionId, userWatch) &&
+        !hasOverdueEntry(sessionId)
+          ? 'quiet-window'
+          : undefined,
       /**
        * 叫醒一个会话。两条路径都**不写进顶层 inject**：`sessionController` 只由
        * `dsh-web-app` 挂载，写进顶层 inject 会让整条 fiber 永久 pending
@@ -1038,7 +1165,10 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
       },
       warn: (message) => ctx.logger.warn(message),
     });
+    activeSweeper = sweeper;
     return async () => {
+      activeSweeper = undefined;
+      stopWatching();
       await sweeper.dispose();
     };
   }, 'later.expirySweeper()');

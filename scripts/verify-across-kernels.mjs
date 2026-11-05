@@ -28,7 +28,7 @@
  * | step | 面 | 判据 |
  * |---|---|---|
  * | `mount` | 装配 | 真内核冷启动、插件 `activated`、AgentRegistry 可用 |
- * | `function` | 功能 | `at` 五种文法经真实命令派发 + 到点投递的事件形状 |
+ * | `function` | 功能 | `at` 五种文法经真实命令派发 + 到点投递的事件形状 + **冷会话**到点投递 |
  * | `type` | 类型 | 把仓库 `@deepseek-ai/dsh*` 依赖线换成该代次后跑**两个** tsconfig（不短路） |
  * | `gate` | 门禁 | 用**该代次自己的** `evaluatePluginCompatibility` 判一遍，再用最新语义判一遍 |
  *
@@ -68,6 +68,9 @@
  * 1. **别用"日志里搜得到文本"当投递判据**：创建事件与命令回执里含同样的正文，
  *    会同时造成假绿和假红。真投递 = 一条 `agent/inbox/spliced` 且其 `inserted[].content`
  *    带 nonce，随后一条 `schedule/change operation:dispatch`。
+ * 4. **冷会话与热会话的判据必须分开数**（issue #11b）：两个用例各用自己的 nonce，任何一方
+ *    `spliced=0` 都单独判红。混在一起数时，"热会话投递成功"会替"冷会话没投出去"打掩护——
+ *    而冷会话那一维恰恰是本任务要证明的东西（投递不再依赖会话是否 live）。
  * 2. 会话日志是**多帧 zstd 拼接**（每次 flush 追加一帧），`zstdDecompressSync` 只解第一帧；
  *    这里按帧 magic 切分逐帧解。
  * 3. 内核模块必须解析到**被测那一代**：插件目录直接挂载会让它用自己 `node_modules` 里
@@ -629,14 +632,38 @@ async function runOne(version) {
 
     // 判据 2：到点投递（事件形状，不看文本命中）
     const nonce = `XK-FIRE-${Date.now().toString(36)}`;
+    // 判据 3：冷会话到点投递（issue #11b）。建完之后**把这个会话关掉**，模拟"宿主重启后
+    // 没有任何人打开过这条会话"。此时原来那条路径上没有任何组件知道它到点了，只有宿主级
+    // 扫描器会把它拉起来——所以这一维判定的是"投递不再依赖会话是否 live"。
+    const coldNonce = `XK-COLD-${Date.now().toString(36)}`;
+    const coldSessionId = `xk-cold-${Date.now().toString(36)}`;
+    const coldHandle = await ctx.agents.create({ sessionId: coldSessionId, meta: { cwd: home } });
+    const coldAgent = coldHandle?.agent ?? coldHandle;
+    const coldCreate = await ctx.commands.execute(coldAgent, `/user-schedule-create ${JSON.stringify({ prompt: coldNonce, after_seconds: 2 })}`, [], new AbortController().signal);
+    if (coldCreate?.result?.kind !== 'success') record.notes.push(`冷投递用例没建起来：${String(coldCreate?.result?.text ?? '').slice(0, 140)}`);
+    try { await coldHandle?.dispose?.(); } catch { /* 关不掉也继续：下面的判定会如实报出来 */ }
+
     const exec = await ctx.commands.execute(agent, `/user-schedule-create ${JSON.stringify({ prompt: nonce, after_seconds: 2 })}`, [], new AbortController().signal);
     if (exec?.result?.kind !== 'success') record.notes.push(`投递用例没建起来：${String(exec?.result?.text ?? '').slice(0, 140)}`);
     await new Promise((r) => setTimeout(r, HOLD * 1000));
     const evs = readEvents(home);
     const spliced = evs.filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(nonce) && (e.data?.inserted?.length ?? 0) > 0).length;
     const dispatched = evs.some((e) => e.type === 'schedule/change' && e.data?.operation === 'dispatch');
+    // 冷会话的投递证据单独取：同一个日志目录里两个会话混在一起，必须按 nonce 分开数，
+    // 否则"热会话投递成功"会替"冷会话没投出去"打掩护（假绿）。
+    const coldSpliced = evs.filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(coldNonce) && (e.data?.inserted?.length ?? 0) > 0).length;
+    // `schedule/change` 只带 schedule id，不带会话 id——两个会话各会产出自己的 dispatch，
+    // 所以按"每个用例至少一条"判，而不是按会话归属判（按会话归属判只能靠日志文件名，
+    // 而那正是"猜"）。数量对比在这里没有意义：热用例本身也可能一次写多条。
+    const coldDispatched = evs.some((e) => e.type === 'schedule/change' && e.data?.operation === 'dispatch');
     const admission = evs.find((e) => /producer-owned source kind/.test(e.raw));
-    record.delivery = { spliced, dispatched, admissionError: admission ? admission.raw.replace(/\s+/g, ' ').slice(0, 160) : null };
+    record.delivery = {
+      spliced,
+      dispatched,
+      coldSpliced,
+      coldDispatched,
+      admissionError: admission ? admission.raw.replace(/\s+/g, ' ').slice(0, 160) : null,
+    };
     if (spliced === 0) {
       // 诊断留进产物：投递为 0 时看不到事件直方图，就只能靠猜（这台机器上真猜错过两次）
       const hist = {};
@@ -645,6 +672,12 @@ async function runOne(version) {
       record.notes.push(`未投递：spliced=0 dispatch=${dispatched ? 'Y' : 'N'}${admission ? ' 且有 v4 源校验报错（issue #75 的形状）' : ''}｜事件 ${Object.keys(hist).length} 种 ${JSON.stringify(hist).slice(0, 160)}`);
     }
     else if (!dispatched) record.notes.push('注入了但没有 dispatch 事件，状态账可能对不齐');
+    if (coldSpliced === 0) {
+      const hist = {};
+      for (const e of evs) hist[e.type ?? '?'] = (hist[e.type ?? '?'] ?? 0) + 1;
+      record.eventHistogram ??= hist;
+      record.notes.push(`冷会话未投递（issue #11b）：spliced=0｜事件 ${Object.keys(hist).length} 种 ${JSON.stringify(hist).slice(0, 160)}`);
+    }
     if (admission) record.notes.push(`v4 源校验拒绝：${admission.raw.replace(/\s+/g, ' ').slice(0, 150)}`);
     record.notes.unshift(note ? `内核树：${note}` : '内核树：复用本地');
     try { await ctx.fiber?.dispose?.(); } catch { /* 释放失败不改写结论 */ }
@@ -661,6 +694,7 @@ async function runOne(version) {
   }
   const red = record.verdict === 'RED'
     || (record.delivery?.spliced ?? 0) === 0
+    || (record.delivery?.coldSpliced ?? 0) === 0
     || !!record.delivery?.admissionError
     || record.at.some((a) => !a.pass)
     || record.notes.some((n) => n.startsWith('装配失败') || n.startsWith('未投递'));
@@ -893,7 +927,7 @@ function report(record) {
   console.log(`\n### ${v} … ${record.verdict}`);
   const bits = [`内核=${record.runtime ?? '?'}`];
   if (guard !== undefined) bits.push(`同源=${guard.ok ? 'same' : 'MISMATCH'}`);
-  if (record.delivery) bits.push(`投递 spliced=${record.delivery.spliced} dispatch=${record.delivery.dispatched ? 'Y' : 'N'}`);
+  if (record.delivery) bits.push(`投递 spliced=${record.delivery.spliced} dispatch=${record.delivery.dispatched ? 'Y' : 'N'} 冷会话 spliced=${record.delivery.coldSpliced ?? '?'}`);
   if (record.at?.length) bits.push(`at 形状 ${record.at.filter((a) => a.pass).length}/${record.at.length}`);
   if (record.type) bits.push(`type ${record.type.ok ? '绿' : record.type.projects.map((p) => `${p.project}:${p.errors}`).join(',')}`);
   if (record.gate) bits.push(`gate 本代=${record.gate.own.status} 最新=${record.gate.latest.status}`);

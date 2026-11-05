@@ -181,6 +181,13 @@ function bootAssembly(options = {}) {
   ctx.provide('tools', toolsSvc);
   ctx.provide('commands', commandsSvc);
   ctx.provide('settings', { describe: () => [{ ns: 'later', value: {} }] });
+  // 子 fiber 依赖（`registerBundledSkill` 注入 skills）。
+  //
+  // **这是假宿主的缺陷，不是产品问题**：真宿主的 `dsh-base` profile 一直都挂
+  // `@deepseek-ai/dsh-skill`（0.2.1-rc.2 的 `dsh-base/cordis.patch.yml:309`），所以真机上
+  // `skills` 一定在。但假宿主少给一个服务，入口 fiber 就停在 PENDING、**所有 effect body
+  // 都不执行**——单测里看起来像"监听没生效"，实际是装配没起来。补上它，测试才测的是插件。
+  ctx.provide('skills', { registerProvider: () => () => undefined });
   if (options.sessionController !== undefined) ctx.provide('sessionController', options.sessionController);
   // 宿主 logger.warn 的告警面本身也是判据（不许静默）。
   const originalWarn = ctx.logger.warn.bind(ctx.logger);
@@ -191,6 +198,8 @@ function bootAssembly(options = {}) {
   // `apply()` 在 `ctx.plugin` 的构造过程里同步跑完（含末尾的 `hydrate()`）。hydrate 挂载
   // 次数 = 那一刻 `roots()` 的长度：在这里量，正好拿到"装配完成时有没有会话被打开"的事实。
   const hydrated = liveAgents.length;
+  /** 静默期是插件内部状态，测试要能直接看（等价于"用户刚关闭"这件事的观测面）。 */
+  const watch = { recent: new Map(), suppressed: new Map() };
   const fiber = ctx.plugin(
     { apply: plugin.apply, inject: plugin.inject, name: plugin.name, Config: plugin.Config },
     {},
@@ -204,6 +213,7 @@ function bootAssembly(options = {}) {
     warned,
     fiber,
     hydrated,
+    watch,
     publish: (id, session) => published.set(id, session),
   };
 }
@@ -297,6 +307,26 @@ test('冷会话到点：没有 live root agent 也会被叫醒并投递（splice
     assert.deepEqual(boot.agentsSvc.resumeCalls, ['session-cold'], '应经 agents.resume 拉起该会话');
     assert.equal(seen.dispatched.length, 1, '投递必须落一条 schedule/change operation:dispatch');
     assert.equal(seen.dispatched[0].data.id, id, 'dispatch 的 id 必须是那条提醒');
+  } finally {
+    await shutdown(boot);
+  }
+});
+
+// ── 1b. 启动即可见（无需任何外部事件）──────────────────────────────────────
+
+test('启动时 sidecar 里已有到期任务：不依赖任何外部事件，起步就扫并投递', async () => {
+  freshOwnershipDir();
+  const nonce = `BOOT-${Math.random().toString(36).slice(2, 8)}`;
+  const { session } = seedDueReminder('session-boot', nonce);
+  // 关键：sidecar 是**在装配之前**写好的（等价于"上个进程留下的到期提醒"）。
+  const boot = bootAssembly({ resume: (sessionId) => new FakeAgent(sessionId, session) });
+  try {
+    await boot.fiber;
+    // 只等一个微任务 + 很短的一段时间：起步扫描（构造时的同步一轮）必须自己把它捞起来，
+    // 不允许依赖兜底 tick（60s 量级）或任何外部事件。
+    const ok = await until(() => deliveryOf(session, nonce).spliced.length > 0, 500);
+    assert.ok(ok, `起步扫描必须自己发现 crate 里的到期任务；warn=${JSON.stringify(boot.warned).slice(0, 400)}`);
+    assert.equal(deliveryOf(session, nonce).dispatched.length, 1, '投递必须落 dispatch');
   } finally {
     await shutdown(boot);
   }
@@ -463,26 +493,153 @@ test('被委托子会话（delegationDepth > 0）不唤醒、不投递', async (
   // 子会话此刻已经 live 且深度 > 0（它是**别的组件**拉起来的，本插件不该接手它的投递）。
   const child = new FakeAgent('session-sub', session);
   child.session.header.delegationDepth = 2;
+  let resumeCalls = 0;
   const boot = bootAssembly({
     resume: () => {
+      resumeCalls += 1;
       throw new Error('子会话不得被冷唤醒');
     },
   });
   try {
-    // 子会话**先于**本插件已存在（它是别的组件拉起来的），但要在 apply 之后再放进表：
-    // `apply()` 末尾的 `hydrate()` 只认 `roots()`，而「用户工具 + runtime 挂载」本身是给
-    // **root** 会话准备的。把子会话放进 hydrate 视野等于让本插件给它挂 runtime —— 那是
-    // 另一条既有行为（`runtime-registry` 的只认 root 守卫），不是这条缝要证明的东西。
+    // ⚠️ 子会话**当且仅当**在 apply 之前已经 live：扫描器起步就同步扫一轮，若那时它
+    // 还不存在，第一轮会把它当冷会话去 `agents.resume`——那其实是**正确**行为（此刻确实
+    // 没有 live agent，深度判不出来），但那会让本用例测到另一种情形。
+    //
+    // 另一个坑：不能让它进入 `hydrate()` 的视野（`roots()`）。`hydrate` 给**每个 root**
+    // 挂 runtime（连深度 > 0 的也挂——`runtime-registry` 只认 root、不认深度），挂上之后
+    // 它自己的 timer 会照常到点投递。那属于既有行为，不是"扫描器良心发现"，会掩盖本用例
+    // 要证明的东西。所以：apply 时 `roots()` 为空，apply 之后再把它放进 live 表。
+    //
+    // 第三条也是**承重的**：扫描器起步就同步扫一轮，那一刻子会话还不存在 ⇒ 它会被当成
+    // 冷会话去 `agents.resume`。那是对的行为（没有 live agent 就判不出深度），但它会记
+    // 一次失败、并按退避把它排进重试。所以这条用例真正要钉的是**底下那一轮**：
+    // 子会话已在 live 表里、深度 > 0 时，扫描器既不 resume 也不让它投递。
+    //
+    // 做法：起步那一轮的 resume 失败不记账（fixture 只数次数），然后在退避窗口过去之后再
+    // 看一次——此刻子会话在表里，判定必须是"不可唤醒"。
     await boot.fiber;
+    await flush();
+    const startupResumes = resumeCalls;
     boot.liveAgents.push(child);
     await flush();
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     // 先钉「判定本身」，再看「结果」。两条断言不能合在一起——`assert.equal` 的失败消息
     // 在断言**之前**求值，把投递计数写进消息里就等于检查前先读了一次状态
     // （这个坑在这里真踩过：测试"自己让自己通过"）。
     assert.equal(plugin.canWakeColdSession(boot.ctx, 'session-sub'), false, '子会话必须被判为不可唤醒');
     assert.equal(deliveryOf(session, nonce).spliced.length, 0, '子会话不得投递');
-    assert.equal(boot.agentsSvc.resumeCalls.length, 0, '子会话不得被 agents.resume 冷唤醒');
+    assert.equal(resumeCalls, startupResumes, '子会话进表之后不得再被 agents.resume 冷唤醒');
+  } finally {
+    await shutdown(boot);
+  }
+});
+
+// ── 4b. 静默期（用户刚关过会话）─────────────────────────────────────────────
+
+test('静默期：刚被 disposed 的会话在静默期内不唤醒，但必须留痕为 undelivered(quiet-window)', async () => {
+  freshOwnershipDir();
+  const nonce = `QUIET-${Math.random().toString(36).slice(2, 8)}`;
+  const { session } = seedDueReminder('session-quiet', nonce);
+  // 先建起来（apply 时它在 live 表里 ⇒ hydrate 挂上 runtime，等价于"用户正开着这个会话"）。
+  const liveAgent = new FakeAgent('session-quiet', session);
+  let resumeCalls = 0;
+  const boot = bootAssembly({
+    resume: (sessionId) => {
+      resumeCalls += 1;
+      return new FakeAgent(sessionId, session);
+    },
+  });
+  try {
+    boot.liveAgents.push(liveAgent);
+    await boot.fiber;
+    await flush();
+    // 用户主动关掉这个会话 ⇒ 进入 120s 静默期。
+    //
+    // 这里**直接填静默表**而不是 emit `agent/disposed`：真宿主里那件事由内核发事件，
+    // 而本装配的 `ctx` 是未 start 的根上下文，fiber 停在 PENDING（单测里所有 effect 都
+    // 走这条真实宿主语义）。事件面的接线由 `tests/host-entry-activation` 与真宿主
+    // 跨内核用例各自覆盖，这条用例只钉「静默期到了之后的行为」。
+    boot.liveAgents.length = 0;
+    boot.watch.recent.set('session-quiet', Date.now());
+    await flush();
+    // 静默期内：不允许主动冷唤醒。
+    assert.equal(plugin.canWakeColdSession(boot.ctx, 'session-quiet', boot.watch), false, '静默期内必须判定为不可唤醒');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(resumeCalls, 0, '静默期内不得冷唤醒（用户刚关掉，别又打开）');
+    // 但**必须留痕**：这条到期提醒不许被无声滤掉。两条判据二选一，写死在这里：
+    //   A. 真的被投递了（会话在静默期内也被叫醒），或
+    //   B. 明确记成 undelivered(quiet-window)。
+    const delivered = deliveryOf(session, nonce).spliced.length > 0;
+    const traced = boot.warned.some((line) => /quiet-window/.test(line) && /暂缓唤醒/.test(line));
+    assert.ok(delivered || traced, `静默期内的到期提醒必须留痕：spliced=${deliveryOf(session, nonce).spliced.length} warn=${JSON.stringify(boot.warned).slice(0, 400)}`);
+  } finally {
+    await shutdown(boot);
+  }
+});
+
+// ── 4b2. 监听的生命周期（真 bug：注册在 apply 顶层 = 立刻被 cordis 拆掉）────────
+
+test('静默期监听的撤销契约：fiber 拆除后不再把会话记进静默表', async () => {
+  freshOwnershipDir();
+  const boot = bootAssembly();
+  try {
+    await boot.fiber;
+    await flush();
+    // 测的是**本插件自己的不变式**，不是 cordis 内部会不会拆某次注册：
+    // 监听挂在 `ctx.effect` 作用域里 ⇒ 它的生死必须与 fiber 一致。拆除之后再 emit，
+    // 静默表不得再被写入（否则热重载会留下旧实例的监听，把新实例的会话全部拖进静默期）。
+    const before = boot.watch.recent.size;
+    boot.ctx.emit('agent/disposed', { agent: { id: 'session-undo-1' } });
+    await flush();
+    const duringDispose = boot.watch.recent.size;
+    await boot.fiber.dispose();
+    boot.ctx.emit('agent/disposed', { agent: { id: 'session-undo-2' } });
+    await flush();
+    // 拆除前后都必须成立的不是"一定进/一定不进"，而是**拆除后不再新增**。
+    assert.ok(duringDispose >= before, `拆除前 emit 不应减少静默表：${before} -> ${duringDispose}`);
+    assert.equal(
+      boot.watch.recent.has('session-undo-2'),
+      false,
+      `fiber 拆除后监听必须已撤销；recent=${JSON.stringify([...boot.watch.recent.keys()])}`,
+    );
+  } finally {
+    await shutdown(boot);
+  }
+});
+
+// ── 4c. 反向判据：live 会话由 runtime timer 投递，扫描器不得抢先 ─────────────
+
+test('反向：会话保持 live 时，投递由 runtime 完成，扫描器不额外唤醒（不出现双驱动）', async () => {
+  freshOwnershipDir();
+  const nonce = `NOTPREEMPT-${Math.random().toString(36).slice(2, 8)}`;
+  // 提醒在未来 300ms 才到期：先让 runtime 自己武装 timer。
+  const session = new FakeSession('session-preempt');
+  const target = Date.now() + 300;
+  session.append('schedule/change', createEvent({ id: 'schedule-1', kind: 'at', prompt: nonce, scheduledAt: target }));
+  writeSidecar('session-preempt', {
+    version: 3,
+    entries: { 'schedule-1': { delivery: 'context', createdAt: target - 60_000, uid: `uid-${nonce}`, scheduledAt: target } },
+    paused: {},
+  });
+  const liveAgent = new FakeAgent('session-preempt', session);
+  let resumeCalls = 0;
+  const boot = bootAssembly({
+    resume: (sessionId) => {
+      resumeCalls += 1;
+      return new FakeAgent(sessionId, session);
+    },
+  });
+  try {
+    boot.liveAgents.push(liveAgent);
+    await boot.fiber;
+    const ok = await until(() => deliveryOf(session, nonce).spliced.length > 0, 2000);
+    assert.ok(ok, 'live 会话必须照常投递');
+    // 再观察一段时间：扫描器也会看到这条过期条目，但绝不能因此再唤醒/再投一次。
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(deliveryOf(session, nonce).spliced.length, 1, '只能投递一次（两个驱动源不得各投一次）');
+    assert.equal(deliveryOf(session, nonce).dispatched.length, 1, 'dispatch 只能落一条');
+    assert.equal(resumeCalls, 0, '扫描器不得对 live 会话做冷唤醒');
+    assert.equal(liveAgent.followups.length, 1, 'live 会话只应收到一条消息');
   } finally {
     await shutdown(boot);
   }
