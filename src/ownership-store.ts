@@ -106,6 +106,17 @@ export interface OwnedEntry {
    * sidecar 是本插件私有存储，加字段天然向后兼容。
    */
   readonly attachments?: readonly ScheduledAttachment[];
+  /**
+   * 本条提醒的**到期时刻**（epoch ms；issue #11b）。
+   *
+   * 为什么必须进 sidecar：宿主级扫描器（`src/expiry-sweeper.ts`）要在**任何会话都没被
+   * 打开**时判断「哪条到期了」，而它拿不到 runtime 的内存 timer、也不该为了读一个时刻
+   * 把每个会话日志都解一遍。sidecar 是进程外唯一能让「一个都没 live」也看得到的索引。
+   *
+   * v3 起新写入必带；v1/v2 老条目缺这个字段，读路径按日志回算（见 {@link resolveScheduledAt}），
+   * 回算不出来的条目**保守跳过**并告警——既不静默丢任务，也绝不把它当成永久逾期去唤醒会话。
+   */
+  readonly scheduledAt?: number;
 }
 
 /** 暂停留档（仅 kind==='after'；不进会话日志）。 */
@@ -127,14 +138,17 @@ export interface PausedEntry {
   readonly attachments?: readonly ScheduledAttachment[];
 }
 
-/** sidecar 文件形状（version 2；v1 读入时补空 paused）。 */
+/** sidecar 文件形状（version 3；v1 读入时补空 paused）。 */
 interface OwnershipFile {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3;
   /** schedule id → 所有权记录。 */
   readonly entries: Record<string, OwnedEntry>;
   /** uid → 暂停留档（v1 无此字段）。 */
   readonly paused?: Record<string, PausedEntry>;
 }
+
+/** 当前写回的 sidecar 版本（v3 = 条目带 `scheduledAt`，供宿主级到期扫描）。 */
+const CURRENT_VERSION = 3 as const;
 
 /**
  * 显式状态目录覆盖（测试 / 便携场景）。
@@ -225,7 +239,7 @@ function fileOf(sessionId: string): string {
 }
 
 function emptyFile(): OwnershipFile {
-  return { version: 2, entries: {}, paused: {} };
+  return { version: CURRENT_VERSION, entries: {}, paused: {} };
 }
 
 interface CacheRow {
@@ -275,13 +289,17 @@ function readFresh(sessionId: string): OwnershipFile {
       typeof parsed !== 'object' ||
       parsed === null ||
       ((parsed as { version?: unknown }).version !== 1 &&
-        (parsed as { version?: unknown }).version !== 2) ||
+        (parsed as { version?: unknown }).version !== 2 &&
+        (parsed as { version?: unknown }).version !== 3) ||
       typeof (parsed as { entries?: unknown }).entries !== 'object' ||
       (parsed as { entries?: unknown }).entries === null
     ) {
       throw new Error('unexpected shape');
     }
-    // v1 → v2：补空 paused，写回时统一升到 2
+    // v1 → v2：补空 paused；v2 → v3：条目补 `scheduledAt`（写回时统一升到 3）。
+    // 老条目缺 `scheduledAt` 的**不在这里**回算：回算要读会话日志，而本层（`readFresh`）
+    // 是纯磁盘层、没有 session 句柄。回算与「回算不出来就保守跳过」都在读侧
+    // `resolveScheduledAt` 里，由需要到期时刻的消费者显式调用。
     //
     // 附件块在**读路径**收窄（sidecar 是本地文件，视同不可信输入）：旧版本
     // 写入的半成品或外部改写在此被滤掉，下游（代发拼 content）只见到合法块。
@@ -296,7 +314,7 @@ function readFresh(sessionId: string): OwnershipFile {
       paused[uid] = attachments === undefined ? entry : { ...entry, attachments };
     }
     const file: OwnershipFile = {
-      version: 2,
+      version: CURRENT_VERSION,
       entries,
       paused,
     };
@@ -375,7 +393,14 @@ export function newTaskUid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `uid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** 记录（新增或覆盖）一条所有权；幂等。仅显式传入 `uid` 时写入稳定身份。 */
+/**
+ * 记录（新增或覆盖）一条所有权；幂等。仅显式传入 `uid` 时写入稳定身份。
+ *
+ * `scheduledAt` 与 `uid`/`windowSeconds`/`attachments` **同一条保留语义**：不传就沿用旧条目
+ * 里的值。这不是省事，是正确性——`pause` 回填 uid、`flush` 失败回滚这类「覆盖写」只关心
+ * 一个字段，若把其余字段当 `undefined` 抹掉，宿主级扫描器（`src/expiry-sweeper.ts`）就会
+ * 突然看不见这条提醒的到期时刻，而那正是「到点了却没人叫醒会话」的静默失败。
+ */
 export function recordOwnership(
   sessionId: string,
   id: string,
@@ -383,8 +408,10 @@ export function recordOwnership(
   uid?: string,
   windowSeconds?: number,
   attachments?: readonly ScheduledAttachment[],
+  scheduledAt?: number,
 ): OwnedEntry {
   const safeAttachments = sanitizeAttachments(attachments);
+  const safeScheduledAt = validTimestamp(scheduledAt);
   if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof id !== 'string' || id.length === 0) {
     const bare: OwnedEntry = {
       delivery,
@@ -392,6 +419,7 @@ export function recordOwnership(
       ...(uid !== undefined ? { uid } : {}),
       ...(typeof windowSeconds === 'number' ? { windowSeconds } : {}),
       ...(safeAttachments !== undefined ? { attachments: safeAttachments } : {}),
+      ...(safeScheduledAt !== undefined ? { scheduledAt: safeScheduledAt } : {}),
     };
     return bare;
   }
@@ -403,16 +431,88 @@ export function recordOwnership(
   // 与「flush 失败回滚」等覆盖写不丢附件；显式传入（含 undefined 清空语义由
   // 调用方用 previousEntry?.attachments 表达）以传入值为准。
   const nextAttachments = attachments !== undefined ? safeAttachments : entries[id]?.attachments;
+  const nextScheduledAt = safeScheduledAt ?? entries[id]?.scheduledAt;
   const entry: OwnedEntry = {
     delivery,
     createdAt: Date.now(),
     ...(nextUid !== undefined ? { uid: nextUid } : {}),
     ...(typeof nextWindow === 'number' ? { windowSeconds: nextWindow } : {}),
     ...(nextAttachments !== undefined ? { attachments: nextAttachments } : {}),
+    ...(nextScheduledAt !== undefined ? { scheduledAt: nextScheduledAt } : {}),
   };
   entries[id] = entry;
-  writeThrough(sessionId, { version: 2, entries, paused: file.paused ?? {} });
+  writeThrough(sessionId, { version: CURRENT_VERSION, entries, paused: file.paused ?? {} });
   return entry;
+}
+
+/**
+ * 收窄一个「到期时刻」：只接受**有限且非负**的毫秒数。
+ *
+ * sidecar 可能在进程外被改坏（本层一贯把磁盘内容视作不可信输入，见 `sanitizeAttachments`）。
+ * `NaN`/`Infinity`/负数/非数字一律当缺失——扫描器据此走「回算或跳过」，而不是把 `NaN`
+ * 当到期时刻去比大小（那样比较恒为 false，条目会永远被判成"未到期"，也就是静默丢失）。
+ */
+function validTimestamp(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** 一条 sidecar 文件里挂着的全部所有权条目（扫描器用；只读）。 */
+export interface SidecarSnapshot {
+  /** 会话 id（文件名去 `.json`，可能已被清洗过）。 */
+  readonly sessionId: string;
+  readonly entries: Readonly<Record<string, OwnedEntry>>;
+}
+
+/** 扫描时单文件容量上限：超过这个尺寸的 sidecar 属异常，读它只会拖住整轮扫描。 */
+const MAX_SIDECAR_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 枚举**全部**会话的 sidecar 条目（宿主级到期扫描的数据源，issue #11b）。
+ *
+ * 这是本层唯一的「跨会话」读接口：扫描器不知道有哪些会话（冷启动时一个 agent 都没有，
+ * `ctx.agents.roots()` 是空数组），只能从持久化面自己枚举。两个失败面都**不抛**：
+ *  - 目录读不了 → 返回空数组（首启/临时目录被删属正常）；
+ *  - 单个文件读不了 / 坏了 → 跳过该文件并 `warn`，绝不让一个坏文件吃掉整轮扫描
+ *    （「整轮失败」等于所有会话的提醒一起停摆，那正是要消灭的失败形态）。
+ *
+ * 返回值是快照：调用方可以边扫描边改，不会看到半更新。
+ * @param warn - 告警出口（插件侧是 `ctx.logger.warn`；缺省走 console）。
+ * @returns 每个可读 sidecar 的会话 id 与条目快照。
+ */
+export function listOwnershipSnapshots(warn?: (message: string) => void): readonly SidecarSnapshot[] {
+  const notify = warn ?? ((message: string) => console.warn(`[dsh-later] ${message}`));
+  const dir = stateDir();
+  let names: readonly string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const snapshots: SidecarSnapshot[] = [];
+  for (const name of names) {
+    if (!name.endsWith('.json') || name.startsWith('.')) continue;
+    const sessionId = name.slice(0, -'.json'.length);
+    try {
+      const path = join(dir, name);
+      const stat = statSync(path);
+      if (stat.size > MAX_SIDECAR_BYTES) {
+        notify(`sidecar "${name}" 体积异常（${stat.size} 字节），本轮扫描跳过该会话。`);
+        continue;
+      }
+      // 走 readFresh 而不是自己解析：缓存、损坏改名、附件收窄都在那一处，扫描面不该有
+      // 第二套解析口径（两套口径迟早对同一份文件给出不同结论）。
+      const file = readFresh(sessionId);
+      if (Object.keys(file.entries).length === 0) continue;
+      snapshots.push({ sessionId, entries: file.entries });
+    } catch (error) {
+      notify(
+        `sidecar "${name}" 读取失败，本轮扫描跳过该会话: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  return snapshots;
 }
 
 /** 撤销一条所有权；幂等（不存在时无操作）。 */
@@ -422,7 +522,7 @@ export function removeOwnership(sessionId: string, id: string): void {
   if (!Object.prototype.hasOwnProperty.call(file.entries, id)) return;
   const entries: Record<string, OwnedEntry> = { ...file.entries };
   delete entries[id];
-  writeThrough(sessionId, { version: 2, entries, paused: file.paused ?? {} });
+  writeThrough(sessionId, { version: CURRENT_VERSION, entries, paused: file.paused ?? {} });
 }
 
 /** 按 uid 找当前仍 active 的 schedule id（缺失 undefined）。 */
@@ -460,7 +560,7 @@ export function recordPaused(sessionId: string, entry: PausedEntry): void {
   if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof entry.uid !== 'string') return;
   const file = readFresh(sessionId);
   writeThrough(sessionId, {
-    version: 2,
+    version: CURRENT_VERSION,
     entries: file.entries,
     paused: { ...(file.paused ?? {}), [entry.uid]: entry },
   });
@@ -473,7 +573,7 @@ export function removePaused(sessionId: string, uid: string): void {
   const paused = { ...(file.paused ?? {}) };
   if (!Object.prototype.hasOwnProperty.call(paused, uid)) return;
   delete paused[uid];
-  writeThrough(sessionId, { version: 2, entries: file.entries, paused });
+  writeThrough(sessionId, { version: CURRENT_VERSION, entries: file.entries, paused });
 }
 
 /** 测试辅助：清空进程内缓存（不删文件）。 */

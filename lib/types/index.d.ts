@@ -60,6 +60,58 @@ export type UserScheduleOnUnconfirmed = 'keep' | 'discard';
  * 从来没被测过——正是不测的原因）。宿主入口不消费它。
  */
 export declare function registerUserScheduleTools(rootCtx: Context, toolCtx: Context, agent: Agent, getSettings: () => SchedulerSettings, getLocale: () => string | undefined, onUserChange: (agent: Agent) => boolean): () => void;
+/**
+ * Cordis 函数插件主体。
+ * @param ctx - 全局服务上下文。
+ * @param config - 可选配置（maxSchedules）。
+ */
+/**
+ * 冷唤醒的「用户最近动过这条会话」标记（只在本进程内存里，不落盘）。
+ *
+ * 为什么要它：宿主级扫描器会在**没人打开会话**时把 agent 拉起来。如果用户刚刚主动把某个
+ * 会话的 agent 关掉（或刚打开、正要自己操作），扫描器的"帮忙"就是打扰。这里用「监听会话
+ * 生命周期」的口径兜住：本进程里被 dispose 的、或最近被打开过的会话，两个扫描周期内
+ * （{@link COLD_WAKE_QUIET_MS}）不主动拉起。跨进程的场景由 diff 口径兜住（见
+ * `canWakeColdSession`）。
+ */
+interface UserWatch {
+    /** sessionId → 最近一次「用户动作」的时刻（epoch ms）。 */
+    readonly recent: Map<string, number>;
+    /**
+     * sessionId → 被静默期挡下的到期条目（issue #11b 的修正）。
+     *
+     * 静默期的语义是「别主动去**打开**一个用户刚碰过的会话」，**不是**「到期任务可以不发」。
+     * 把两者混在一起，就成了"有一条到期了，因为它刚被关过，所以谁都不知道它没发"——
+     * 正是本仓一直在清理的那类安静失败。所以挡下来的每一条都在这里留痕，由扫描器取走并
+     * 报成 `undelivered`（原因 `quiet-window`），下次到期重排时重试。
+     */
+    readonly suppressed: Map<string, Set<string>>;
+}
+/**
+ * 判断一个会话是否**允许**被宿主级扫描器冷唤醒（决策 D3 的拒绝面）。
+ *
+ * 三条拒绝理由，每条都有实证/上下文：
+ *  1. **被委托子会话**（`delegationDepth > 0`）：上游对子会话的 reminder 投递一律拒绝
+ *     （`session/agent-busy`，见 schedule 的 `reminderTargetRefusal`）。它的提醒本就不该由
+ *     本插件投递；拉起来只会白跑一轮 turn 再失败。
+ *  2. **非 root**：`ctx.agents.roots()` 里没有它 ⇒ runtime 挂不上 ⇒ 唤醒等于白拉。冷会话在
+ *     这里看到的是「此刻没有对应 agent」，属于正常现象，不算拒绝。
+ *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
+ *     注意这是**优先级最低**的一条：前两条（子会话 / 非 root）是「叫醒了也投不出去」，
+ *     这一条只是「现在别打开」。被它挡下的到期任务必须留痕（见 `UserWatch.suppressed`）。
+ * @param ctx - 宿主上下文。
+ * @param sessionId - 候选会话。
+ * @param watch - 用户动作表。
+ * @returns 可唤醒返回 true。
+ */
+export declare function canWakeColdSession(ctx: Context, sessionId: string, watch?: UserWatch): boolean;
+/**
+ * 「叫醒也没用」的硬拒绝（与时间无关）：被委托子会话、或此刻是非 root 的活体 agent。
+ * @param ctx - 宿主上下文。
+ * @param sessionId - 候选会话。
+ * @returns 拒绝原因；可唤醒时为 undefined。`quiet-window` **不**是硬拒绝（见下）。
+ */
+export declare function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | 'not-root' | undefined;
 export declare function apply(ctx: Context, config?: {
     maxSchedules?: number;
 }): void;

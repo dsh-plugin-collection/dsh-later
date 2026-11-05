@@ -42,6 +42,7 @@ import { confirmDelivery, messageIdOf } from './delivery.js';
 import type { DeliveryMode } from './delivery.js';
 import { detectTimeZone, formatHhmm } from './time-utils.js';
 import { laterUserSource } from './later-message-source.js';
+import { dueTargetOf, isDue } from './due.js';
 
 /** runtime 关心的设置子集（插话投递策略）。 */
 export interface SteerDeliverySettings {
@@ -87,7 +88,7 @@ export function dueUserDecision(
     Date.parse(a.record.scheduledAt) - Date.parse(b.record.scheduledAt) || a.index - b.index;
 
   const overdueOneShots = indexed
-    .filter((entry) => entry.record.kind !== 'every' && Date.parse(entry.record.scheduledAt) <= now)
+    .filter((entry) => entry.record.kind !== 'every' && isDue(entry.record, now))
     .sort(byTargetThenCreate);
   if (overdueOneShots.length > 0) {
     const asUser = (record: ScheduleRecord): boolean =>
@@ -109,7 +110,7 @@ export function dueUserDecision(
   }
 
   const every = indexed
-    .filter((entry) => entry.record.kind === 'every' && Date.parse(entry.record.scheduledAt) <= now)
+    .filter((entry) => entry.record.kind === 'every' && isDue(entry.record, now))
     .sort(byTargetThenCreate);
   if (every.length > 0) {
     return {
@@ -123,7 +124,7 @@ export function dueUserDecision(
   }
 
   const target = active.reduce<number | undefined>((selected, record) => {
-    const candidate = Date.parse(record.scheduledAt);
+    const candidate = dueTargetOf(record.scheduledAt) ?? Number.NaN;
     return candidate > now && (selected === undefined || candidate < selected) ? candidate : selected;
   }, undefined);
   return { kind: 'wait', ...(target === undefined ? {} : { target }) };
@@ -253,6 +254,13 @@ export class UserScheduleRuntime {
     }
   }
 
+  /**
+   * 非 live 时的到期探测：只有**确实**有到期条目才向宿主扫描器举手。
+   *
+   * 刻意用「fold 出来的 active 里有没有到期的」当判据，而不是"反正我有 sidecar 里的
+   * 条目就喊一声"：后者会让扫描器的静默期形同虚设（每个开了提醒的会话每轮都会被要求唤醒）。
+   * 读日志失败时**不**举手——宁可由扫描器按常规节奏自己判定，也不要发出一个没有依据的请求。
+   */
   /** 等待一次 public 的 idle 边界（供 agent 忙碌时重试）。 */
   private waitForIdle(): void {
     if (this.idleWait !== undefined) return;
@@ -487,6 +495,9 @@ export class UserScheduleRuntime {
       previous?.uid,
       record.kind === 'after' ? record.afterSeconds : previous?.windowSeconds,
       previous?.attachments,
+      // 补偿重挂保住的是**同一个时刻**（`createAtRecord` 用的就是 `record.scheduledAt`），
+      // 所以到期索引跟着走；漏了它，宿主级扫描器就再也不会来叫醒这条提醒。
+      Date.parse(record.scheduledAt),
     );
 
     let nextRecord;

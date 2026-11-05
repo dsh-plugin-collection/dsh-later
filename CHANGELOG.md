@@ -4,6 +4,31 @@
 
 ## 未发布
 
+- **feat** 服务端重启、会话从没被打开过，到点的提醒也会准时投递（issue #11 的投递半面，本仓记作 #11b）。
+  - 现象：`/later +2m` 建好提醒 → 停掉 dsh 进程 → 同一 `DSH_HOME` 重启 → 全程不连浏览器 → 到期后再等 90s，会话日志里 `user/message` 投递 **0** 条；手动打开那条会话，**立刻** 1 条。不重启、只把 agent 回收掉，同样 40s 内不投。
+  - 根因：投递源只有每会话 runtime 的私有 `setTimeout`（`src/runtime.ts:171` 的 `timer` / `:236` 的 `arm()`），而 runtime 只在「已存在的 live root agent」上挂载（`src/index.ts` 的 `runtimeRegistry.hydrate()` 只遍历 `ctx.agents.roots()`，另一个入口是 `agent/created`）。进程重启后没人打开会话 ⇒ 一个 runtime 都不挂 ⇒ `driveOnce` 开头两次 `isLive()`（`:573` / `:580`）恒假 ⇒ **没有任何组件知道某条提醒到点了**。
+  - 改法（宿主级到期扫描器 `src/expiry-sweeper.ts` + 入口接线）：
+    - **到期索引扩到 sidecar**：`OwnedEntry` 新增 `scheduledAt`（epoch ms），sidecar `version` 升到 **3**。这是进程外唯一能在「零 live agent」时看到的索引——扫描器不该为了读一个时刻把每份会话日志解一遍。全部写路径（create / edit 含回滚 / pause 回填 / resume / 补偿重挂 `rearmOneShot`）都带上它，且与 `uid`/`windowSeconds`/`attachments` 同一条保留语义（覆盖写不传就沿用旧值）。
+    - **v1/v2 → v3 迁移回算**：老条目缺字段时从会话日志的 `schedule/change create` 回算——`after` = `createdAt + afterSeconds`（记录里的 ISO 时刻与它自相矛盾，以创建时刻为准），`at` = 记录自带的时刻。**推不出来就保守跳过并告警一次**：不猜时刻，也绝不把它当成"永久逾期"去反复唤醒；那条提醒在会话被打开时仍照常派发。
+    - **只叫醒，不重写投递**：扫描器到点后 `runtimeRegistry.mount()`（幂等）+ `requestDrive()`，之后走的全是原有链路——确认窗口、`schedule/change dispatch` 记账、`/later` 的 user 代发语义、暂停/逾期处理、`every` 的周期重挂。`tests/delivery.test.mjs` 与 `tests/occurrences.test.mjs` 一个字没改。
+    - **非 web profile 的回退路径**：先惰性取 `ctx.get('sessionController')`（只由 `dsh-web-app` 挂载，**绝不写进顶层 `inject`**——那会让整条 fiber 永久 pending、插件整体消失），拿不到回退 `ctx.agents.resume({ resumeSessionId })`；两条都不通记 `undelivered` 并告警一次，不做重试风暴。
+    - **拒绝面**：被委托子会话（`delegationDepth > 0`）与非 root 一律不唤醒；用户刚关掉的会话有 120s 静默期，但**确实已过期**的条目静默期让路（见下条），被挡下的记 `undelivered(quiet-window)` 并 warn 一次，不静默丢。
+    - **扫描节奏**：内存维护最近到期点（精确 timer）+ 60s 兜底 tick；精确 timer `unref`（不替用户钉住进程），兜底 tick 不 `unref`（插件级闹钟本身就是进程该被唤醒的理由）。单条失败不中断整轮；反复投不出去按 1s→2s→4s→8s 退避，连续 5 次放弃并只告警一次，到期点被消化即清零。
+    - **撤销**：挂在 apply 的顶层 `ctx.effect` 上，dispose 时清掉两级定时器并等在途扫描收敛——热重载后不会留下第二个扫描器。
+  - 落地时修掉的三处真实缺陷（都已写进源码注释）：
+    1. **扫描器启动时必须同步扫一轮**：`apply()` 那一刻 sidecar 往往还是空的，若只靠"先排 timer 等它触发"，延迟算出来是 0、`unref` 之后又不再唤醒进程，等于整个生命周期只剩 60s 兜底 tick。新增回归用例「启动时 sidecar 已有到期任务 ⇒ 不依赖任何外部事件，起步就扫并投递」。
+    2. **建/改/暂停/恢复/插话之后必须让扫描器重排**（`activeSweeper?.reschedule()`）：runtime 有 `requestDrive()`，扫描器原本没有任何人通知它，新写进 sidecar 的到期时刻只能等兜底 tick。
+    3. **唤醒后的排程与失败判定曾经互相踩**：重排用的是「条目自己的到期点」（永远在过去 ⇒ 延迟恒 0 ⇒ 逐 tick 空转，实测一个会话被唤醒 417 次）；失败判定又在确认窗口内先于退避检查（把成功的唤醒也记成失败）。现在按「每次尝试的起点 + 该失败次数对应的退避」排程，并用 `due.ts` 的统一判定。
+  - **到期判定归一**：新增 `src/due.ts`（`isDue` / `dueTargetOf`），runtime 读折叠记录、扫描器读 sidecar，两边共用同一个口径——`at`/`after`/`every` 的到期判定都是 `scheduledAt <= now`（`every` 的"过期多久只算一次"在上游 occurrence 解析里），时刻非法/缺失**一律不算到期**。两处各写一遍判据迟早会分叉成「扫描器认为到期、runtime 认为没到期」。
+  - 判据：单测 `tests/11b-cold-delivery.test.mjs` 15 条，判据只看**事件形状**（`agent/inbox/spliced` 的 `inserted[].content` 带 nonce + 随后一条 `schedule/change operation: dispatch`），不看文本命中；跨内核 `function` 面新增「冷会话」一维，与热会话**分开数**（任何一方为 0 都单独判红，不许互相打掩护）。
+  - **验证**：`npm test` 75 个文件 **790 pass / 0 fail**（4 条 peer-facet skip 属隔离 worktree 的既有现象）；`npm run typecheck` 两个 tsconfig 都通过；`npm run verify:kernels:all` **绿 9 / 红 0 / 未判定 0，退出码 0**（明细 `.verify/across-kernels-2026-11-05T07-58-09-169Z.json`）。逐代 `delivery = spliced=1 · dispatched=true · coldSpliced=1 · coldDispatched=true · at 5/5`（两个 dispatch 字段**各自按会话日志目录归因**，不是全局 `some()`——否则两者恒等，冷那一维等于没有证据）：`0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.2` / `0.2.1-rc.2` / `0.2.1-rc.3` / `0.2.1-rc.4` / `0.2.2-alpha.2`。gate 面 `0.1.2-rc.1` 与 `0.1.5-rc.3` 记 `absent`（那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属既有合法降级，判据未放宽）。
+  - **测试口径**：新增 `tests/11b-cold-delivery.test.mjs` 15 条，全部只看**事件形状**（`agent/inbox/spliced` 的 `inserted[].content` 带 nonce + 随后一条 `schedule/change operation: dispatch`），不看文本命中。跨内核 `function` 面的「冷会话」维度与热会话**分开计数**：两个用例各用自己的 nonce，任何一方 `spliced=0` 都单独判红——混在一起数时，"热会话投递成功"会替"冷会话没投出去"打掩护。
+
+- **fix** 会话被关掉之后的「静默期」原本挂在 `apply()` 顶层注册监听，依赖 cordis 的时序假设；现在移入 `ctx.effect`，与 fiber 同寿命。
+  - 背景：#11b 给宿主级扫描器加了一条「用户刚关掉这个会话，120s 内别主动打开」的静默期，监听 `agent/disposed`。原先这个监听在 `apply()` 顶层就注册了——`apply()` 执行期间 fiber 还在 `LOADING`，此时的事件注册能不能活下来取决于宿主时序，是一条**不该存在的隐含依赖**。
+  - 改法：监听改在 `ctx.effect(() => …)` 里注册，撤销函数交回 effect，fiber 拆掉时一定摘干净（热重载不会留下旧实例的监听，把新实例的会话全拖进静默期）。
+  - 测试口径：`tests/11b-cold-delivery.test.mjs` 测的是**本插件自己的不变式**而非 cordis 内部行为——「拆 fiber 之后监听不再把会话记进静默表」。真 cordis 上最小实验（`ctx.on` 于 apply 顶层注册、apply 返回后 emit）`hits=1`，说明「顶层注册会被立刻拆掉」不成立，所以这里记的是**时序依赖的消除**，不是"监听从来没生效"。
+
 ## 1.12.0 — 2026-11-03
 
 > 三条 GitHub 外部报告的修复（#10 命令认领、#9 设置实时、#11 显示面），加上 #9 的遗留（工具描述不再钉死注册时刻的字符上限）与「服务端重启后的触发语义」的文档订正。合并后 main 的 `npm test` 778 / 0 fail，typecheck 两面通过，`verify:kernels:all` 9 代全绿（0.1.2-rc.1 与 0.1.5-rc.3 的 gate 面记 `absent`：那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属「声明未被验证」）。

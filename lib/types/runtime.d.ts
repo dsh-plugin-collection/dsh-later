@@ -94,6 +94,13 @@ export declare class UserScheduleRuntime {
     private arm;
     /** 串行 drain 合并的触发。 */
     private runRequested;
+    /**
+     * 非 live 时的到期探测：只有**确实**有到期条目才向宿主扫描器举手。
+     *
+     * 刻意用「fold 出来的 active 里有没有到期的」当判据，而不是"反正我有 sidecar 里的
+     * 条目就喊一声"：后者会让扫描器的静默期形同虚设（每个开了提醒的会话每轮都会被要求唤醒）。
+     * 读日志失败时**不**举手——宁可由扫描器按常规节奏自己判定，也不要发出一个没有依据的请求。
+     */
     /** 等待一次 public 的 idle 边界（供 agent 忙碌时重试）。 */
     private waitForIdle;
     /** 停止调度器、取消 timer、等待在途派发收敛。 */
