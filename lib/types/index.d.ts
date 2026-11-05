@@ -60,6 +60,41 @@ export type UserScheduleOnUnconfirmed = 'keep' | 'discard';
  * 从来没被测过——正是不测的原因）。宿主入口不消费它。
  */
 export declare function registerUserScheduleTools(rootCtx: Context, toolCtx: Context, agent: Agent, getSettings: () => SchedulerSettings, getLocale: () => string | undefined, onUserChange: (agent: Agent) => boolean): () => void;
+/**
+ * Cordis 函数插件主体。
+ * @param ctx - 全局服务上下文。
+ * @param config - 可选配置（maxSchedules）。
+ */
+/**
+ * 冷唤醒的「用户最近动过这条会话」标记（只在本进程内存里，不落盘）。
+ *
+ * 为什么要它：宿主级扫描器会在**没人打开会话**时把 agent 拉起来。如果用户刚刚主动把某个
+ * 会话的 agent 关掉（或刚打开、正要自己操作），扫描器的"帮忙"就是打扰。这里用「监听会话
+ * 生命周期」的口径兜住：本进程里被 dispose 的、或最近被打开过的会话，两个扫描周期内
+ * （{@link COLD_WAKE_QUIET_MS}）不主动拉起。跨进程的场景由 diff 口径兜住（见
+ * `canWakeColdSession`）。
+ */
+interface UserWatch {
+    /** sessionId → 最近一次「用户动作」的时刻（epoch ms）。 */
+    readonly recent: Map<string, number>;
+}
+/**
+ * 判断一个会话是否**允许**被宿主级扫描器冷唤醒（决策 D3 的拒绝面）。
+ *
+ * 三条拒绝理由，每条都有实证/上下文：
+ *  1. **被委托子会话**（`delegationDepth > 0`）：上游对子会话的 reminder 投递一律拒绝
+ *     （`session/agent-busy`，见 schedule 的 `reminderTargetRefusal`）。它的提醒本就不该由
+ *     本插件投递；拉起来只会白跑一轮 turn 再失败。
+ *  2. **非 root**：`ctx.agents.roots()` 里没有它 ⇒ runtime 挂不上 ⇒ 唤醒等于白拉。冷会话在
+ *     这里看到的是「此刻没有对应 agent」，属于正常现象，不算拒绝。
+ *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
+ * what 这一段只在**此刻有 agent** 时才有信息；没有 agent 时只看用户动作表。
+ * @param ctx - 宿主上下文。
+ * @param sessionId - 候选会话。
+ * @param watch - 用户动作表。
+ * @returns 可唤醒返回 true。
+ */
+export declare function canWakeColdSession(ctx: Context, sessionId: string, watch?: UserWatch): boolean;
 export declare function apply(ctx: Context, config?: {
     maxSchedules?: number;
 }): void;
