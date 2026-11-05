@@ -15,9 +15,18 @@
  *
  * - `at` / `after`（一次性）：`scheduledAt <= now` 即到期。
  * - `every`（固定间隔）：上游把它表达成「下一次应该触发的 `scheduledAt`」——到点后由
- *   `resolveEveryOccurrence` 推下一次。所以**到期判定与一次性完全相同**：比 `scheduledAt`
- *   与 `now`。真正"过期多久都只算一次"的语义在上游的 occurrence 解析里，不在判定里。
- *   这里显式统一，是为了让"扫描器看到 every 到点了"与"runtime 认为 every 到点了"必然一致。
+ *   `resolveEveryOccurrence` 推下一次。所以**到期判定与一次性完全相同**：`scheduledAt <= now`
+ *   即到期，不看"已经过期多久"。
+ *
+ *   为什么"过期多久都只算一次"不在判定里：那条语义由上游的 occurrence 解析兜住——runtime
+ *   派发 `every` 时带的是 `resolveEveryOccurrence(record, now).occurrenceAt`（本次应算的那一次
+ *   的真实时刻），而不是"现在"，所以哪怕会话晚醒两小时，派发的仍是那一次、且只算一次；
+ *   下一次的目标时刻再由上游推。判定层只回答"现在到点了没有"，answered 之后怎么折算成
+ *   occurrence 是上游的事——两层各管一件事，才不会被两个读者各解释一遍。
+ *
+ *   这里显式统一，是为了让"扫描器看到 every 到点了"与"runtime 认为 every 到点了"必然一致：
+ *   两边共用这一句，分叉（比如一边用 `<`、一边用 `<=`，或一边按 occurrence 比较）就会变成
+ *   "扫描器把会话反复叫醒、runtime 每次都说不该派发"。
  * - 时刻无法解析（`NaN`）：**永远不算到期**。宁可让 runtime 在会话打开时按自己的 fold 处理，
  *   也不让扫描器拿着一个坏时刻去做"立刻唤醒"的决定——那会变成每轮都唤醒、每次都投不出去。
  *

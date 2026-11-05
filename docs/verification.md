@@ -564,7 +564,9 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 
 **已修（issue #11b / 分支 `feat/11b-host-level-sweep`，1.13.0）**：宿主级到期扫描器 `src/expiry-sweeper.ts` 挂在插件 apply 的顶层 fiber 上，看 sidecar 里每条提醒的到期时刻（v3 起 `OwnedEntry.scheduledAt`），到点用「惰性取 `ctx.get('sessionController')` → 回退 `ctx.agents.resume({ resumeSessionId })`」把会话拉起来，再走**原有** runtime 链路投递（确认窗口、`schedule/change dispatch` 记账、`/later` 代发语义一个字没改）。
 
-上面那条「停进程重启、不开浏览器、到期后 0 条」现在变成：**到期后由扫描器自己叫醒会话并投递**。判据是事件形状（`agent/inbox/spliced` 的 `inserted[].content` 带 nonce + 随后一条 `schedule/change operation: dispatch`），跨内核 `function` 面每个代次都单列一维（`冷会话 spliced=N`），与热会话分开数——任何一方为 0 都单独判红，不许互相打掩护。
+上面那条「停进程重启、不开浏览器、到期后 0 条」现在变成：**到期后由扫描器自己叫醒会话并投递**。判据是事件形状（`agent/inbox/spliced` 的 `inserted[].content` 带 nonce + 随后一条 `schedule/change operation: dispatch`），跨内核 `function` 面每个代次都单列一维（`冷会话 spliced=N dispatch=Y`），与热会话分开数——任何一方为 0 都单独判红，不许互相打掩护。
+
+**dispatch 的归属口径**：`schedule/change` 事件本身只带 schedule id、不带会话 id，所以脚本按**会话日志文件**归属——内核把每个会话写成 `<home>/sessions/<cwd 编码>/<sessionId>/session.v4.jsonl(.zstd)`，目录名就是 sessionId，这是确定性事实而非猜测。早期版本在全量事件里 `some()`，热用例与冷用例的 `dispatched` / `coldDispatched` 因此**恒等**（永远同真同假），冷那一维对结论的贡献是 0 却显示成 `true`；现在两者各自看自己会话的日志，`sessionsSeen` 里也留下本次出现的会话目录，便于复核。
 
 落地时踩到、现在写死在实现里的四条（改动这些之前先读源码注释）：
 

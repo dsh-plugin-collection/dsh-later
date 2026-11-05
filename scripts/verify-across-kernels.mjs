@@ -473,8 +473,23 @@ function unzstdAllFrames(buf) {
   return parts.join('\n');
 }
 
+/**
+ * 读整个 home 下的事件，并按**日志文件**归组。
+ *
+ * 为什么要归组：`function` 面现在有两个用例（热会话 / 冷会话），它们的投递证据必须能
+ * **各自归因**。早期版本把 `schedule/change operation: dispatch` 直接在全量事件里 `some()`，
+ * 于是热用例与冷用例的 `dispatched` 字段**恒等**——两个字段永远同真同假，冷那一维对结论
+ * 的贡献是 0，却会在汇总里显示成 `true`。
+ *
+ * 归属口径是**确定性事实、不是猜**：内核把每个会话写成
+ * `<home>/sessions/<cwd 编码>/<sessionId>/session.v4.jsonl(.zstd)`，目录名就是 sessionId。
+ * 这里让每个事件带上 `sessionDir`（最近的那层会话目录名），调用方按它归属。
+ * @param {string} home - 本次运行的临时 DSH_HOME。
+ * @returns {{ events: object[], bySession: Map<string, object[]> }} 全部事件与按 sessionId 归组的事件。
+ */
 function readEvents(home) {
-  const out = [];
+  const events = [];
+  const bySession = new Map();
   const stack = [home];
   while (stack.length) {
     const dir = stack.pop();
@@ -484,17 +499,24 @@ function readEvents(home) {
       const p = join(dir, e.name);
       if (e.isDirectory()) { if (e.name !== 'node_modules') stack.push(p); continue; }
       if (!/\.(jsonl|log)(\.zstd)?$/.test(e.name)) continue;
+      // 会话目录名 = sessionId（日志文件名固定是 session.v4.jsonl[.zstd]）。
+      const sessionDir = basename(dir);
       try {
         if (statSync(p).size > 40 * 1024 * 1024) continue;
-        const text = /\.zstd$/.test(e.name) ? unzstdAllFrames(readFileSync(p)) : readFileSync(p, 'utf8');
+        const text = /\.zstd$/.test(p) ? unzstdAllFrames(readFileSync(p)) : readFileSync(p, 'utf8');
         for (const line of text.split('\n')) {
           if (!line.trim().startsWith('{')) continue;
-          try { out.push({ ...JSON.parse(line), raw: line }); } catch { /* 非事件行跳过 */ }
+          let parsed;
+          try { parsed = JSON.parse(line); } catch { continue; }
+          const event = { ...parsed, raw: line, sessionDir };
+          events.push(event);
+          if (!bySession.has(sessionDir)) bySession.set(sessionDir, []);
+          bySession.get(sessionDir).push(event);
         }
       } catch { /* 读不了就跳过这个文件 */ }
     }
   }
-  return out;
+  return { events, bySession };
 }
 
 /** 未来 N 天的本地日期（避免"时刻已过"被上游拒，从而污染 at 判据）。 */
@@ -646,22 +668,36 @@ async function runOne(version) {
     const exec = await ctx.commands.execute(agent, `/user-schedule-create ${JSON.stringify({ prompt: nonce, after_seconds: 2 })}`, [], new AbortController().signal);
     if (exec?.result?.kind !== 'success') record.notes.push(`投递用例没建起来：${String(exec?.result?.text ?? '').slice(0, 140)}`);
     await new Promise((r) => setTimeout(r, HOLD * 1000));
-    const evs = readEvents(home);
+    const { events: evs, bySession } = readEvents(home);
     const spliced = evs.filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(nonce) && (e.data?.inserted?.length ?? 0) > 0).length;
-    const dispatched = evs.some((e) => e.type === 'schedule/change' && e.data?.operation === 'dispatch');
     // 冷会话的投递证据单独取：同一个日志目录里两个会话混在一起，必须按 nonce 分开数，
     // 否则"热会话投递成功"会替"冷会话没投出去"打掩护（假绿）。
     const coldSpliced = evs.filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(coldNonce) && (e.data?.inserted?.length ?? 0) > 0).length;
-    // `schedule/change` 只带 schedule id，不带会话 id——两个会话各会产出自己的 dispatch，
-    // 所以按"每个用例至少一条"判，而不是按会话归属判（按会话归属判只能靠日志文件名，
-    // 而那正是"猜"）。数量对比在这里没有意义：热用例本身也可能一次写多条。
-    const coldDispatched = evs.some((e) => e.type === 'schedule/change' && e.data?.operation === 'dispatch');
+    /**
+     * dispatch 记账必须**按会话归因**，不能在全量事件里 `some()`。
+     *
+     * 早期版本就是这么写的，于是热用例与冷用例的 `dispatched` / `coldDispatched` **恒等**：
+     * 两个字段永远同真同假，冷那一维对结论的贡献是 0，却会在汇总里显示成 `true`——
+     * 下一个看矩阵的人会以为"冷会话的 dispatch 记账也验过了"。
+     *
+     * 归属口径是确定性事实、不是猜：内核把每个会话写成
+     * `<home>/sessions/<cwd 编码>/<sessionId>/session.v4.jsonl(.zstd)`，目录名就是 sessionId。
+     * 这里按「该会话自己的日志文件里出现过本用例的 nonce、且其中有 dispatch」判。
+     */
+    const dispatchInSession = (sessionId, marker) => {
+      const own = bySession.get(sessionId) ?? [];
+      return own.some((e) => e.type === 'schedule/change' && e.data?.operation === 'dispatch')
+        && own.some((e) => e.raw.includes(marker));
+    };
+    const dispatched = dispatchInSession(agent.id, nonce);
+    const coldDispatched = dispatchInSession(coldSessionId, coldNonce);
     const admission = evs.find((e) => /producer-owned source kind/.test(e.raw));
     record.delivery = {
       spliced,
       dispatched,
       coldSpliced,
       coldDispatched,
+      sessionsSeen: [...bySession.keys()],
       admissionError: admission ? admission.raw.replace(/\s+/g, ' ').slice(0, 160) : null,
     };
     if (spliced === 0) {
@@ -678,6 +714,7 @@ async function runOne(version) {
       record.eventHistogram ??= hist;
       record.notes.push(`冷会话未投递（issue #11b）：spliced=0｜事件 ${Object.keys(hist).length} 种 ${JSON.stringify(hist).slice(0, 160)}`);
     }
+    else if (!coldDispatched) record.notes.push('冷会话注入了但没有自己的 dispatch 事件（按会话日志归属判定），状态账可能对不齐');
     if (admission) record.notes.push(`v4 源校验拒绝：${admission.raw.replace(/\s+/g, ' ').slice(0, 150)}`);
     record.notes.unshift(note ? `内核树：${note}` : '内核树：复用本地');
     try { await ctx.fiber?.dispose?.(); } catch { /* 释放失败不改写结论 */ }
@@ -695,6 +732,7 @@ async function runOne(version) {
   const red = record.verdict === 'RED'
     || (record.delivery?.spliced ?? 0) === 0
     || (record.delivery?.coldSpliced ?? 0) === 0
+    || record.delivery?.coldDispatched === false
     || !!record.delivery?.admissionError
     || record.at.some((a) => !a.pass)
     || record.notes.some((n) => n.startsWith('装配失败') || n.startsWith('未投递'));
@@ -927,7 +965,12 @@ function report(record) {
   console.log(`\n### ${v} … ${record.verdict}`);
   const bits = [`内核=${record.runtime ?? '?'}`];
   if (guard !== undefined) bits.push(`同源=${guard.ok ? 'same' : 'MISMATCH'}`);
-  if (record.delivery) bits.push(`投递 spliced=${record.delivery.spliced} dispatch=${record.delivery.dispatched ? 'Y' : 'N'} 冷会话 spliced=${record.delivery.coldSpliced ?? '?'}`);
+  if (record.delivery) {
+    const d = record.delivery;
+    // dispatch 两个字段**各自归因**（按会话日志目录）：热用例看热会话自己的日志，冷用例看
+    // 冷会话自己的日志。早期版本两者恒等，等于冷那一维没有证据，别退回那种写法。
+    bits.push(`投递 spliced=${d.spliced} dispatch=${d.dispatched ? 'Y' : 'N'} 冷会话 spliced=${d.coldSpliced ?? '?'} dispatch=${d.coldDispatched === undefined ? 'n/a' : d.coldDispatched ? 'Y' : 'N'}`);
+  }
   if (record.at?.length) bits.push(`at 形状 ${record.at.filter((a) => a.pass).length}/${record.at.length}`);
   if (record.type) bits.push(`type ${record.type.ok ? '绿' : record.type.projects.map((p) => `${p.project}:${p.errors}`).join(',')}`);
   if (record.gate) bits.push(`gate 本代=${record.gate.own.status} 最新=${record.gate.latest.status}`);
