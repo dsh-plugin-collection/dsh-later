@@ -27,7 +27,31 @@
  */
 import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
+declare function decodeScheduleChangeCompat(data: unknown): ScheduleChange;
+/**
+ * 仅供 `tests/schedule-change-decode-parity.test.mjs` 使用的兜底解码器出口。
+ *
+ * 为什么必须导出：开发树里 `dsh-schedule` 一直有 `decodeScheduleChange`，所以
+ * 正常路径**永远走不到兜底分支**——不导出就只能靠真内核复现，而这正是 issue #12
+ * 第二段「只改了一处、单测全绿」的成因。导出让单测能直接钉住兜底语义。
+ */
+export declare const __decodeScheduleChangeCompatForTest: typeof decodeScheduleChangeCompat;
 import type { AfterScheduleRecord, AtScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
+/**
+ * `schedule/change` 事件解出的三种操作。上游 `0.2.2-alpha.3` 起类型面不再导出
+ * `ScheduleChange`（GitHub issue #12），本仓按旧版语义自行声明。
+ */
+type ScheduleChange = {
+    readonly operation: 'create';
+    readonly schedule: unknown;
+} | {
+    readonly operation: 'delete';
+    readonly id: string;
+} | {
+    readonly operation: 'dispatch';
+    readonly id: string;
+    readonly acceptedAt?: string;
+};
 import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
 import type { UserScheduleProjectionValue } from './domain.js';
 /**
