@@ -78,6 +78,53 @@ const upstreamFold = pickExport<FoldScheduleEvents>('foldScheduleEvents');
 const upstreamView = pickExport<ScheduleViewFn>('scheduleView');
 /** 上游 `decodeScheduleChange`；`0.2.2-alpha.3` 起不存在（本仓 fold 的等价实现需要它）。 */
 const decodeChange = pickExport<(data: unknown) => ScheduleChange>('decodeScheduleChange');
+/** 上游 `decodeScheduleRecord`；`0.2.2-alpha.3` 起取代了变更解码器的**记录**那一半。 */
+const decodeRecord = pickExport<(value: unknown) => ScheduleRecord>('decodeScheduleRecord');
+
+/**
+ * 变更解码的本仓等价实现。
+ *
+ * `0.2.2-alpha.3` 移除了 `decodeScheduleChange`，但保留了 `decodeScheduleRecord`
+ * （只解记录、不解 `{operation, schedule}` 这层包装）。载荷形状两代一致
+ * （`version` / `operation` / `schedule | id`），所以在本仓把包装拆开、把 `schedule`
+ * 交给上游 `decodeScheduleRecord` 校验，语义与旧解码器一致：
+ *  - 非法载荷由 `decodeScheduleRecord` 抛出，与旧实现抛 `ScheduleLogError` 等价；
+ *  - `unknown` 操作一律拒绝。
+ *
+ * 上游两代都没有 `decodeScheduleRecord` 时（极老代次）退化为**形状检查**：
+ * 只认 `create.schedule.id` 是字符串，不做字段级校验——比拒绝整条日志好。
+ */
+function decodeChangeCompat(data: unknown): ScheduleChange {
+  const upstream = decodeChange;
+  if (upstream !== undefined) return upstream(data);
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    throw new TypeError('schedule change must be an object');
+  }
+  const payload = data as Record<string, unknown>;
+  const operation = payload['operation'];
+  if (operation === 'create') {
+    const raw = payload['schedule'];
+    const record = decodeRecord !== undefined ? decodeRecord(raw) : (raw as ScheduleRecord);
+    if (typeof (record as { id?: unknown })?.id !== 'string') {
+      throw new TypeError('schedule change create requires a record with a string id');
+    }
+    return { operation: 'create', schedule: record };
+  }
+  if (operation === 'delete') {
+    const id = payload['id'];
+    if (typeof id !== 'string') throw new TypeError('schedule change delete requires a string id');
+    return { operation: 'delete', id };
+  }
+  if (operation === 'dispatch') {
+    const id = payload['id'];
+    if (typeof id !== 'string') throw new TypeError('schedule change dispatch requires a string id');
+    const acceptedAt = payload['acceptedAt'];
+    return typeof acceptedAt === 'string'
+      ? { operation: 'dispatch', id, acceptedAt }
+      : { operation: 'dispatch', id };
+  }
+  throw new TypeError(`unknown schedule change operation ${String(operation)}`);
+}
 
 /**
  * `scheduleView` 的本仓等价实现。
@@ -125,9 +172,7 @@ function foldScheduleEventsCompat(
     if (event.type !== 'schedule/change') continue;
     let change: ScheduleChange;
     try {
-      const decode = decodeChange;
-      if (decode === undefined) continue;
-      change = decode(event.data);
+      change = decodeChangeCompat(event.data);
     } catch {
       continue;
     }

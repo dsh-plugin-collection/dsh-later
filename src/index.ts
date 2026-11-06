@@ -710,11 +710,21 @@ async function wakeColdSession(
     watch.recent.delete(sessionId);
     watch.suppressed.delete(sessionId);
   }
-  const mounted = registry.mount(agent);
-  if (mounted === undefined) {
-    // 已经挂着就显式重驱一次：`mount` 对已挂载的会话是空操作（**不会**再 requestDrive），
-    // 而这里的唤醒语义是"现在就去核算一遍到期"，不能靠 attach 的副作用代劳。
-    registry.drive(agent);
+  // 无条件重驱一次。
+  //
+  // 原实现写成 `if (mounted === undefined) registry.drive(agent)`——但 `mount()` 成功后
+  // **返回**的是 runtime 而不是 undefined（`runtime-registry.ts` 的 `mount` 结尾
+  // `return runtime`），于是条件恒假，冷唤醒之后从来没有真正驱动过投递。表现是：
+  // 会话被拉起来了（日志里有 `session` 事件），但 `agent/inbox/spliced` 与 `dispatch`
+  // 永远不出现，扫描器随后报「唤醒后提醒仍然到期」。0.2.2-alpha.3 上首次暴露
+  // （issue #12 的回归矩阵），0.1.2…0.2.2-alpha.2 九代为什么是绿的，另行核对。
+  registry.mount(agent);
+  const driven = registry.drive(agent);
+  if (!driven) {
+    ctx.logger.warn(
+      `later: 会话 ${sessionId} 已被唤醒，但 runtime 未能驱动（root 判定未命中），` +
+        `本轮按未投递处理；该会话被打开时会立即补投。`,
+    );
   }
 }
 
