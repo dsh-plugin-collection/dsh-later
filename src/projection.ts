@@ -27,12 +27,43 @@
  */
 import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
-import { decodeScheduleChange, resolveEveryOccurrence } from '@deepseek-ai/dsh-schedule';
+import * as schedNs from '@deepseek-ai/dsh-schedule';
+import { resolveEveryOccurrence } from '@deepseek-ai/dsh-schedule';
+
+/**
+ * `decodeScheduleChange` 在 `dsh-schedule@0.2.2-alpha.3` 起被移除（改为
+ * domain / task 模型，见 GitHub issue #12）。**不能**用具名 import：ESM 在
+ * 目标导出缺失时是链接期硬失败，整个插件一条 fiber 都不激活
+ * （`SyntaxError: The requested module … does not provide an export named …`），
+ * 运行期 try/catch 也接不住。这里走 namespace + 属性访问，缺符号时退化为
+ * 「该事件不解码」，由下面的解码失败分支原地跳过。
+ *
+ * 与 `schedule-compat.ts` 的 `pick()` 同一口径；那边是模块私有，这里保持
+ * 本文件自足，避免为一个属性访问引入跨模块依赖。
+ */
+function pickExport<T>(name: string): T | undefined {
+  return (schedNs as unknown as Record<string, unknown>)[name] as T | undefined;
+}
+
+/** 旧代次的变更解码器；`0.2.2-alpha.3` 起不存在（返回 undefined）。 */
+const decodeScheduleChangeCompat = pickExport<(data: unknown) => ScheduleChange>(
+  'decodeScheduleChange',
+);
+
 import type {
   AfterScheduleRecord,
   AtScheduleRecord,
   EveryScheduleRecord,
 } from '@deepseek-ai/dsh-schedule';
+
+/**
+ * `schedule/change` 事件解出的三种操作。上游 `0.2.2-alpha.3` 起类型面不再导出
+ * `ScheduleChange`（GitHub issue #12），本仓按旧版语义自行声明。
+ */
+type ScheduleChange =
+  | { readonly operation: 'create'; readonly schedule: unknown }
+  | { readonly operation: 'delete'; readonly id: string }
+  | { readonly operation: 'dispatch'; readonly id: string; readonly acceptedAt?: string };
 import { OWNED_EVENT, PROJECTION_KEY } from './domain.js';
 import {
   allOwnership,
@@ -438,7 +469,11 @@ export function applyUserScheduleProjection(
   if (event.type === 'schedule/change') {
     let change;
     try {
-      change = decodeScheduleChange(event.data);
+      const decode = decodeScheduleChangeCompat;
+      // 内核已移除该解码器（0.2.2-alpha.3+）：这一代上本投影不认识变更事件，
+      // 走下面的跳过分支，而不是让整个模块链接失败。
+      if (decode === undefined) return state;
+      change = decode(event.data);
     } catch {
       return state; // 无法解码的事件跳过（dsh-schedule 自身的 fold 会严格报错）
     }
@@ -508,7 +543,7 @@ export function applyUserScheduleProjection(
         const current = state.active.find((entry) => entry.id === change.id);
         if (current === undefined) return state;
         let nextActive: readonly StoredScheduleRecord[];
-        if ('acceptedAt' in change) {
+        if (change.acceptedAt !== undefined) {
           const advanced = advanceEvery(current, change.acceptedAt);
           // 周期推进后保留 createdAt（进度条起点跨周期不变）
           const next = advanced === undefined ? undefined : { ...advanced, createdAt: current.createdAt };

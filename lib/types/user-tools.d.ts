@@ -21,7 +21,35 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
-import type { ScheduleRecord, ScheduleView } from '@deepseek-ai/dsh-schedule';
+import type { ScheduleRecord } from '@deepseek-ai/dsh-schedule';
+/**
+ * `ScheduleView` / `ScheduleState` / `ScheduleDeliveryMode` / `ScheduleChange`
+ * 在 `dsh-schedule@0.2.2-alpha.3` 起一并从类型面移除（GitHub issue #12）。
+ *
+ * 这四个是本仓**读视图**的输入/输出形状，语义与旧版一致，因此在本仓自行声明，
+ * 而不是跟着上游 import（跨代时上游会删、而本仓仍要用）：
+ *  - `ScheduleState`：`scheduled`（还没到点）/ `overdue`（已到点未派发）；
+ *  - `ScheduleDeliveryMode`：本插件恒为 `'host'`（提醒不离开所属会话）；
+ *  - `ScheduleView` = `ScheduleRecord` + 上面两项；
+ *  - `ScheduleChange`：`schedule/change` 事件解出的三种操作。
+ */
+export type ScheduleState = 'scheduled' | 'overdue';
+export type ScheduleDeliveryMode = 'host';
+export type ScheduleView = ScheduleRecord & {
+    readonly state: ScheduleState;
+    readonly deliveryMode: ScheduleDeliveryMode;
+};
+export type ScheduleChange = {
+    readonly operation: 'create';
+    readonly schedule: ScheduleRecord;
+} | {
+    readonly operation: 'delete';
+    readonly id: string;
+} | {
+    readonly operation: 'dispatch';
+    readonly id: string;
+    readonly acceptedAt?: string;
+};
 import type { UserScheduleDelivery } from './domain.js';
 import type { ScheduledAttachment } from './ownership-store.js';
 /** 单 session 用户任务上限（PRD：防滥用）。 */
