@@ -154,12 +154,17 @@ function clauseSatisfied(clause, version) {
 test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，范围自洽）', () => {
   assert.ok(KERNEL_GENERATIONS.length >= 2, '至少覆盖两代');
   // issue #95（2026-10-26）先用跨代 tsc 量了一遍：0.1.1 / 0.1.2 / 0.1.5 三代都红，于是先把下界
-  // 收到 0.1.7-rc.1（PR #98）；随后按同一份测量把能兼容的补回来（PR #101）：
-  //   · 0.1.5：图标改名 / Tooltip 无 portal / 无 fileMediaUrl —— 兼容层兜住；
-  //   · 0.1.2：再加 FileTypeIcon/fileSizeText/attachments/FileBlock/ContentBlock 无 file 变体 —— 降级兜住；
-  //   · 0.1.1：`dsh-util-workspace-path@0.1.1-rc.2` 在 registry 未发布 ⇒ 装不出 ⇒ **无法自证**，仍不入表。
-  // 入表标准因此写死为「装配功能 + 跨代 tsc 两面都过」，而不是「跑现成 lib 产物能挂上」。
-  assert.equal(KERNEL_GENERATIONS[0].id, '0.1.2-rc.1', '下界是 0.1.2-rc.1（0.1.1 无法自证，未入表）');
+  // 收到 0.1.7-rc.1（PR #98）；随后按同一份测量把能兼容的补回来（PR #101），下界一度回到
+  // 0.1.2-rc.1。**2026-11-06 又抬到 0.1.7-rc.2**，这次不是被证伪，是上架门槛与成本面：
+  //   · 上架门槛：DSH 社区插件索引 / 官方市场要求新登记插件的最低宿主下限不低于 0.2.0-0，
+  //     只留 0.1.7-rc.2 这一条**退役记录**（README 矩阵里它的状态写的是「已退役」）；
+  //   · 0.1.2 / 0.1.5 / 0.1.7-rc.1 从表里移出，它们的证据仍在 docs/verification.md。
+  // 入表标准仍是「装配功能 + 跨代 tsc 两面都过」，而不是「跑现成 lib 产物能挂上」。
+  assert.equal(
+    KERNEL_GENERATIONS[0].id,
+    '0.1.7-rc.2',
+    '下界是 0.1.7-rc.2（0.1.2 / 0.1.5 / 0.1.7-rc.1 已于 2026-11-06 退役，见 src/upstream-compat.ts 表头）',
+  );
 
   for (const gen of KERNEL_GENERATIONS) {
     // 0.1.1 出表后表里不应再有 legacy-events 的一代；read* 的兜底分支保留为防御。
@@ -202,9 +207,16 @@ test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，�
 
   // 下界一致性：engines.dsh 必须与表的下界同一句，别让两处各说一套（issue #95 的验收项之一）
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const lower = '>=0.1.2-rc.1';
+  const lower = `>=${KERNEL_GENERATIONS[0].id}`;
   assert.ok(String(pkg.engines?.dsh ?? '').includes(lower), `engines.dsh 应以 ${lower} 起：${pkg.engines?.dsh}`);
   assert.ok(!String(pkg.engines?.dsh ?? '').includes('0.1.1'), 'engines.dsh 不得再声称 0.1.1 起（该代无法自证）');
+  // 退役三代不许自己爬回声明面：谁把 0.1.2 / 0.1.5 / 0.1.7-rc.1 加回表里，这条先红。
+  for (const retired of ['0.1.2-rc.1', '0.1.5-rc.3', '0.1.7-rc.1']) {
+    assert.ok(
+      !String(pkg.engines?.dsh ?? '').includes(retired),
+      `engines.dsh 里又出现了已退役的 ${retired}：抬回下界要连同上架门槛一起重新决定`,
+    );
+  }
 });
 
 test('verGt / caretCovers 自身行为正确（防护栏本身失效）', () => {

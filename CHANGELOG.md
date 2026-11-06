@@ -4,6 +4,15 @@
 
 ## 未发布
 
+- **chore** 内核下界抬到 `>=0.2.0-rc.2`：`0.1.2-rc.1`、`0.1.5-rc.3`、`0.1.7-rc.1` 不再声明，
+  `engines.dsh` 与 `peerDependencies` 里 `0.1.x` 只剩 `0.1.7-rc.2` 一条**退役记录**。
+  不是这几代被证伪——它们的四面证据仍在 `docs/verification.md`——是两件事推的：DSH 社区插件
+  索引与官方市场 2026-11-05 那轮写明的上架门槛要求新登记插件的最低宿主下限不低于 `0.2.0-0`；
+  以及老代次带来的条款与只在其上执行的降级分支的成本。**仍在 `0.1.x` 内核上的用户装不上 1.13.0**，
+  留在 1.12.1 可以继续用；降级代码这一轮没删，只收声明。
+  守卫同步：`tests/support-surface.test.mjs` 新增下界断言，`tests/upstream-compat.test.mjs` 钉住
+  「退役三代不许爬回声明面」，`tests/kernel-version-source-kind.test.mjs` 那条 rc.1 断言方向翻转。
+
 ## 1.12.1 — 2026-11-06
 
 - **fix** 在 `@deepseek-ai/dsh-schedule@0.2.2-alpha.3` 及以上**装不起来**了：那一代移除了

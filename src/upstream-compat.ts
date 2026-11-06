@@ -1,7 +1,11 @@
 /**
  * 上游内核跨代兼容层：把「鸭子类型双轨探测 + peer 代次矩阵 + 内核版本判定」收敛到单文件。
  *
- * ## 支持的下界是 0.1.2-rc.1（issue #95 的结论，issue #101 的兼容层补回 0.1.2/0.1.5）
+ * ## 支持的下界是 0.1.7-rc.2（2026-11-06 起；此前是 0.1.2-rc.1）
+ *
+ * 下面这段是 **2026-10-26（issue #95 / #101）当时的口径，原样保留当证据**，不随后来抬下界而改写；
+ * 其中的 `0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` 已于 2026-11-06 退役，理由写在
+ * `KERNEL_GENERATIONS` 正上方的那段注释里。
  *
  * 2026-10-26 用「把整条 `@deepseek-ai/dsh*` 依赖线换成目标代次后跑本仓 tsc」量了一遍，
  * 当时 0.1.1 / 0.1.2 / 0.1.5 三代都是红的，于是先把下界收到 0.1.7-rc.1（PR #98）。
@@ -37,6 +41,8 @@
  *     ——这张表是「已完整验证」的台账，入表就是声明四面都过了。
  *   - 跑 `node scripts/sync-peer-matrix.mjs` 重写 package.json：**peer 逐代枚举** +
  *     **`engines.dsh` 由本表按 tuple 上界推导**（两者都别再手抄，见 `enginesDshRange`）
+ *   - 下界当前是 `0.2.0-rc.2`（1.13.0 起）。**不要**为了「多支持几代」把 0.1.x 加回表里：
+ *     那是上架门槛与成本面的决定，理由写在 `KERNEL_GENERATIONS` 正上方的注释里
  *   - 跑 `npm test`（含 tests/upstream-compat.test.mjs 矩阵护栏与
  *     tests/support-surface.test.mjs 的支持面护栏）
  *   - 跨代 tsc + 功能面：`node devkit/matrix.mjs --versions <代次> --steps gate,peer,typecheck`
@@ -89,77 +95,32 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
  *   现在表里**没有任何一代用 `legacy-events`**（0.1.1 已出表）；该取值与 read* 的兜底分支
  *   保留为防御——第三方伪造 Session、或未来某代悄悄改形状时，失败要可诊断而不是抛 undefined。
  */
+/**
+ * ⚠️ **下界 = `0.2.0-rc.2`（1.13.0 起）**：`0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` 三代
+ * **已从本表移除、不再声明**。
+ *
+ * 它们没有被证伪——各自的四面证据仍在 `docs/verification.md`，不删不改写——是两件事推的：
+ * 1. **上架门槛**：DSH 社区插件索引（2026-11-05 那轮）与官方市场的准入条件是「新登记插件
+ *    声明的**最低宿主下限低于 `0.2.0-0`** 不予接受」。本插件原先声明 `>=0.1.2-rc.1`。
+ * 2. **成本面**：每多一个 tuple 就多一条 `engines.dsh` 条款、每个 kernel-scoped peer 多三枚
+ *    枚举项，外加一套只在那一代跑的降级分支；而那些分支在常规回归里永远不执行。
+ *
+ * 回到 0.1.x 下界之前先读上面两条：本表是「已完整验证」的台账，不是「能跑」的清单。
+ * 逐步退役的记录（每一代当时测到什么）见 `docs/verification.md` 与本文档历史提交。
+ *
+ * 退役没有删代码：`attachment-blocks.ts` / `primitives-compat.ts` / `media-url.ts` 的降级
+ * 分支仍按内核版本判定，只是已声明范围内不会再命中。删不删是另一件事，判据只有一个——
+ * 在 0.2.0+ 上装本插件的用户里还有没有人需要它。
+ *
+ * ## 退役记录
+ *
+ * - `0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1`（2026-11-06）：随下界抬升出表。
+ *   它们的原始条目注释（每一代的面差异、`0.1.5` 为何按 rc.3 验证、`0.1.7-rc.1` 为什么必须
+ *   单列）连同实测数据留在 `docs/verification.md`，本表不再复述。
+ * - `0.1.7-rc.2`：**保留在本表**，作为「曾支持、现已退役」的显式记录（README 的支持矩阵
+ *   里它那一行写的是「已退役」）。删掉它会让「这两代为什么不再支持」变成没人记得的事。
+ */
 export const KERNEL_GENERATIONS = [
-  {
-    /**
-     * `0.1.2-rc.1` 代次：Session 形状已是 `ownEvents()` + `inheritedEventCount`（0.1.1 的
-     * `.events` + `header.seedLength` 到这里已经改成新形状）。
-     *
-     * 与 0.1.7+ 的差异是**能力/命名**而不是 Session：UI 原语缺 `FileTypeIcon`/`fileSizeText`、
-     * 图标用尺寸后缀名、`Tooltip` 没有 `portal`、`CommandInputDescriptor` 没有 `attachments`、
-     * `dsh-llm` 没有 `FileBlock`、`ContentBlock` 没有 `file` 变体。这些全部收在
-     * `src/client/primitives-compat.ts`、`src/client/workspace-path-compat.ts` 与宿主侧
-     * 的兼容层里（见 issue #95 / #101），跨代 tsc 两个项目都是 0 条错误。
-     */
-    id: '0.1.2-rc.1',
-    sessionApi: 'own-events' as const,
-  },
-  {
-    /**
-     * `0.1.5` 线：**列 rc.3，不列 rc.1**（实测结论，见下）。
-     *
-     * Session 形状未变（仍 `ownEvents()` + `inheritedEventCount`）；`dsh-schedule` 的导出面与
-     * 0.1.7-rc.1 **逐符号相同**（`renderEveryReminderBatchFraming` / `allocateScheduleId` 两边都在），
-     * 所以**符号判据区分不了这两代**，只能读版本号（issue #75）。
-     *
-     * 为什么 id 是 rc.3：`@deepseek-ai/dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，
-     * 按默认安装会把整条插件线解析到 **rc.3**（实测 lockfile 里 238 个 `@deepseek-ai/dsh*`
-     * 有 237 个不是 rc.1）——也就是说这一代用户实际拿到的是**统一的 rc.3**，能验证的形态也只有它。
-     *
-     * ⚠️ 早先这里写的是「rc.1 启动器 + rc.3 组件混装**装不起来**」，那是**误判**，别再照着它做
-     * 决定。逐插件补全 peer 后同一棵树能 mount（投递 spliced=1 / dispatch=Y / at 5/5）。当时的
-     * RED 来自 `scripts/verify-across-kernels.mjs` 自己的两个装配口径：① 写死顶层
-     * `dsh-app-boot` 路径，而纯 rc.1 安装会把它嵌到 `dsh/node_modules` 下；② 用
-     * `--legacy-peer-deps` 跳过 peer，而 `ensureBootPeers` 只补 app-boot 一棵线——
-     * `dsh-session-persistence-jsonl` 是靠 **peer** 拿 `dsh-session-persistence` 的，于是报
-     * `Cannot find package`。这两个洞应当修在脚本里；在此之前，脚本对 rc.1 的 RED **不构成**
-     * 「该代不支持」的证据。
-     *
-     * 该代还有一处 schemastery 差异：`s.object(...).volatile()` 在它装的 **3.18.2** 上不存在
-     * （整条插件加载失败，`…volatile is not a function`）—— 已在 `src/index.ts` 里做能力探测降级。
-     *
-     * UI 侧差异（图标尺寸后缀名、`Tooltip` 无 `portal`、`fileMediaUrl` 缺失）由
-     * `primitives-compat.ts` / `workspace-path-compat.ts` 兜住；它本身有 `FileTypeIcon`/`fileSizeText`。
-     */
-    id: '0.1.5-rc.3',
-    sessionApi: 'own-events' as const,
-  },
-  {
-    /**
-     * `0.1.7-rc.1`：**必须单列的组合代**（issue #75）。
-     *
-     * 上游两个破坏性变更不在同一个 rc 落地：
-     *  - **本代已删** 消息 `source.kind:'plugin'`——实测它的
-     *    `@deepseek-ai/dsh-session-format-v3-to-v4` 在写入时刻对 `kind === 'plugin'`
-     *    直接 throw `format v4 message requires a producer-owned source kind`；
-     *  - **本代未改** `renderEveryReminderBatchFraming` 的名字（改名到 rc.2 才发生），
-     *    `allocateScheduleId` 也**仍在**导出（rc.2 才删）。
-     *
-     * 于是任何按 `dsh-schedule` 符号存在性做的分代在这里必然判错：rc.1 的导出面与
-     * 0.1.5 **逐符号相同**（两版都在 registry，实测 `renderEveryReminderBatchFraming`
-     * 与 `allocateScheduleId` 两边都有）。区分它们只有版本号，见
-     * `schedule-compat.ts:messageSourceDecision()`。
-     *
-     * 选错的后果是静默的：提醒到点 100% 不投递，会话日志里既没有
-     * `schedule/change operation:dispatch`、也没有那句校验报错（它在宿主 stdout），
-     * 用户只看到「超时未确认」。实测（devkit `func-later --case drive-gates`）：
-     * rc.1 上 `fold` 由 active 1 → 0（窗口过期，不是消费），`agent/inbox/spliced`=0。
-     *
-     * `sessionApi` 仍是 `own-events`：Session 形状这一面本代未变，变的只是消息准入。
-     */
-    id: '0.1.7-rc.1',
-    sessionApi: 'own-events' as const,
-  },
   {
     /**
      * `0.1.7` 代次（此处指 rc.2 起）：Session 形状仍未变（`ownEvents()` + `inheritedEventCount`）；
@@ -176,6 +137,13 @@ export const KERNEL_GENERATIONS = [
      * `schedule-compat.ts` 的版本判定，不走符号存在性（issue #75）。
      *
      * 不单列 0.1.6-alpha.*：alpha 线无独立兼容面，且 0.1.7 已覆盖其功能面。
+     *
+     * ⚠️ **已退役（1.13.0 起不再声明）**：下界抬到 `>=0.2.0-0` 后，这一条只作为记录留在
+     * 表里——它仍参与 `enginesDshRange()` 的推导，所以 `>=0.1.7-rc.2 <0.1.8-0` 这一条款
+     * 依然会出现在 `engines.dsh` 里。**这不是漏删**：删了它，`0.1.7-rc.2` 会在
+     * `engines.dsh` 上没有任何说明地消失，而 README 的支持矩阵正指着这一行说「已退役」。
+     * 真要彻底移出声明面时，三处（本表、README 矩阵、`tests/support-surface.test.mjs`
+     * 的拒收清单）必须一起改，别只改一处。
      */
     id: '0.1.7-rc.2',
     sessionApi: 'own-events' as const,
