@@ -4,6 +4,23 @@
 
 ## 未发布
 
+## 1.12.1 — 2026-11-06
+
+- **fix** 在 `@deepseek-ai/dsh-schedule@0.2.2-alpha.3` 及以上**装不起来**了：那一代移除了
+  `decodeScheduleChange` / `foldScheduleEvents` / `scheduleView` / `SCHEDULE_CHANGE_VERSION`
+  四个旧导出（改为 domain / task 模型），本插件具名导入了其中几个，ESM 在**链接期**就失败，
+  `apply` 里的 try/catch 接不住 ⇒ 整条 fiber 不激活、命令与面板全不可用。**1.0.0–1.12.0
+  全部中招**，`0.2.2-alpha.3` / `0.2.2-rc.1` 上任何版本都装不起来（GitHub issue #12）。
+  现在改为「上游有该导出就用上游，没有就用本仓等价实现」：变更解码在本地拆开
+  `{operation, schedule}` 包装后交给仍然存在的 `decodeScheduleRecord` 校验；周期推进与
+  提醒文案继续用上游仍在的 `resolveEveryOccurrence` / `renderReminderFraming`。
+- **fix** 冷唤醒之后**从来没有真正驱动过投递**：`wakeColdSession` 写的是
+  `if (mounted === undefined) registry.drive(agent)`，而 `mount()` 成功时返回的是 runtime
+  而非 `undefined`，条件恒假。后果是「服务端重启、会话没被打开」时会把会话拉起来、却
+  不投递，扫描器随后按失败退避。现在无条件驱动，驱动失败时也告警而不是静默。
+- **feat** 支持的内核代次增加 `0.2.2-alpha.3` 与 `0.2.2-rc.1`，矩阵扩到**十一个代次**，
+  `engines.dsh` 与 peer 声明由代次表推导。
+
 ## 1.12.0 — 2026-11-05
 
 > 三条 GitHub 外部报告的修复（#10 命令认领、#9 设置实时、#11 显示面与**投递面**），加上 #9 的遗留（工具描述不再钉死注册时刻的字符上限）、「服务端重启后的触发语义」的文档订正，以及 #11b 的宿主级到期扫描（冷会话到点投递）。合并后 main 的 `npm test` 778 / 0 fail，typecheck 两面通过，`verify:kernels:all` 9 代全绿（0.1.2-rc.1 与 0.1.5-rc.3 的 gate 面记 `absent`：那两代的 app-boot 不导出 `evaluatePluginCompatibility`，属「声明未被验证」）。
