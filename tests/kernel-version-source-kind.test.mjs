@@ -277,15 +277,21 @@ test('schedule-compat 的主判据是版本，符号探测只活在兜底分支'
   assert.doesNotMatch(body.slice(0, 500), /pick\(/, '调用点不该再自己做符号探测');
 });
 
-test('rc.1 已登记进代次矩阵，peer 枚举跟着带上它', () => {
+test('0.1.7-rc.1 已退役：代次表与 peer 枚举都不再为它单列', () => {
+  /**
+   * 这条断言在 2026-11-06 之前是反的（要求表里必须列 rc.1、peer 必须枚举它）。方向为什么翻：
+   * 下界抬到 `>=0.2.0-0` 之后 rc.1 不再是声明面，而**它为什么曾必须单列**（消息
+   * `source.kind:'plugin'` 在 rc.1 被删、framing 改名要到 rc.2，符号判据区分不了两者，
+   * 见 issue #75）并没有失效——那段判定仍在 `schedule-compat.ts` 里，对任何读得到
+   * 0.1.7-rc.1 的宿主照旧生效。所以这里守的是「别把退役的一代顺手加回去」，不是
+   * 「rc.1 与 rc.2 一样」。
+   */
   const compat = readFileSync(new URL('../src/upstream-compat.ts', import.meta.url), 'utf8');
-  assert.match(compat, /id: '0\.1\.7-rc\.1'/, '代次表必须显式列 rc.1：它不是 rc.2 的预发布，是一代独立行为');
+  assert.doesNotMatch(compat, /id: '0\.1\.7-rc\.1'/, 'rc.1 已退役（2026-11-06），不许再进代次表');
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
     if (!name.startsWith('@deepseek-ai/dsh-')) continue;
-    assert.match(range, />=0\.1\.7-rc\.1/, `${name} 的 peer 枚举漏了 rc.1（scripts/sync-peer-matrix.mjs 没跑？）`);
+    assert.doesNotMatch(range, />=0\.1\.7-rc\.1/, `${name} 的 peer 枚举又带回了已退役的 rc.1`);
   }
-  // tuple 收口后，「rc.1 被正式承认」的表达从「engines 里有 <0.2.0-0 兜着」变成
-  // **它自己那条下界恰为 rc.1**——这比原来更强：借更宽的下界蒙混不再可能。
-  assert.match(pkg.engines.dsh, />=0\.1\.7-rc\.1\s/, 'engines 的 0.1.7 条款下界必须是 rc.1，不是 rc.2');
+  assert.doesNotMatch(pkg.engines.dsh, />=0\.1\.7-rc\.1\s/, 'engines 的 0.1.7 条款只留 rc.2 这条退役记录');
 });
