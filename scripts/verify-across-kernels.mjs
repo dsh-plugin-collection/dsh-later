@@ -691,6 +691,16 @@ async function runOne(version) {
     };
     const dispatched = dispatchInSession(agent.id, nonce);
     const coldDispatched = dispatchInSession(coldSessionId, coldNonce);
+    // 诊断：投递为 0 时，把失败的命令回执原文带进 notes。此前只能看到「spliced=0」，
+    // 分不清是「没建起来」「建起来但没到点」还是「到点投递被拒」——这三种修法完全不同。
+    if (spliced === 0) {
+      const failed = evs
+        .filter((e) => e.type === 'command/done' && e.data?.kind === 'error')
+        .map((e) => String(e.data?.text ?? '').slice(0, 120));
+      if (failed.length > 0) record.notes.push(`命令失败回执：${failed.slice(0, 3).join(' / ')}`);
+      const created = evs.filter((e) => e.type === 'schedule/change' && e.data?.operation === 'create').length;
+      record.notes.push(`诊断：schedule/change create=${created}，到期投递事件=${evs.filter((e) => /inbox\/spliced/.test(e.type)).length}`);
+    }
     const admission = evs.find((e) => /producer-owned source kind/.test(e.raw));
     record.delivery = {
       spliced,
