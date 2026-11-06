@@ -1,0 +1,18 @@
+{
+ "case": "9-after",
+ "kernel": "0.2.1-rc.4",
+ "plugin": "/tmp/ver/wt/post-9-10",
+ "steps": [
+  {
+   "step": "设置 allowLongPrompts:true / maxPromptChars:10000，发 1204 字 /later",
+   "promptLen": 1204,
+   "chatPosts": 0,
+   "commandEvents": [
+    "run::",
+    "done:success:将于11/5周四 17:26（约 30 分钟后）「长文本上限验证长文本上限验证长"
+   ],
+   "rejectedAt1000": false,
+   "sidecar": 1
+  }
+ ]
+}

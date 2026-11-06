@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html, body { background: transparent; }
+      #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; }
+
+      .copy { position: absolute; left: 120px; top: 150px; }
+      .headline { margin-top: 28px; font-size: 112px; line-height: 1.15; }
+      .headline .l { display: block; opacity: 0; }
+      .sub { margin-top: 30px; font-size: 30px; opacity: 0; }
+
+      .stage { position: absolute; left: 300px; top: 596px; width: 1360px; height: 230px; }
+      .stack img { opacity: 0; }
+
+      .hint-key { position: absolute; left: 300px; top: 856px; font-size: 26px; color: #6d6d7b; opacity: 0; }
+      .hint-key b { color: var(--violet); font-weight: 600; }
+
+      .prov { left: 120px; bottom: 60px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s1" data-start="0" data-duration="6" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> DSH · SESSION SCHEDULER</div>
+        <h1 class="headline">
+          <span class="l">有些话，</span>
+          <span class="l">不必现在说<span class="accent">。</span></span>
+        </h1>
+        <p class="sub">在输入框里说明什么时候发，剩下的交给服务端。</p>
+      </div>
+
+      <div class="stage stack" id="typing">
+        <img src="../assets/real/03-typing-01.png" alt="输入 /later" />
+        <img src="../assets/real/03-typing-02.png" alt="继续输入" />
+        <img src="../assets/real/03-typing-03.png" alt="继续输入" />
+        <img src="../assets/real/03-typing-04.png" alt="继续输入" />
+        <img src="../assets/real/03-typing-05.png" alt="继续输入" />
+        <img src="../assets/real/03-typing-06.png" alt="命令输入完成" />
+      </div>
+
+      <div class="hint-key" id="hint-key">按 <b>回车</b>，这条就开始计时</div>
+      <div class="prov">REAL GUI · DSH 0.2.1-rc.4 · dsh-later 1.10.0</div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      const frames = [...document.querySelectorAll("#typing img")];
+
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.5 }, 0.05);
+      tl.fromTo(".headline .l", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.65, ease: "power3.out", stagger: 0.16 }, 0.2);
+      tl.fromTo(".sub", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 0.6);
+
+      frames.forEach((f, i) => tl.set(f, { opacity: 1 }, 1.55 + i * 0.3));
+
+      tl.fromTo("#hint-key", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 3.5);
+      tl.fromTo(".prov", { opacity: 0 }, { opacity: 1, duration: 0.6 }, 1.2);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s1"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

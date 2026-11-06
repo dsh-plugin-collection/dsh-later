@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html,
+      body {
+        background: transparent;
+      }
+
+      #root {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+
+      .copy {
+        position: absolute;
+        left: 120px;
+        top: 150px;
+        width: 1400px;
+      }
+
+      .headline {
+        margin-top: 30px;
+        font-size: 90px;
+      }
+
+      .sub {
+        margin-top: 26px;
+        font-size: 30px;
+      }
+
+      .flow {
+        position: absolute;
+        left: 240px;
+        top: 560px;
+        display: flex;
+        align-items: center;
+        gap: 0;
+      }
+
+      .node {
+        width: 420px;
+        height: 230px;
+        border-radius: 26px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(28, 28, 36, 0.94), rgba(15, 15, 21, 0.94));
+        padding: 30px 34px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        opacity: 0;
+      }
+
+      .node .top {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 30px;
+        font-weight: 700;
+        color: #f2f2f8;
+      }
+
+      .node .desc {
+        font-size: 25px;
+        line-height: 1.5;
+        color: #8b8b99;
+      }
+
+      .node.closed {
+        border-color: rgba(242, 84, 79, 0.35);
+      }
+
+      .node.closed .top {
+        color: #ff8c88;
+      }
+
+      .node.host {
+        border-color: rgba(167, 139, 250, 0.45);
+        box-shadow: 0 0 60px rgba(124, 92, 255, 0.18);
+      }
+
+      .link {
+        width: 150px;
+        height: 2px;
+        background: linear-gradient(90deg, rgba(167, 139, 250, 0.15), rgba(167, 139, 250, 0.65));
+        position: relative;
+        opacity: 0;
+      }
+
+      .link .dot {
+        position: absolute;
+        top: -4px;
+        left: 0;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #a78bfa;
+        box-shadow: 0 0 16px rgba(167, 139, 250, 0.9);
+      }
+
+      .badge-ok {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 21px;
+        color: #8ee6b0;
+        background: rgba(60, 200, 130, 0.1);
+        border: 1px solid rgba(90, 220, 150, 0.3);
+        border-radius: 999px;
+        padding: 6px 14px;
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s8" data-start="0" data-duration="4.5" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> SERVER-SIDE</div>
+        <h1 class="headline">网页关了，<span class="accent">它还在走</span></h1>
+        <p class="sub">计时在服务端。关浏览器、换设备，到点照样派出。</p>
+      </div>
+
+      <div class="flow">
+        <div class="node closed">
+          <div class="top">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+              <path d="M8 10.5l8 3M16 10.5l-8 3" />
+            </svg>
+            浏览器
+          </div>
+          <div class="desc">网页已经关掉，标签页也不在了。</div>
+        </div>
+
+        <div class="link" id="link1"><i class="dot"></i></div>
+
+        <div class="node host">
+          <div class="top">
+            <svg class="pixel-clock violet" width="64" height="64" viewBox="0 0 10 10" shape-rendering="crispEdges" fill="currentColor">
+              <rect x="0" y="0" width="2" height="2" />
+              <rect x="4" y="0" width="2" height="2" />
+              <rect x="8" y="0" width="2" height="2" />
+              <rect x="8" y="4" width="2" height="2" />
+              <rect x="8" y="8" width="2" height="2" />
+              <rect x="4" y="8" width="2" height="2" />
+              <rect x="0" y="8" width="2" height="2" />
+              <rect x="0" y="4" width="2" height="2" />
+              <rect x="4" y="2" width="2" height="1" />
+              <rect x="6" y="3" width="1" height="2" />
+            </svg>
+            DSH 服务端
+          </div>
+          <div class="desc">任务存在这里，按服务端时钟走。</div>
+        </div>
+
+        <div class="link" id="link2"><i class="dot"></i></div>
+
+        <div class="node">
+          <div class="top">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8a6 6 0 10-12 0c0 5-2 6-2 6h16s-2-1-2-6M10.5 20a2 2 0 003 0" />
+            </svg>
+            任意设备
+          </div>
+          <div class="desc">打开会话就在那儿，没开也会照常到点。</div>
+          <div><span class="badge-ok">✓ 准时送达</span></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.5 }, 0.05);
+      tl.fromTo(".headline", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.12);
+      tl.fromTo(".sub", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 0.38);
+
+      tl.fromTo(".node", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out", stagger: 0.16 }, 0.5);
+      tl.fromTo(".link", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0.9);
+
+      tl.fromTo("#link1 .dot", { x: 0, opacity: 0 }, { opacity: 1, duration: 0.2 }, 1.5);
+      tl.to("#link1 .dot", { x: 140, duration: 1.1, ease: "power1.inOut" }, 1.5);
+      tl.to("#link1 .dot", { opacity: 0, duration: 0.25 }, 2.5);
+
+      tl.fromTo("#link2 .dot", { x: 0, opacity: 1 }, { x: 140, duration: 1.1, ease: "power1.inOut" }, 2.6);
+      tl.to("#link2 .dot", { opacity: 0, duration: 0.25 }, 3.6);
+
+      tl.fromTo(".badge-ok", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.45 }, 3.7);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s8"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

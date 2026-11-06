@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html, body { background: transparent; }
+      #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; }
+
+      .copy { position: absolute; left: 120px; top: 118px; width: 1680px; }
+      .headline { margin-top: 22px; font-size: 80px; }
+      .sub { margin-top: 18px; font-size: 28px; }
+
+      .stage { position: absolute; left: 580px; top: 420px; width: 760px; opacity: 0; }
+      .stage img {
+        display: block;
+        width: 100%;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        box-shadow: 0 40px 110px rgba(0, 0, 0, 0.6);
+      }
+
+      .cap {
+        position: absolute;
+        left: 580px;
+        top: 368px;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 20px;
+        border-radius: 999px;
+        font-size: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+        color: #d9d9e4;
+        opacity: 0;
+      }
+      .cap .dot { width: 10px; height: 10px; border-radius: 50%; background: #f0a020; box-shadow: 0 0 12px #f0a020; }
+
+      .note {
+        position: absolute;
+        left: 580px;
+        top: 690px;
+        width: 760px;
+        font-size: 26px;
+        line-height: 1.7;
+        color: #7d7d8b;
+        opacity: 0;
+      }
+      .note b { color: #e8e8f1; font-weight: 600; }
+
+      .prov { left: 120px; bottom: 44px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s7" data-start="0" data-duration="5" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> PRESENCE</div>
+        <h1 class="headline">哪个会话有活儿，<span class="accent">一眼看到</span></h1>
+        <p class="sub">侧栏行里多一只像素时钟：紫是排好了，琥珀是快到点，红是该发了。</p>
+      </div>
+
+      <div class="cap" id="cap"><span class="dot"></span>这一行是「5 分钟内」的琥珀档，悬停给出下一次</div>
+
+      <div class="stage"><img src="../assets/real/sidebar-row.png" alt="侧栏行里的像素时钟" /></div>
+
+      <div class="note" id="note">悬停这一行，宿主自己的「进行中 / 空闲」之外会<b>追加</b>一行「有 N 条定时提醒，下次 …」，不改写原有状态</div>
+      <div class="prov">REAL GUI · 2 倍像素，裁自会话列表</div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.45 }, 0.05);
+      tl.fromTo(".headline", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.1);
+      tl.fromTo(".sub", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5 }, 0.32);
+      tl.fromTo(".stage", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.45);
+      tl.fromTo("#cap", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.45 }, 1.05);
+      tl.fromTo("#note", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 2.0);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s7"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

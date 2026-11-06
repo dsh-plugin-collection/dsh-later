@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html,
+      body {
+        background: transparent;
+      }
+      #root {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+
+      .copy {
+        position: absolute;
+        left: 120px;
+        top: 150px;
+        width: 800px;
+      }
+      .headline {
+        margin-top: 28px;
+        font-size: 92px;
+      }
+      .sub {
+        margin-top: 26px;
+        font-size: 29px;
+      }
+
+      .shot {
+        position: absolute;
+        left: 940px;
+        top: 392px;
+        width: 760px;
+        opacity: 0;
+      }
+      .shot img {
+        display: block;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .mark-ring {
+        position: absolute;
+        left: 978px;
+        top: 486px;
+        width: 76px;
+        height: 72px;
+        border-radius: 14px;
+        border: 2px solid rgba(167, 139, 250, 0.9);
+        box-shadow: 0 0 26px rgba(124, 92, 255, 0.5);
+        opacity: 0;
+      }
+
+      .note {
+        position: absolute;
+        font-size: 26px;
+        color: #8a8a98;
+        opacity: 0;
+      }
+      .note b {
+        color: #ececf4;
+        font-weight: 600;
+      }
+      .note-a {
+        left: 940px;
+        top: 852px;
+        width: 760px;
+      }
+      .note-b {
+        left: 940px;
+        top: 906px;
+        width: 760px;
+      }
+
+      .conn {
+        position: absolute;
+        height: 1px;
+        background: rgba(167, 139, 250, 0.45);
+        opacity: 0;
+      }
+
+
+      .prov {
+        left: 120px;
+        bottom: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s3" data-start="0" data-duration="4.5" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> DELIVERED</div>
+        <h1 class="headline">到点，<br />它自己<span class="accent">发出</span></h1>
+        <p class="sub">
+          以你的身份送达，气泡左边挂一支表。<br />
+          时间与复制按钮，和普通消息一模一样。
+        </p>
+      </div>
+
+      <div class="shot"><img class="realimg" src="../assets/real/bubble2.png" alt="到点送达的气泡与标记" width="760" /></div>
+      <div class="mark-ring" id="ring"></div>
+      <div class="note note-a" id="note-a">气泡左边这支表<b> = 不是现在发的</b></div>
+      <div class="note note-b" id="note-b">正文、时间、复制，都按宿主原样渲染</div>
+
+      <div class="prov">REAL GUI · 0.2.1-rc.4 真机，非复刻</div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.45 }, 0.05);
+      tl.fromTo(".headline", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.66, ease: "power3.out" }, 0.12);
+      tl.fromTo(".sub", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 0.4);
+
+      tl.fromTo(".shot", { opacity: 0, y: 26, scale: 0.985 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: "power3.out" }, 0.5);
+
+      tl.to("#ring", { opacity: 1, duration: 0.35 }, 1.35);
+      tl.fromTo("#note-a", { opacity: 0, x: 10 }, { opacity: 1, x: 0, duration: 0.45 }, 1.45);
+      tl.fromTo("#note-b", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 2.3);
+      tl.to("#ring", { opacity: 0.45, duration: 0.6 }, 2.6);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s3"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

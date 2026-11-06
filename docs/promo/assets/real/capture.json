@@ -1,0 +1,176 @@
+{
+  "kernelVersion": "0.2.1-rc.4",
+  "pluginVersion": "1.10.0",
+  "attachedTo": "http://127.0.0.1:3080",
+  "note": "派生项可随时用 ffmpeg 从同日采集的原图重做。直连线上实例（127.0.0.1:3080）采集，采集用完即删掉演示提醒。",
+  "shots": [
+    {
+      "name": "01-composer-empty",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "03-typing-01",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "03-typing-02",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "03-typing-03",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "03-typing-04",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "03-typing-05",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "03-typing-06",
+      "clip": {
+        "x": 459,
+        "y": 433,
+        "width": 794,
+        "height": 134
+      }
+    },
+    {
+      "name": "04-tick-01",
+      "clip": {
+        "x": 475,
+        "y": 415,
+        "width": 794,
+        "height": 173
+      }
+    },
+    {
+      "name": "04-tick-02",
+      "clip": {
+        "x": 475,
+        "y": 415,
+        "width": 794,
+        "height": 173
+      }
+    },
+    {
+      "name": "04-tick-03",
+      "clip": {
+        "x": 475,
+        "y": 415,
+        "width": 794,
+        "height": 173
+      }
+    },
+    {
+      "name": "04-tick-04",
+      "clip": {
+        "x": 475,
+        "y": 415,
+        "width": 794,
+        "height": 173
+      }
+    },
+    {
+      "name": "05-delivered",
+      "clip": {
+        "x": 455,
+        "y": 92,
+        "width": 802,
+        "height": 136
+      }
+    },
+    {
+      "name": "06-delivered-hover",
+      "clip": {
+        "x": 455,
+        "y": 92,
+        "width": 802,
+        "height": 136
+      }
+    },
+    {
+      "name": "07-sidebar-urgent",
+      "clip": {
+        "x": 2,
+        "y": 692,
+        "width": 276,
+        "height": 52
+      }
+    },
+    {
+      "name": "08-sidebar-hover-urgent",
+      "clip": {
+        "x": 4,
+        "y": 694,
+        "width": 636,
+        "height": 206
+      }
+    }
+  ],
+  "notes": [
+    "session opened: true",
+    "dock rows: 1",
+    "delivered: true",
+    "presence: [\"urgent\"]",
+    "reminders cleaned: 9"
+  ],
+  "derived": [
+    {
+      "file": "bubble2.png",
+      "from": "05-delivered.png",
+      "crop": "340x180+1250+44",
+      "why": "只留气泡、标记与时间"
+    },
+    {
+      "file": "dock-row.png",
+      "from": "04-tick-02.png",
+      "crop": "1588x170+0+0",
+      "why": "只要 dock 行，不要下面的作曲行"
+    },
+    {
+      "file": "panel2.png",
+      "from": "docs/media/screenshot-panel.png",
+      "crop": "680x568+12+12",
+      "why": "切掉弹层边缘透出的输入框与发送键"
+    },
+    {
+      "file": "sidebar-row.png",
+      "from": "08-sidebar-hover-urgent.png",
+      "crop": "540x150+0+0",
+      "why": "只留会话行，避免把截断的悬停卡片带进画面"
+    }
+  ]
+}

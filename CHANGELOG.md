@@ -14,6 +14,10 @@
   现在改为「上游有该导出就用上游，没有就用本仓等价实现」：变更解码在本地拆开
   `{operation, schedule}` 包装后交给仍然存在的 `decodeScheduleRecord` 校验；周期推进与
   提醒文案继续用上游仍在的 `resolveEveryOccurrence` / `renderReminderFraming`。
+- **fix** `0.2.2-alpha.3` 上「提醒建得起来、到点也发得出去，但 GUI 上永远看不见」：同一处
+  导出移除影响了**两条通道**，上一轮只补了投递通道（`foldUserState`），投影通道
+  （`schedules` 投影）仍写着「取不到解码器就跳过」，于是 dock 与定时面板一片空白。
+  现在两条通道用同一套兜底解码，并加了一条防再犯断言：两条通道对同一条变更的结论必须相同。
 - **fix** 冷唤醒之后**从来没有真正驱动过投递**：`wakeColdSession` 写的是
   `if (mounted === undefined) registry.drive(agent)`，而 `mount()` 成功时返回的是 runtime
   而非 `undefined`，条件恒假。后果是「服务端重启、会话没被打开」时会把会话拉起来、却

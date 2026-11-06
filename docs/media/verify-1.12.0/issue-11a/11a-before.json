@@ -1,0 +1,16 @@
+{
+ "case": "11a-before",
+ "kernel": "0.2.1-rc.4",
+ "plugin": "/tmp/ver/wt/pre-11a",
+ "steps": [
+  {
+   "step": "建 /later +2m",
+   "dockRows": 1,
+   "sidecar": 1
+  },
+  {
+   "step": "重启后打开该会话（到期前）",
+   "dockRows": 0
+  }
+ ]
+}

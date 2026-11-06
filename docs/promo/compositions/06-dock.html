@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html, body { background: transparent; }
+      #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; }
+
+      .copy { position: absolute; left: 120px; top: 118px; width: 1600px; }
+      .headline { margin-top: 24px; font-size: 82px; }
+      .sub { margin-top: 20px; font-size: 28px; }
+
+      .shot { position: absolute; left: 110px; top: 486px; width: 1700px; opacity: 0; }
+
+      .num {
+        position: absolute;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: rgba(124, 92, 255, 0.92);
+        color: #fff;
+        font-size: 22px;
+        font-weight: 700;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 0 24px rgba(124, 92, 255, 0.6);
+        opacity: 0;
+      }
+
+      .legend {
+        position: absolute;
+        left: 300px;
+        top: 742px;
+        width: 1300px;
+        display: flex;
+        gap: 60px;
+        opacity: 0;
+      }
+      .item { flex: 1; }
+      .item .k { font-size: 28px; font-weight: 700; color: #f2f2f8; }
+      .item .k span { color: var(--violet); margin-right: 10px; }
+      .item .d { margin-top: 8px; font-size: 21px; line-height: 1.5; color: #7d7d8b; }
+
+      .prov { left: 120px; bottom: 48px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s6" data-start="0" data-duration="4.5" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> THE DOCK</div>
+        <h1 class="headline">还没发出去的，<span class="accent">都还改得动</span></h1>
+        <p class="sub">倒计时条上四个动作。都是你亲手点的，模型调不到这几条命令。</p>
+      </div>
+
+      <div class="shot"><img class="realimg" src="../assets/real/dock-row.png" alt="待发送 dock 与四个动作" width="1700" /></div>
+
+      <div class="num" id="n1">1</div>
+      <div class="num" id="n2">2</div>
+      <div class="num" id="n3">3</div>
+      <div class="num" id="n4">4</div>
+
+      <div class="legend" id="legend">
+        <div class="item"><div class="k"><span>1</span>改内容</div><div class="d">就地编辑，不用重发</div></div>
+        <div class="item"><div class="k"><span>2</span>暂停</div><div class="d">按剩余时长重新排期</div></div>
+        <div class="item"><div class="k"><span>3</span>取消</div><div class="d">这条不再发出</div></div>
+        <div class="item"><div class="k"><span>4</span>插话</div><div class="d">立刻推给 agent</div></div>
+      </div>
+
+      <div class="prov">REAL GUI · 按钮坐标取自 DOM 锚点，非目测</div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      // capture.json 里记录的锚点（相对整张 dock 截图）：76.28 / 81.07 / 85.85 / 90.64 %，y 8.38 %
+      const X = [76.28, 81.07, 85.85, 90.64];
+      const SHOT = { x: 110, y: 486, w: 1700, h: (1700 * 170) / 1588 };
+      const nums = [document.getElementById("n1"), document.getElementById("n2"), document.getElementById("n3"), document.getElementById("n4")];
+      nums.forEach((el, i) => {
+        el.style.left = `${SHOT.x + (X[i] / 100) * SHOT.w - 20}px`;
+        el.style.top = `${SHOT.y + 4}px`;
+      });
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.45 }, 0.05);
+      tl.fromTo(".headline", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.1);
+      tl.fromTo(".sub", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, 0.34);
+
+      tl.fromTo(".shot", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.45);
+      nums.forEach((el, i) => {
+        tl.fromTo(el, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(2)" }, 1.0 + i * 0.32);
+      });
+      tl.fromTo("#legend", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.55 }, 1.15);
+      tl.fromTo(".prov", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0.9);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s6"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

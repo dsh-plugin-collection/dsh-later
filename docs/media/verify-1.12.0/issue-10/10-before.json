@@ -1,0 +1,21 @@
+{
+ "case": "10-before",
+ "kernel": "0.2.1-rc.4",
+ "plugin": "/tmp/ver/wt/pre-9-10",
+ "steps": [
+  {
+   "step": "手敲 /user-schedule-list {}",
+   "chatPosts": 0,
+   "作为聊天发出": true,
+   "页面有额度报错": true,
+   "commandEvents": [],
+   "sidecar": 0
+  },
+  {
+   "step": "手敲裸 id /user-schedule-delete schedule-…",
+   "chatPosts": 0,
+   "commandEvents": [],
+   "页面文案": ""
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "dsh-later-promo",
+  "private": true,
+  "type": "module",
+  "description": "dsh-later 宣传视频的 HyperFrames 工程：HTML 分镜，CLI 渲染成 MP4。",
+  "scripts": {
+    "check": "bash scripts/hf.sh check",
+    "lint": "bash scripts/hf.sh lint",
+    "snapshot": "bash scripts/hf.sh snapshot --review",
+    "render": "bash scripts/hf.sh render -o renders/dsh-later-promo.mp4 -f 30 -q delivery -w 4"
+  }
+}

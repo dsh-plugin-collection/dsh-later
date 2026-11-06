@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html,
+      body {
+        background: transparent;
+      }
+
+      #root {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+
+      .center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+      }
+
+      .glow {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 900px;
+        height: 620px;
+        transform: translate(-50%, -56%);
+        background: radial-gradient(closest-side, rgba(124, 92, 255, 0.22), transparent 70%);
+        filter: blur(30px);
+        opacity: 0;
+      }
+
+      .mark {
+        width: 240px;
+        height: 240px;
+        opacity: 0;
+      }
+
+      .word {
+        margin-top: 6px;
+        font-size: 84px;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        opacity: 0;
+      }
+
+      .word .accent {
+        color: var(--violet);
+      }
+
+      .tagline {
+        margin-top: 22px;
+        font-size: 32px;
+        color: #9b9baa;
+        opacity: 0;
+      }
+
+      .install {
+        margin-top: 56px;
+        display: inline-flex;
+        align-items: center;
+        gap: 18px;
+        padding: 22px 34px;
+        border-radius: 999px;
+        border: 1px solid rgba(167, 139, 250, 0.42);
+        background: rgba(124, 92, 255, 0.1);
+        font-family: var(--font-mono);
+        font-size: 29px;
+        color: #ece9ff;
+        opacity: 0;
+      }
+
+      .install .dollar {
+        color: var(--violet);
+      }
+
+      .meta {
+        margin-top: 34px;
+        font-family: var(--font-mono);
+        font-size: 22px;
+        letter-spacing: 0.06em;
+        color: #5f5f6d;
+        opacity: 0;
+      }
+
+      .meta .sep {
+        color: #3c3c48;
+        padding: 0 12px;
+      }
+
+      .final-fade {
+        position: absolute;
+        inset: 0;
+        background: #08080b;
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s9" data-start="0" data-duration="5.1" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="center">
+        <div class="glow"></div>
+        <img class="mark" src="../assets/logo.svg" alt="dsh-later" />
+        <div class="word">dsh-<span class="accent">later</span></div>
+        <div class="tagline">把「稍后」说得清清楚楚</div>
+        <div class="install"><span class="dollar">$</span> dsh plugin --profile web add dsh-later</div>
+        <div class="meta">github.com/dsh-plugin-collection/dsh-later<span class="sep">·</span>v1.9.0<span class="sep">·</span>MIT</div>
+      </div>
+
+      <div class="final-fade"></div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      tl.fromTo(".glow", { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 1.4, ease: "power2.out" }, 0.05);
+      tl.fromTo(".mark", { opacity: 0, scale: 0.82, y: 18 }, { opacity: 1, scale: 1, y: 0, duration: 0.85, ease: "back.out(1.6)" }, 0.15);
+      tl.fromTo(".word", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.65, ease: "power3.out" }, 0.55);
+      tl.fromTo(".tagline", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 0.8);
+      tl.fromTo(".install", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 1.15);
+      tl.fromTo(".meta", { opacity: 0 }, { opacity: 1, duration: 0.6 }, 1.5);
+
+      tl.to(".final-fade", { opacity: 1, duration: 0.8, ease: "power2.in" }, 4.2);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s9"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

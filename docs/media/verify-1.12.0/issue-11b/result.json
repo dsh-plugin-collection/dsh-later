@@ -1,0 +1,45 @@
+{
+ "steps": [
+  {
+   "step": "A 建提醒",
+   "dockRows": 1,
+   "scan": {
+    "sessions": {
+     "bfa2c8d9": {
+      "mine": true,
+      "spliced": 0,
+      "dispatched": 0
+     }
+    },
+    "spliced": 0,
+    "dispatched": 0,
+    "warmup": 0
+   }
+  },
+  {
+   "step": "B 重启完成（无浏览器）"
+  },
+  {
+   "step": "C 到期后（重启后从未打开过该会话）",
+   "scan": {
+    "sessions": {
+     "bfa2c8d9": {
+      "mine": true,
+      "spliced": 1,
+      "dispatched": 1
+     }
+    },
+    "spliced": 1,
+    "dispatched": 1,
+    "warmup": 0
+   },
+   "dockRows": 0,
+   "页面出现提醒文本": true
+  }
+ ],
+ "verdict": {
+  "coldSpliced": 1,
+  "coldDispatched": 1,
+  "pass": true
+ }
+}

@@ -1,0 +1,27 @@
+{
+ "case": "10-after",
+ "kernel": "0.2.1-rc.4",
+ "plugin": "/tmp/ver/wt/post-9-10",
+ "steps": [
+  {
+   "step": "手敲 /user-schedule-list {}",
+   "chatPosts": 0,
+   "作为聊天发出": false,
+   "页面有额度报错": false,
+   "commandEvents": [
+    "run:",
+    "done:success"
+   ],
+   "sidecar": 0
+  },
+  {
+   "step": "手敲裸 id /user-schedule-delete schedule-…",
+   "chatPosts": 0,
+   "commandEvents": [
+    "run::",
+    "done:success:{\"id\":\"schedule-00000000-0000-0000"
+   ],
+   "页面文案": ""
+  }
+ ]
+}

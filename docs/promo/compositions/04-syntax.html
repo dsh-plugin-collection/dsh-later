@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html,
+      body {
+        background: transparent;
+      }
+
+      #root {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+
+      .copy {
+        position: absolute;
+        left: 120px;
+        top: 150px;
+        width: 1200px;
+      }
+
+      .headline {
+        margin-top: 30px;
+        font-size: 90px;
+      }
+
+      .sub {
+        margin-top: 26px;
+        font-size: 30px;
+      }
+
+      .cards {
+        position: absolute;
+        left: 120px;
+        right: 120px;
+        top: 560px;
+        display: flex;
+        gap: 36px;
+      }
+
+      .tcard {
+        flex: 1;
+        height: 300px;
+        padding: 34px 36px;
+        background: linear-gradient(180deg, rgba(28, 28, 36, 0.95), rgba(18, 18, 24, 0.95));
+        border: 1px solid var(--line);
+        border-radius: 26px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        opacity: 0;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+      }
+
+      .tcard .tag {
+        font-family: var(--font-mono);
+        font-size: 21px;
+        letter-spacing: 0.14em;
+        color: var(--violet);
+      }
+
+      .tcard .code {
+        font-family: var(--font-mono);
+        font-size: 40px;
+        color: #f0f0f6;
+        letter-spacing: -0.01em;
+      }
+
+      .tcard .code .cmd {
+        color: var(--violet);
+      }
+
+      .tcard .code .arg {
+        color: #ffffff;
+      }
+
+      .tcard .code .txt {
+        color: #7e7e8c;
+        font-size: 32px;
+      }
+
+      .tcard .meaning {
+        font-size: 27px;
+        color: #9a9aa8;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .tcard .meaning b {
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .tcard .meaning .arrow {
+        color: var(--violet);
+        font-family: var(--font-mono);
+      }
+
+      .footnote {
+        left: 120px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s4" data-start="0" data-duration="4" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> SYNTAX</div>
+        <h1 class="headline">什么时候，<span class="accent">一句话</span>说清</h1>
+        <p class="sub">相对时长、挂钟时刻、重复序列。写不出来的时间，它才不猜。</p>
+      </div>
+
+      <div class="cards">
+        <div class="tcard">
+          <div class="tag">相对时长</div>
+          <div class="code"><span class="cmd">/later</span> <span class="arg">+5s</span> <span class="txt">检查部署</span></div>
+          <div class="meaning"><span class="arrow">→</span> <b>5 秒后</b>送达</div>
+        </div>
+
+        <div class="tcard">
+          <div class="tag">挂钟时刻</div>
+          <div class="code"><span class="cmd">/later</span> <span class="arg">明天9点</span> <span class="txt">交周报</span></div>
+          <div class="meaning"><span class="arrow">→</span> 明早 <b>09:00</b> 送达</div>
+        </div>
+
+        <div class="tcard">
+          <div class="tag">重复序列</div>
+          <div class="code"><span class="cmd">/later</span> <span class="arg">+1h*3</span> <span class="txt">起来喝水</span></div>
+          <div class="meaning"><span class="arrow">→</span> 每小时一次，共 <b>3 次</b></div>
+        </div>
+      </div>
+
+      <div class="footnote">一次最多 10 条 · 多次写法的间隔不低于 60 秒</div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.5 }, 0.05);
+      tl.fromTo(".headline", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.15);
+      tl.fromTo(".sub", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.6 }, 0.4);
+
+      tl.fromTo(
+        ".tcard",
+        { opacity: 0, y: 44 },
+        { opacity: 1, y: 0, duration: 0.62, ease: "power3.out", stagger: 0.16 },
+        0.85
+      );
+
+      tl.fromTo(".footnote", { opacity: 0 }, { opacity: 1, duration: 0.45 }, 1.55);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s4"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

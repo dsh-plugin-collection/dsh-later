@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../assets/base.css" />
+    <style>
+      html,
+      body {
+        background: transparent;
+      }
+      #root {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+
+      .copy {
+        position: absolute;
+        left: 120px;
+        top: 130px;
+      }
+      .headline {
+        margin-top: 26px;
+        font-size: 84px;
+      }
+      .sub {
+        margin-top: 22px;
+        font-size: 29px;
+      }
+
+      /* 与第 1 场同一落点：底边对齐，作曲行不动，dock 从上面长出来 */
+      .stage {
+        position: absolute;
+        left: 300px;
+        top: 530px;
+        width: 1360px;
+        height: 296px;
+      }
+      .stack img {
+        top: auto;
+        bottom: 0;
+        height: 296px;
+        opacity: 0;
+      }
+
+      .cap {
+        position: absolute;
+        left: 300px;
+        top: 446px;
+        font-size: 27px;
+        color: #6f6f7c;
+        opacity: 0;
+      }
+      .cap b {
+        color: var(--violet);
+        font-weight: 600;
+      }
+
+      .prov {
+        left: 120px;
+        bottom: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="s2" data-start="0" data-duration="4" data-width="1920" data-height="1080">
+      <div class="backdrop"></div>
+      <div class="grid"></div>
+
+      <div class="copy">
+        <div class="kicker"><span class="bar"></span> COUNTDOWN</div>
+        <h1 class="headline">回车之后，输入框上就多了一条倒计时</h1>
+        <p class="sub">时钟、剩余时间、正文、四个动作，都在这一行上。</p>
+      </div>
+
+      <div class="stage stack" id="ticks">
+        <img src="../assets/real/04-tick-01.png" alt="倒计时 5 秒" />
+        <img src="../assets/real/04-tick-02.png" alt="倒计时 4 秒" />
+        <img src="../assets/real/04-tick-03.png" alt="倒计时 3 秒" />
+        <img src="../assets/real/04-tick-04.png" alt="倒计时 2 秒" />
+      </div>
+
+      <div class="cap" id="cap">这一秒一秒，是<b>服务端</b>的时间，不是页面的定时器</div>
+      <div class="prov">REAL GUI · 每秒一张，未变速</div>
+    </div>
+
+    <script src="../assets/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      const frames = [...document.querySelectorAll("#ticks img")];
+
+      frames[0].style.opacity = "1";
+      tl.fromTo(".copy .kicker", { opacity: 0, x: -12 }, { opacity: 1, x: 0, duration: 0.45 }, 0.05);
+      tl.fromTo(".headline", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.1);
+      tl.fromTo(".sub", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, 0.32);
+
+      frames.forEach((f, i) => {
+        if (i > 0) tl.set(f, { opacity: 1 }, 0.35 + i * 1.0);
+      });
+
+      tl.fromTo("#cap", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 1.0);
+      tl.fromTo(".prov", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0.6);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["s2"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

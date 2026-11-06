@@ -1,0 +1,421 @@
+@font-face { font-family: "Noto Sans SC"; src: local("Noto Sans SC"); }
+@font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei"); }
+@font-face { font-family: "Noto Sans Mono"; src: local("Noto Sans Mono"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+
+/* dsh-later promo: shared design system
+   Palette follows the plugin's own presence colors: violet / amber / red. */
+
+:root {
+  --ground: #08080b;
+  --ground-2: #0d0d12;
+  --ink: #f4f4f8;
+  --ink-dim: #c3c3cf;
+  --muted: #83838f;
+  --violet: #a78bfa;
+  --violet-2: #7c5cff;
+  --amber: #f0a020;
+  --red: #f2544f;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-soft: rgba(255, 255, 255, 0.055);
+
+  --ui-bg: #17171d;
+  --ui-bg-2: #1d1d24;
+  --ui-border: #2c2c36;
+  --ui-ink: #e9e9f0;
+  --ui-muted: #8b8b97;
+
+  --font-sans: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "DejaVu Sans Mono", "Noto Sans Mono", ui-monospace, monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: var(--ground);
+  font-family: var(--font-sans);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- backdrop ---------- */
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(1150px 680px at 16% 4%, rgba(124, 92, 255, 0.17), transparent 62%),
+    radial-gradient(900px 620px at 94% 96%, rgba(124, 92, 255, 0.1), transparent 66%),
+    linear-gradient(180deg, #0b0b10 0%, #08080b 100%);
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(1100px 720px at 30% 20%, #000 15%, transparent 78%);
+  -webkit-mask-image: radial-gradient(1100px 720px at 30% 20%, #000 15%, transparent 78%);
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(1400px 900px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+
+/* ---------- type ---------- */
+
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 24px;
+  letter-spacing: 0.16em;
+  color: var(--violet);
+  text-transform: uppercase;
+}
+
+.kicker .bar {
+  width: 46px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--violet), rgba(167, 139, 250, 0));
+}
+
+.headline {
+  font-size: 104px;
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -0.015em;
+}
+
+.headline.sm {
+  font-size: 88px;
+}
+
+.headline .accent {
+  color: var(--violet);
+}
+
+.sub {
+  font-size: 34px;
+  line-height: 1.62;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.sub strong {
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---------- DSH UI mocks ---------- */
+
+.composer {
+  width: 1180px;
+}
+
+.dock {
+  position: relative;
+  background: var(--ui-bg-2);
+  border: 1px solid var(--ui-border);
+  border-radius: 20px;
+  padding: 20px 26px 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.dock-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 26px;
+  color: var(--ui-ink);
+}
+
+.dock-time {
+  font-family: var(--font-mono);
+  color: var(--ui-muted);
+  font-size: 24px;
+}
+
+.dock-remain {
+  font-family: var(--font-mono);
+  color: var(--violet);
+  font-size: 24px;
+  min-width: 132px;
+}
+
+.dock-title {
+  flex: 1;
+  font-size: 27px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dock-actions {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  color: var(--ui-muted);
+}
+
+.dock-actions svg {
+  width: 30px;
+  height: 30px;
+}
+
+.dock-bar {
+  margin-top: 14px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.dock-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffffff, #d9d2ff);
+}
+
+.inputbar {
+  margin-top: 16px;
+  height: 136px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 28px;
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  border-radius: 30px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+
+.inputbar .plus {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #26262e;
+  color: var(--ui-muted);
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.inputbar .field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 31px;
+  color: #dcdce6;
+  white-space: pre;
+}
+
+.inputbar .cmd {
+  color: var(--violet);
+}
+
+.caret {
+  display: inline-block;
+  width: 3px;
+  height: 34px;
+  background: var(--violet);
+  margin-left: 2px;
+  transform: translateY(2px);
+}
+
+.inputbar .send {
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #8f74ff, #6d4cf5);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  box-shadow: 0 10px 28px rgba(124, 92, 255, 0.45);
+}
+
+.inputbar .clock-btn {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  color: var(--ui-muted);
+}
+
+.msg {
+  width: 1010px;
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  border-radius: 22px;
+  padding: 28px 32px 30px;
+  box-shadow: 0 40px 110px rgba(0, 0, 0, 0.6);
+}
+
+.msg-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 27px;
+  color: var(--ink-dim);
+}
+
+.msg-head .badge {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.msg-head .stamp {
+  font-family: var(--font-mono);
+  color: var(--violet);
+  font-size: 24px;
+}
+
+.msg-body {
+  margin-top: 20px;
+  padding-left: 22px;
+  border-left: 3px solid #3b3b48;
+  font-size: 32px;
+  line-height: 1.55;
+  color: #ececf3;
+}
+
+/* ---------- screenshot cards ---------- */
+
+.shot {
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow: 0 70px 150px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+}
+
+.callout {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  font-size: 26px;
+  color: #ddd6fe;
+  background: rgba(124, 92, 255, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.38);
+  white-space: nowrap;
+}
+
+.connector {
+  position: absolute;
+  background: rgba(167, 139, 250, 0.4);
+}
+
+.connector.v {
+  width: 1px;
+}
+
+.connector.h {
+  height: 1px;
+}
+
+.footnote {
+  position: absolute;
+  left: 120px;
+  bottom: 78px;
+  font-size: 24px;
+  color: #61616e;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* ---------- pixel clock glyph ---------- */
+
+.pixel-clock {
+  display: block;
+  color: var(--violet);
+}
+
+.pixel-clock .ring rect {
+  opacity: 0.92;
+}
+
+/* ---------- misc ---------- */
+
+.hairline {
+  position: absolute;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+}
+
+/* ---------- real GUI captures ---------- */
+
+.realimg {
+  display: block;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 40px 110px rgba(0, 0, 0, 0.62);
+}
+
+.prov {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  letter-spacing: 0.1em;
+  color: #4f4f5c;
+}
+
+.hlbox {
+  position: absolute;
+  border-radius: 12px;
+  border: 2px solid rgba(167, 139, 250, 0.85);
+  box-shadow: 0 0 0 6px rgba(124, 92, 255, 0.08), 0 0 34px rgba(124, 92, 255, 0.45);
+}
+
+.stack {
+  position: absolute;
+}
+
+.stack img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 40px 110px rgba(0, 0, 0, 0.62);
+}
+
+.tick-glow {
+  position: absolute;
+  left: -10px;
+  right: -10px;
+  top: -6px;
+  height: 26%;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(124, 92, 255, 0.22), rgba(124, 92, 255, 0));
+  filter: blur(8px);
+  opacity: 0;
+}

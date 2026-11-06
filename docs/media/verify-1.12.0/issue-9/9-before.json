@@ -1,0 +1,18 @@
+{
+ "case": "9-before",
+ "kernel": "0.2.1-rc.4",
+ "plugin": "/tmp/ver/wt/pre-9-10",
+ "steps": [
+  {
+   "step": "设置 allowLongPrompts:true / maxPromptChars:10000，发 1204 字 /later",
+   "promptLen": 1204,
+   "chatPosts": 0,
+   "commandEvents": [
+    "run::",
+    "done:error:提醒内容不能超过 1000 字符。"
+   ],
+   "rejectedAt1000": true,
+   "sidecar": 0
+  }
+ ]
+}
