@@ -632,6 +632,21 @@ async function runOne(version) {
       c.provide('profileContext', { name: 'x', dir: profile, patchPath: join(profile, 'cordis.patch.yml'), installAnchor: root, startedBundles: [], cwd: home, home, overlays: [] });
     });
     if (!ctx.agents) throw new Error('没有 ctx.agents（AgentRegistry 未装配）');
+    // 诊断：把插件自己打的 `later:` 告警收进来。投递为 0 时，原因几乎总在这类告警里
+    // （fold 失败 / flush 失败 / 投递未确认），比事后猜测有用得多。
+    const laterWarns = [];
+    try {
+      // `later:` 与 `later[TRACE]` 都要收：前者是产品告警，后者是这次定位用的临时探针。
+      for (const level of ['warn', 'info', 'debug']) {
+        const logger = ctx.logger;
+        const orig = logger[level]?.bind(logger);
+        if (orig) logger[level] = (...args) => {
+          const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
+          if (text.includes('later')) laterWarns.push(text.slice(0, 160));
+          return orig(...args);
+        };
+      }
+    } catch { /* 日志面缺席：忽略 */ }
     const sessionId = `xk-${Date.now().toString(36)}`;
     const handle = await ctx.agents.create({ sessionId, meta: { cwd: home } });
     const agent = handle?.agent ?? handle;
@@ -666,6 +681,7 @@ async function runOne(version) {
     try { await coldHandle?.dispose?.(); } catch { /* 关不掉也继续：下面的判定会如实报出来 */ }
 
     const exec = await ctx.commands.execute(agent, `/user-schedule-create ${JSON.stringify({ prompt: nonce, after_seconds: 2 })}`, [], new AbortController().signal);
+    record.notes.push(`投递用例回执：${JSON.stringify(exec?.result ?? exec).slice(0, 220)}`);
     if (exec?.result?.kind !== 'success') record.notes.push(`投递用例没建起来：${String(exec?.result?.text ?? '').slice(0, 140)}`);
     await new Promise((r) => setTimeout(r, HOLD * 1000));
     const { events: evs, bySession } = readEvents(home);
@@ -691,6 +707,17 @@ async function runOne(version) {
     };
     const dispatched = dispatchInSession(agent.id, nonce);
     const coldDispatched = dispatchInSession(coldSessionId, coldNonce);
+    // 诊断：投递为 0 时，把失败的命令回执原文带进 notes。此前只能看到「spliced=0」，
+    // 分不清是「没建起来」「建起来但没到点」还是「到点投递被拒」——这三种修法完全不同。
+    if (spliced === 0) {
+      const failed = evs
+        .filter((e) => e.type === 'command/done' && e.data?.kind === 'error')
+        .map((e) => String(e.data?.text ?? '').slice(0, 120));
+      if (failed.length > 0) record.notes.push(`命令失败回执：${failed.slice(0, 3).join(' / ')}`);
+      const created = evs.filter((e) => e.type === 'schedule/change' && e.data?.operation === 'create').length;
+      record.notes.push(`诊断：schedule/change create=${created}，到期投递事件=${evs.filter((e) => /inbox\/spliced/.test(e.type)).length}`);
+    }
+    if (spliced === 0 && laterWarns.length > 0) record.notes.push(`插件告警：${laterWarns.slice(-6).join(' ｜ ')}`);
     const admission = evs.find((e) => /producer-owned source kind/.test(e.raw));
     record.delivery = {
       spliced,

@@ -311,6 +311,37 @@ export const KERNEL_GENERATIONS = [
     id: '0.2.2-alpha.2',
     sessionApi: 'own-events' as const,
   },
+  {
+    /**
+     * `0.2.2-alpha.3` 代次（GitHub issue #12）——**dsh-schedule 的导出面破坏**。
+     *
+     * 这一代把整套事件溯源 API 换成了 domain / task 模型：`decodeScheduleChange`、
+     * `foldScheduleEvents`、`scheduleView`、`SCHEDULE_CHANGE_VERSION` 四个符号**被移除**。
+     * 而本插件原来在 `projection.ts` / `user-tools.ts` 里**具名导入**了其中三个，
+     * ESM 链接期硬失败 ⇒ 整条 fiber 不激活、命令和面板全不可用（`1.12.0` 及更早全部中招）。
+     *
+     * 修复不是本表（本表只管「声明 + 逐代验证」），而是把那三处改成 namespace 访问 +
+     * 缺失时用本仓等价实现（见 `projection.ts` 的 `decodeScheduleChangeCompat` 与
+     * `user-tools.ts` 的 `scheduleViewCompat` / `foldScheduleEventsCompat`）。
+     *
+     * **仍在的符号**（实测 alpha.3 / rc.1 的 `export {}`）：`resolveEveryOccurrence`、
+     * `renderReminderFraming`、`ScheduleId`、`ScheduleInputError`、`decodeScheduleRecord`、
+     * `scheduleDomain`、`ScheduleService`。所以「周期任务第几次该发」与提醒文案可以继续用上游。
+     *
+     * session 形状未变（`ownEvents()` + `inheritedEventCount`），故 `sessionApi` 仍为
+     * `own-events`；类型面由 `dsh-schedule` 的 `ScheduleChange` 等仍存在，逐代 tsc 覆盖。
+     */
+    id: '0.2.2-alpha.3',
+    sessionApi: 'own-events' as const,
+  },
+  {
+    /**
+     * `0.2.2-rc.1` 代次：与 alpha.3 的 dsh-schedule 导出面**逐符号相同**（同为 32 个导出，
+     * 同样缺那四个旧符号），所以修复面无需再改，只是把一个新的 rc 纳入实测与声明。
+     */
+    id: '0.2.2-rc.1',
+    sessionApi: 'own-events' as const,
+  },
 ] as const;
 
 /**

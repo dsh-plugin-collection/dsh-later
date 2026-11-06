@@ -73,14 +73,32 @@ function createChangeEvent(id) {
 /**
  * 轻量 semver 比较（不引依赖：`semver` 不在 devDependencies 里）。
  *
- * 只处理本项目用到的形状 `major.minor.patch-rc.N`（以及 `0.0.1-rc.1`）。
- * 预发布一律排在同版本正式版**之前**，符合 semver 语义。
+ * 形状是 `major.minor.patch-<tag>[.N]`，tag 可能是 `alpha`、`rc`、`beta`。
+ *
+ * 旧实现只认 `rc.N`，把别的预发布标签一律当成 `pre = -1`、且**不区分标签**——
+ * `0.2.2-alpha.3` 与 `0.2.2-alpha.2` 因此比不出先后（都为 -1），`0.2.2-alpha.3`
+ * 对 `0.2.2-alpha.2` 被判成「不递增」，把一个真实存在、且导出面确实变化了的代次
+ * 挡在代次表外（GitHub issue #12 就卡在这条断言上）。
+ *
+ * 现按 semver §11 的两段比较：先比数字段；同为预发布则**先比 tag 的字典序**
+ * （`alpha` < `beta` < `rc`），tag 相同再比序号。数字段缺省视为 0
+ * （`-alpha` 等价 `-alpha.0`）。
  */
+const PRE_TAGS = { alpha: 0, beta: 1, rc: 2 };
+
 function parseVer(v) {
   const [core, pre = ''] = v.split('-');
   const [major, minor, patch] = core.split('.').map(Number);
-  const m = /^rc\.(\d+)$/.exec(pre);
-  return { major, minor, patch, pre: m ? Number(m[1]) : -1, hasPre: pre.length > 0 };
+  const m = /^([a-z]+)(?:\.(\d+))?$/.exec(pre);
+  if (m === null) return { major, minor, patch, tagRank: -1, pre: -1, hasPre: pre.length > 0 };
+  return {
+    major,
+    minor,
+    patch,
+    tagRank: PRE_TAGS[m[1]] ?? -1,
+    pre: m[2] === undefined ? 0 : Number(m[2]),
+    hasPre: true,
+  };
 }
 
 /** a > b 时返回 true。 */
@@ -90,8 +108,11 @@ function verGt(a, b) {
   for (const k of ['major', 'minor', 'patch']) {
     if (x[k] !== y[k]) return x[k] > y[k];
   }
-  // 正式版 > 预发布版；同为预发布则比 rc 序号
+  // 正式版 > 预发布版
   if (x.hasPre !== y.hasPre) return !x.hasPre;
+  if (!x.hasPre) return false;
+  // 同为预发布：先比标签序（alpha < beta < rc），再比序号
+  if (x.tagRank !== y.tagRank) return x.tagRank > y.tagRank;
   return x.pre > y.pre;
 }
 
