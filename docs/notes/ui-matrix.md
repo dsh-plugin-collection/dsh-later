@@ -290,47 +290,71 @@ exit 0
 （缺陷只在缺少它时导致宿主 skip；之前没有一代因此被误判为绿 —— 这是本轮新发现的缺陷，
 不是旧结论要翻案）。
 
-## 11. 「冷会话」这一维：UI 面只有过一次**单代次、不可复跑**的真 GUI 证据，跨代次未判定（2026-11-10，基线 `main@3e6eef1`，插件 1.12.1）
+## 11. 「冷会话」这一维：入库材料里有一次真 GUI 运行，但**结论不可归因**；跨代次**未判定**（2026-11-10，基线 `main@3e6eef1`，插件 1.12.1）
 
-**结论先说**：#11b（宿主级到期扫描器，`9c586e5` → PR #133 `f6ac902`，2026-11-05，随 1.12.0 发布）之后，
-「服务端重启、那条会话从没被打开过」这一档在 UI 面**有过一次**真 GUI 运行，但只有**一代、一次、且不可复跑**；
-本文件的矩阵命令 `npm run verify:ui` **不覆盖**这一维。所以：**跨代次的 UI 结论 = 未判定**，
-空白不是绿，§5 的历次结论只回答「画没画出来」，读表的人不要把它当成投递语义的验证记录。
+**三档按可信度分开写，不许连读成一句。** #11b = 宿主级到期扫描器（`9c586e5` → PR #133 `f6ac902`，
+2026-11-05，随 1.12.0 发布）。
 
-**那一次实测在哪**：`docs/media/verify-1.12.0/issue-11b/`（`result.json` + 两张 real-gui jpg）。
-流程按该目录 README 的表格：建 `/later +2m`（dock 1 行）→ 停进程、重启、**全程不连浏览器** →
-过到期点再开 GUI（该会话从未被打开）。判据是事件形状：`result.json` 的 `verdict` 为
-`coldSpliced: 1`、`coldDispatched: 1`、`pass: true`；step C 另有 `dockRows: 0` 与「页面出现提醒文本」= `true`。
-**但它量到的 UI 面只有侧栏那一层**：`real-gui-2-after-restart-cold-delivered-PASS.jpg` 里是侧栏出现了
-「冷会话投递验证COLDUI11B」这条会话（时间戳「刚刚」），主区停在另一个会话上——**没有**入镜「已投递的行在 dock
-里长什么样」「badge 由红回落」这类形态判据。日志在 `/tmp/ui11b/`，未入库，这条流程在仓里**没有可复跑入口**。
+### 11.1 存在这样一次运行（事实，材料在仓里）
 
-**本文件的矩阵为什么不算覆盖这一维**——三条可直接复跑的检索：
+`docs/media/verify-1.12.0/issue-11b/`：`result.json` + 两张 real-gui 图。按同目录 README 的 #11b 一节，
+流程是建 `/later +2m`（dock 1 行）→ 停进程、同 `DSH_HOME` 重启、**全程不连浏览器** → 过到期点**再开 GUI**。
+`result.json` 记 `verdict.coldSpliced = 1`、`coldDispatched = 1`、`pass = true`，step C 另有 `dockRows = 0`
+与「页面出现提醒文本」= `true`；`real-gui-2-after-restart-cold-delivered-PASS.jpg` 量到的是**侧栏**出现了
+「冷会话投递验证COLDUI11B」这条会话（主区停在另一个会话上，dock 里已投递的行没有入镜）。
+**这一档只说「跑过、留了材料」，不等于冷投递已被证明。**
+
+### 11.2 但那次运行的结论**不可归因**（两条硬伤，都可复跑）
+
+**(a) 判据读日志的时机在「开浏览器之后」，而开浏览器本身就会补投。** 打开那条会话会让它的 runtime
+当场挂上（`src/index.ts` 的 `agent/created` 回调 + `src/runtime-registry.ts` 的自愈 `ensure()` /
+`drive()`），逾期记录随即被 fold 出来补投，写进同一条会话日志的同样是 `agent/inbox/spliced` 与
+`schedule/change dispatch`。仓里现成的对照就是 `docs/verification.md`「服务端重启后，没人打开过的会话
+不会按时投递」一节记的**修前**行为：同一套流程「打开那条会话，**立刻补发**」（`delivered=1`）。⇒ 「日志里有 dispatch」
+分不清是冷扫描器投的还是一打开才补投的；入库材料里**没有**「连浏览器**之前**日志里已存在 dispatch」的
+快照（原始日志在 `/tmp/ui11b/`，未入库）。**判据要成立，必须在连浏览器之前先读持久化日志确认 `dispatch`
+已经存在**，再开 GUI 看画面。
+
+**(b) 那次跑的是哪个代码状态没钉住，而 1.12.0 的发布物恰好带着「冷唤醒不投递」的缺陷。** 同目录 README
+其它 issue 都记了 post 提交（#9 / #10 是 `71db603`、#11a 是 `542aa80`），**唯独 #11b 这一节没记**。
+而 `mount()` 成功时返回的是 runtime 而非 `undefined`，所以 #11b 实现里的
+`if (mounted === undefined) registry.drive(agent)` **条件恒假** ⇒ 会话被拉起来却从不驱动投递
+（`src/index.ts` 的 wake 路径注释写明了这条后果）。两个发布物实测：
+
+| 查的 | 命令 | 量到的 |
+|---|---|---|
+| 1.12.0 的包 | `npm pack dsh-later@1.12.0` → `package/lib/index.js` | `const mounted = registry.mount(agent);` 紧跟 `if (mounted === undefined) {` ⇒ **恒假 guard 在 1.12.0 发布物内** |
+| 1.12.1 的包 | `npm pack dsh-later@1.12.1` → `package/lib/index.js` | 同一处已是无条件 `registry.drive(agent)`（`9867852` 改的，1.12.1 发布 `2026-11-06T05:58:30.624Z`） |
+| guard 的引入时刻 | `git log -S'mounted === undefined'` | `8a74442`（2026-11-05 13:21 +0800）带进实现，**早于** 1.12.0 的发布时刻 `2026-11-05T09:30:19.094Z` |
+
+⇒ 若那次跑的是 1.12.0 的包，冷唤醒**根本投不出**，`spliced=1` 只可能来自 (a) 里开 GUI 之后的补投，
+正好落回不可归因。材料没钉提交点，这个可能性**排除不掉**。
+
+### 11.3 跨代次的冷会话 UI 面：**未判定**
+
+本文件的矩阵命令 `npm run verify:ui` **不覆盖**这一维。三条可直接复跑的检索：
 
 | 要问的 | 量到的 | 所以 |
 |---|---|---|
-| 三面等到点了吗 | `scripts/ui-matrix/capture.mjs` 头部的三面清单（`1-composer` / `2-dock` / `3-panel`）用的是 `/later +30m`，同文件 4 处 `page.screenshot`（composer / dock / panel / badge）都在**建完提醒当场**拍，全程没有等到点 | 没有任何一帧涉及到期时刻 |
+| 三面等到点了吗 | `scripts/ui-matrix/capture.mjs` 头部的三面清单（`1-composer` / `2-dock` / `3-panel`）用 `/later +30m`，同文件 4 处 `page.screenshot`（composer / dock / panel / badge）全在建完提醒当场拍，没有等到点 | 没有任何一帧涉及到期时刻 |
 | 采集件看投递吗 | `grep -rnE 'dispatch\|到期\|spliced' scripts/ui-matrix/` = **1 处命中**，且是 `run.mjs` 的分工注释（明说事件形状归 `verify:kernels`）；代码路径 **0 处** | 矩阵不判投递 |
 | 中途重启过实例吗 | `grep -rnE 'restart\|SIGTERM\|resumeSessionId' scripts/ui-matrix/` = **1 处命中**：`instance.mjs` 的 `stopInstance()`，只在**测完收尾**杀进程组 | 「重启后没人打开」这个状态在矩阵里根本不存在 |
 
-另两条边界事实：本文件此前**零次**提到冷会话（`git show 3e6eef1:docs/notes/ui-matrix.md \| grep -c '冷会话'` = **0**）；
-§5 最后一行是 2026-11-02 的回归确认、§10 是 2026-10-30 的副本缺陷修复，**两轮都早于 #11b**。
-`docs/media/ui-matrix*` 三个证据目录里**没有**任何冷会话帧（`ls \| grep -i 'cold\|冷'` 无命中）。
+另两条边界事实：基线里本文件 `grep -c '冷会话'` = **0**；§5 最后一行是 2026-11-02 的回归确认、§10 是
+2026-10-30 的副本缺陷修复，**两轮都早于 #11b**。`docs/media/ui-matrix*` 三个证据目录里没有任何冷会话帧。
 
 **跨代次这一维的证据目前只在非 GUI 面**：`scripts/verify-across-kernels.mjs` 的判据 3（冷会话到点投递，
-进程内 `ctx.agents`，不起浏览器、不渲染 DOM）逐代次单列 `冷会话 spliced=N dispatch=Y`，
-以及 `docs/verification.md`「服务端重启后，没人打开过的会话不会按时投递」一节。
+进程内 `ctx.agents`，不起浏览器、不渲染 DOM）逐代次单列 `冷会话 spliced=N dispatch=Y`。
 
-**同一维度的口径分歧，登记但不在此判定**：`verify-across-kernels.mjs` 判据 3 的形状是
-`agents.create(...)` → 命令建提醒 → `coldHandle?.dispose?.()` → 等到点，量的是**打开过又被关掉**
-的会话；README「两档承诺」的第二档写的是**从没被打开过**的会话。所以「`冷会话 spliced=1`」现在
-不能被引用成「README 那一档已实测」——真正对上那一档的只有上面 `verify-1.12.0/issue-11b/` 那一次。
-改这一维归口在跨内核脚本那条流（动的是 `scripts/verify-across-kernels.mjs` 的 `function` 面与本文件之外的
+**同一维度的口径分歧，登记但不在此判定**：判据 3 的形状是 `agents.create(...)` → 命令建提醒 →
+`coldHandle?.dispose?.()` → 等到点，量的是**打开过又被关掉**的会话；README「两档承诺」的第二档写的是
+**从没被打开过**的会话。所以「`冷会话 spliced=1`」不能被引用成「README 那一档已实测」。改这一维归口在
+跨内核脚本那条流（动 `scripts/verify-across-kernels.mjs` 的 `function` 面与本文件之外的
 `docs/verification.md`），本文件只记录 UI 面覆盖到哪、差多少。
 
-**要让这一维在本文件变绿需要补什么**（本轮未做，未排期，归 Lead）：把 `verify-1.12.0/issue-11b/` 那次手工流程
-落成 `scripts/ui-matrix/` 里的**第四面**——在隔离实例用真实命令通道建一条 `+2m` 的提醒 → 杀进程并用同一
-`DSH_HOME` 重启 → 全程不连浏览器，直到过期之后再打开那条会话 → 断言 dock 出现这条**已投递**的行、
-侧栏 badge 由红回落、会话日志里有对应会话自己的 `schedule/change dispatch`，并逐代次跑。
-不该塞进现有三张截图里冒充它们覆盖过。
-
+**要让这一维在本文件变绿需要补什么**（本轮未做，未排期，归 Lead）：把 `verify-1.12.0/issue-11b/` 那次
+手工流程落成 `scripts/ui-matrix/` 里的**第四面**，并修掉 11.2 的两条不可归因——建一条 `+2m` 提醒 →
+杀进程、同 `DSH_HOME` 重启 → **全程不连浏览器**，到期后**先读持久化日志**确认该会话自己的
+`agent/inbox/spliced` 带本次 nonce 且 `schedule/change operation: dispatch` 已存在 → **再**开 GUI，断言
+dock 出现这条已投递的行、侧栏 badge 由红回落；并且**钉住 post 提交点**（跑的是哪个 commit 的 `lib/`），
+逐代次跑。不该塞进现有三张截图里冒充它们覆盖过。
