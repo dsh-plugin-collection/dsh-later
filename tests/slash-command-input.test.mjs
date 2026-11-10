@@ -271,3 +271,92 @@ class FakeAgent {
 function fakeAgent(session = new FakeSession()) {
   return new FakeAgent(session);
 }
+
+// ── 5. issue #142：`-edit` 只给 id 时，回命令层自己的文案，不动数据 ───────────
+
+/**
+ * 旧行为：裸 id（或 {"id":…}）经 coercePayload 后 `prompt` 缺席，一路穿到
+ * `userScheduleEditPrompt` → `validatePrompt(undefined)` → 下游报
+ * 「提醒内容不能为空。」——把「没说要改成什么」误报成「内容被清空」。
+ * 这组用例钉住修复后的四条边界（含两条**不该**被命令层接管的形状，防止过度拦截）：
+ *   a) 有 id、prompt 键缺席 → 命令层文案，数据原样；
+ *   b) 显式 prompt:"" → 真·空内容，仍走下游原文案；
+ *   c) 无 id → 仍走下游 invalid_rule，命令层不接管缺 id 的形状；
+ *   d) id+prompt 齐全 → 成功路径未被新分支挡坏。
+ */
+
+function invocation142(agent, rawInput, commandId) {
+  return { commandId, agent, rawInput, signal: new AbortController().signal };
+}
+
+test('#142 -edit 只给 id（裸 id / {"id":…}）：命令层自己的文案，不是下游「不能为空」，且不改数据', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent(new FakeSession());
+  const created = await defOf('user-schedule-create').handler(
+    invocation142(agent, '{"prompt":"起来喝水","after_seconds":300}', 'cmd-142-create'),
+  );
+  assert.equal(created.kind, 'success', `前置创建应成功，实得 ${created.text}`);
+  const id = JSON.parse(created.text).id;
+
+  for (const raw of [id, JSON.stringify({ id })]) {
+    const r = await defOf('user-schedule-edit').handler(invocation142(agent, raw, 'cmd-142-edit'));
+    assert.equal(r.kind, 'error', `${raw} 应报错`);
+    assert.match(r.text, /缺少要改成的新内容/, `命令层应直说缺 prompt（实得 ${r.text}）`);
+    assert.match(r.text, /user-schedule-edit/, '文案要落在命令名上，用户知道是谁在说话');
+    assert.doesNotMatch(r.text, /提醒内容不能为空/, '不得把「没说改成什么」说成「内容为空」');
+    assert.doesNotMatch(r.text, /^invalid_prompt/, '不是下游透传，是命令层自己的作答');
+  }
+
+  // 数据未动：内容还是创建时那句，条数没变。
+  const list = await defOf('user-schedule-list').handler(invocation142(agent, '', 'cmd-142-list'));
+  const items = JSON.parse(list.text);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].prompt, '起来喝水', '被拒的 edit 不得落盘');
+});
+
+test('#142 显式给空 prompt 仍是下游「提醒内容不能为空。」；无 id 载荷仍走下游 invalid_rule（不过度拦截）', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent(new FakeSession());
+  const created = await defOf('user-schedule-create').handler(
+    invocation142(agent, '{"prompt":"保持原样","after_seconds":300}', 'cmd-142b-create'),
+  );
+  const id = JSON.parse(created.text).id;
+
+  const emptyPrompt = await defOf('user-schedule-edit').handler(
+    invocation142(agent, JSON.stringify({ id, prompt: '  ' }), 'cmd-142b-empty'),
+  );
+  assert.equal(emptyPrompt.kind, 'error');
+  assert.match(emptyPrompt.text, /^invalid_prompt: 提醒内容不能为空。/,
+    `真·空内容归下游管，语义不变（实得 ${emptyPrompt.text}）`);
+
+  const noId = await defOf('user-schedule-edit').handler(
+    invocation142(agent, '{"prompt":"没有 id 可改"}', 'cmd-142b-noid'),
+  );
+  assert.equal(noId.kind, 'error');
+  assert.match(noId.text, /^invalid_rule/, `缺 id 的形状仍由下游作答（实得 ${noId.text}）`);
+  assert.doesNotMatch(noId.text, /缺少要改成的新内容/, '命令层不接管无 id 的载荷');
+
+  const list = JSON.parse((await defOf('user-schedule-list').handler(
+    invocation142(agent, '', 'cmd-142b-list'),
+  )).text);
+  assert.equal(list[0].prompt, '保持原样', '两条被拒路径都不动数据');
+});
+
+test('#142 回归：id+prompt 齐全的 edit 成功路径未被新分支挡坏', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent(new FakeSession());
+  const created = await defOf('user-schedule-create').handler(
+    invocation142(agent, '{"prompt":"旧内容","after_seconds":300}', 'cmd-142c-create'),
+  );
+  const id = JSON.parse(created.text).id;
+
+  const edited = await defOf('user-schedule-edit').handler(
+    invocation142(agent, JSON.stringify({ id, prompt: '新内容' }), 'cmd-142c-edit'),
+  );
+  assert.equal(edited.kind, 'success', `完整载荷的 edit 必须照旧成功（实得 ${edited.text}）`);
+
+  const list = JSON.parse((await defOf('user-schedule-list').handler(
+    invocation142(agent, '', 'cmd-142c-list'),
+  )).text);
+  assert.equal(list[0].prompt, '新内容');
+});

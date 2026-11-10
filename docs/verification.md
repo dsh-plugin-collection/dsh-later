@@ -562,7 +562,7 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 
 **已修的半面（issue #11a / PR #124，1.12.0）**：投影与投递两条通道原来口径不同——宿主每次冷恢复会话都会追加一条 `session/end-seed {}`（内核 `dsh-session/lib/index.js:1428`），旧投影据此把 `active` 抹空，于是提醒**照发但看不见、取消不掉**。现在两通道同按 `init(header, inheritedEventCount)` 的继承前缀切点判，`stateVersion` 升到 5 让旧的中毒缓存行作废。
 
-**已修（issue #11b / 分支 `feat/11b-host-level-sweep`，1.13.0）**：宿主级到期扫描器 `src/expiry-sweeper.ts` 挂在插件 apply 的顶层 fiber 上，看 sidecar 里每条提醒的到期时刻（v3 起 `OwnedEntry.scheduledAt`），到点用「惰性取 `ctx.get('sessionController')` → 回退 `ctx.agents.resume({ resumeSessionId })`」把会话拉起来，再走**原有** runtime 链路投递（确认窗口、`schedule/change dispatch` 记账、`/later` 代发语义一个字没改）。
+**已修（issue #11b / 分支 `feat/11b-host-level-sweep`，1.12.0）**：宿主级到期扫描器 `src/expiry-sweeper.ts` 挂在插件 apply 的顶层 fiber 上，看 sidecar 里每条提醒的到期时刻（v3 起 `OwnedEntry.scheduledAt`），到点用「惰性取 `ctx.get('sessionController')` → 回退 `ctx.agents.resume({ resumeSessionId })`」把会话拉起来，再走**原有** runtime 链路投递（确认窗口、`schedule/change dispatch` 记账、`/later` 代发语义一个字没改）。
 
 上面那条「停进程重启、不开浏览器、到期后 0 条」现在变成：**到期后由扫描器自己叫醒会话并投递**。判据是事件形状（`agent/inbox/spliced` 的 `inserted[].content` 带 nonce + 随后一条 `schedule/change operation: dispatch`），跨内核 `function` 面每个代次都单列一维（`冷会话 spliced=N dispatch=Y`），与热会话分开数——任何一方为 0 都单独判红，不许互相打掩护。
 
@@ -571,7 +571,7 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 落地时踩到、现在写死在实现里的四条（改动这些之前先读源码注释）：
 
 1. **扫描器启动就要同步扫一轮**。`apply()` 那一刻 sidecar 往往还是空的，若只靠「先排 timer 等它触发」，排出来的延迟是 0、`unref` 之后又不再唤醒进程，等于**整个生命周期只剩 60s 兜底 tick**。
-2. **建/改/暂停/恢复/插话之后必须让扫描器重排**（`activeSweeper?.reschedule()`）。runtime 那边有 `requestDrive()`，扫描器没有第二个知情者，新写进 sidecar 的到期时刻只能等兜底 tick。
+2. **建/改/暂停/恢复之后必须让扫描器重新武装**（`activeSweeper?.rearm(sessionId)`，不是 `reschedule()`）。runtime 那边有 `requestDrive()`，扫描器没有第二个知情者，新写进 sidecar 的到期时刻只能等兜底 tick；而 `reschedule()` 是**纯重排**，不碰退避状态——一个已经放弃（`gaveUp`）的会话光靠重排永远不会被新提醒叫起来，这正是 #139 的第二半（D2）。
 3. **静默期只拦"扫描器猜着去打开"，不拦"确实已到期"**。`agent/disposed` 之后内核会把会话日志封口（实测 `foldUserState` 折出 `active: 0`），所以"到期"这件事只能由 sidecar 这个断点索引回答：`hasOverdueEntry()` 为真时静默期让路。被挡下的条目记 `undelivered(quiet-window)` 并 warn 一次，**不静默丢**。
 4. **到期判定只有一处**（`src/due.ts` 的 `isDue` / `dueTargetOf`），runtime 读折叠记录、扫描器读 sidecar，两边共用同一口径；时刻非法/缺失一律不算到期。
 
@@ -582,11 +582,62 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 - **非 root 不冷唤醒**：`ctx.agents.roots()` 里没有它 ⇒ 本插件的 runtime 挂不上 ⇒ 唤醒等于白拉。同样按硬拒绝处理（枚举层摘掉）。注意冷会话在这里看到的是「此刻没有对应 agent」，属正常现象，不算拒绝——判定只在**此刻存在 agent** 时才有信息。
 - **静默期（120s）只对"扫描器主动打开"生效，"确实已到期"可以旁路**：用户关掉某个会话后 120s 内，扫描器不会主动去打开它。但旁路**只对「sidecar 里确实已过期」的条目生效**——判据是 `hasOverdueEntry(sessionId)`（`src/index.ts`，走 `src/due.ts` 的统一判定），即 sidecar 里那条 `scheduledAt <= now`。其余情况（没有到期条目、或到期时刻缺失/非法）**仍按 120s 静默期**，扫描器不会去碰它。被静默期挡下的到期条目记 `undelivered(quiet-window)` 并 warn 一次，宽限后再试——不无声滤掉。
 - **冷唤醒会计一个 turn**：`agents.resume` 是真建 agent。宿主没有 provider 时那一轮以 `turn/end` 错误收尾（`agent "…" has no provider/model`）。扫描器用「1s→2s→4s→8s 退避、连续 5 次放弃并只告警一次」兜住"反复投不出去"，正常投递不受影响。
+- **叫起来的会话在投递收敛之后释放**（#140，决策 D1）：本插件自己 `agents.resume` 出来的句柄会被 `dispose()`，会话回到冷的状态、写者位让回去；`sessionController` 路径交回的 agent 归控制器，本插件不拆。turn 未结束且 30s 内没收敛时**故意保留**并 warn 一次（宁热不丢）。
 - **`every` 周期任务的重挂仍归 runtime**：扫描器只负责叫醒，不搬周期逻辑。
 - **老 sidecar（v1/v2）缺 `scheduledAt` 的条目**：读时从会话日志 `schedule/change create` 回算（`after` = `createdAt + afterSeconds`，`at` = 记录自带的时刻）；回算不出来就**保守跳过并告警一次**——不猜、也不当成"永久逾期"去反复唤醒。回算需要会话句柄，冷会话拿不到时这条只能等会话被打开。
 - **静默期监听的撤销契约只有单测覆盖了一半**：完整那条（监听挂在 effect 作用域里 ⇒ 拆 fiber 后必须摘掉）由 `tests/11b-cold-delivery.test.mjs` 的「撤销契约」用例钉住；「apply 期间注册的监听会不会被 cordis 拆」**不是**本插件的问题（真 cordis 上顶层注册同样有效，最小实验 `hits=1`），所以这里不记成已知限制。
 
-**因此本文件之外的那些承诺请按这句读**：「关网页也准时触发」现在**两档都成立**——浏览器关掉、服务端在跑：一直以来成立；服务端重启、会话没被打开：**1.13.0 起成立**，边界见上面的「剩余边界」。
+**因此本文件之外的那些承诺请按这句读**：「关网页也准时触发」现在**两档都成立**——浏览器关掉、服务端在跑：一直以来成立；服务端重启、会话没被打开：**1.12.0 起成立**，边界见上面的「剩余边界」。
+
+### 到期索引与投递真相同源、冷唤醒句柄释放（issue #139 / #140，1.12.1 之后）
+
+**结论（实测，HEAD `3e6eef1` 的缺陷在本地修复分支上复跑）**：一次性提醒投递成功之后，sidecar 条目
+不再被扫描器判成「到期且未消化」；`gaveUp` 的三条解除路径都能被测试驱动；冷唤醒的会话在投递收敛
+之后被释放。取舍写在 `docs/design-decisions.md` 的 D1/D2/D3。
+
+| 判据 | 实测结果 | 手段 |
+|---|---|---|
+| 投递之后条目仍在索引里、但到期视图读成 `consumed`（**不摘条目**，`rearmOneShot` 依赖它的 uid/附件） | 成立 | `tests/due-index-consumption.test.mjs`：装配层用真 `lib/index.js` + 假宿主，判据是 `agent/inbox/spliced` 带本次 nonce + 随后 `schedule/change operation:dispatch` |
+| 验收① 同会话第一条投完，第二条仍能被冷唤醒并投递 | 成立 | 同上（第二条走真 `user_schedule_create` 工具路径，经 `rearm` 排精确 timer；直接写 sidecar 只能等 60s 兜底 tick，测不到用户实际时序） |
+| 验收② 重启后带历史已投条目**不被白白拉起** | **分两档成立** | 新数据（1.12.1+ 镜像写下的标记）：`agents.resume` **0 次**；遗留数据（无标记）：**恰好 1 次**，之后永不再拉。第二档是边界不是失败——冷会话读不到自己的判据（`SessionStore.get` 只返回 live 会话），所以第一次拉起既是唤醒也是唯一能对账的时机 |
+| 验收③ `every` 连续两次 occurrence 之间不攒失败、不误报 `gaveUp` | 成立 | 索引被推进到 `> now` 的下一次；镜像源是 fold 自己的端态，**没有第三次 occurrence 计算** |
+| `gaveUp` 解除路径 ①条目删/推远 ②正常消化 ③用户改动 `rearm` | 三条各自可达 | 注入假时钟的扫描器单测；①在修复前**结构性不可达**（`settle()` 的 `gaveUp` 短路排在清算之前） |
+| 冷唤醒 → 投递 → 释放 → 第二条到期 → 再唤醒并投递 | 成立 | `tests/cold-wake-release.test.mjs` 序列用例（同一条测试同时覆盖 #140 的释放与 #139 的第二条，不拆成各测一半的两个断言） |
+| turn 未结束不释放；`sessionController` 路径不释放 | 成立 | 同上两条独立用例 |
+
+**未判定（不许因为上面绿了就当它绿）**：
+
+- **30s 未收敛「故意保留 + warn」那一支没驱动**：单测不真等 30s（`COLD_WAKE_RELEASE_WAIT_MS` 是
+  代码常量）。可达的那一半（busy ⇒ 不拆、转 idle ⇒ 补拆）有用例；上限本身属推断。
+- **跨内核四面已在合并后的集成树上复跑（2026-11-10，`integration/closeout`）**：
+  `node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install` →
+  **11/11 绿、0 红、0 未判定，退出码 0**（明细 `/tmp/closeout-verify/across-kernels-2026-11-10T06-27-52-177Z.json`，
+  gitignore 目录，复跑即得）。逐代都报 `同源=same`、`投递 spliced=1 dispatch=Y`、
+  **`已关闭会话 spliced=1 dispatch=Y`**、`at 形状 5/5`、type 两 tsconfig 0 错、gate 本代与最新都 pass
+  （`0.1.2-rc.1` / `0.1.5-rc.3` 的 gate 本代仍是**结构性未判定** —— 那两代不导出
+  `evaluatePluginCompatibility`，不许记成绿）。
+  ⚠️ 这一维现在叫「已关闭会话」而不是「从没被打开过」：脚本做的是 create→`dispose()`→等，
+  每次跑还是**全新 sessionId**，所以它覆盖不到「同会话第二条」与「重启后带历史已投条目」，
+  那两条由 `tests/due-index-consumption.test.mjs` 在单测层覆盖。**矩阵绿 ≠ #139 被真内核验过**，
+  两边是不同的判据面。
+- **UI 面（本轮补跑）**：`PLAYWRIGHT_MODULE=… npm run verify:ui -- --versions 0.2.2-rc.1,0.2.1-rc.4,0.1.2-rc.1`
+  → 三代都是 `按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0`，退出码 0。
+  取最新 / 中间 / 最老三档是为了确认「镜像写进 sidecar」与「冷唤醒句柄释放」没有动到 dock 与
+  投影的读面；**其余 8 个代次的 UI 面本轮没跑**，仍是各自那轮的历史结论。
+- **越界自检**：本轮 nonce（`XK-FIRE` / `XK-COLD`）在真实 `~/.dsh/sessions` 下 **0 命中**；
+  临时 `DSH_HOME` 由脚本自己建。`find ~/.dsh -newermt …` 会列出一堆文件，但那是本机别的服务
+  （gitea-dispatch / wakatime / dsh-web）在写 —— **可归因的检查是 nonce，不是时间戳**。
+
+- **真宿主上「写者持有」那条后果没有直接实测**：D1 的依据是内核 `AgentHandle` 与
+  `sessionController.resolveAgent` 的契约文本 + 本仓 `index.ts` 里那条 `{ error }` 分支注释，
+  不是端到端跑出来的 GUI 现象。
+
+**顺带纠正一处会误导人的判据命名**：`scripts/verify-across-kernels.mjs` 里那条"冷会话"维度实际做
+的是 **create → 建提醒 → `dispose()` → 等**，测的是「**被打开过又关掉**的会话」（每次跑用全新
+sessionId，`gaveUp` 又是进程内状态，所以它既覆盖不到「同会话第二条」也覆盖不到「重启后带历史
+条目」）。现在这一维在脚本与报告里改名为**已关闭会话**；#128 要求的「**从未被打开过**」那一面由
+`tests/due-index-consumption.test.mjs` 的验收②两条用例覆盖（假宿主里 sidecar 有、`published`
+里没有，正是"从没被打开过"的形状）。
 
 ### `0.1.7` 下设置页不可用
 

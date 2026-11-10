@@ -59,3 +59,61 @@ export declare function dueTargetOf(value: unknown): number | undefined;
  * @returns 到期返回 true；时刻缺失/非法时返回 false（见模块头的理由）。
  */
 export declare function isDue(record: DueComparable | undefined, now: number): boolean;
+/**
+ * ## 索引面（sidecar）的到期读数：issue #139 的修法落点
+ *
+ * `isDue` 读的是**事实面**（runtime 从会话日志折出来的 `ScheduleRecord`）。
+ * 宿主级扫描器读的是**索引面**（`ownership-store` 的 `OwnedEntry`），而索引面此前只有
+ * 一个静态的 `scheduledAt`：一次性提醒投递完之后，日志里那条记录已经出列，索引里却
+ * 仍然写着同一个过去的时刻——扫描器于是把它**永远判成「到期且未消化」**，累计 5 次
+ * 假失败后 `gaveUp`（#139 的整条链条）。
+ *
+ * 修法不是让扫描器去读 fold：`ctx.sessions.get(id)` 按内核定义只返回**已发布（live）**
+ * 的会话（`dsh-session` 的 `SessionStore.get`，全类没有 load/restore 入口），而「要不要
+ * 叫醒这条冷会话」的判定恰恰发生在会话还冷的时候——那是一条循环依赖。所以真相同源只能
+ * 反过来做：**投递路径把 fold 的端态镜像进索引面**，扫描器继续只读索引，但读的是带
+ * 消化状态的索引。镜像规则只有两条，都落在这里：
+ *  - 日志里该 id 已不在 `active`（一次性投完 / 被删）⇒ 索引标 `dispatchedAt`＝已消化；
+ *  - 日志里该 id 还在 `active` 但时刻变了（`every` 的 dispatch 由 fold 推进到
+ *    `nextScheduledAt`）⇒ 索引跟着写新的 `scheduledAt`。
+ *
+ * 这个返回类型被**强制**成三态，而不是 `number | undefined`：两种「没有时刻」必须可区分——
+ *  - `consumed`：这条已经投递过，**永远**不算到期；
+ *  - `unknown`：v1/v2 老条目缺 `scheduledAt`，要由读侧拿会话日志回算。
+ * 合成一个 `undefined` 的话，回算路径会把「已投递的一次性提醒」从 create 事件里重新算出
+ * 那个过去的时刻（`resolveScheduledAtFromLog` 只看 create，不看 dispatch——它本来就只
+ * 该看 create），条目于是被复活成到期，#139 原地复发。
+ *
+ * @module dsh-later/due
+ */
+/** 索引面条目里，本判据关心的字段（`OwnedEntry` 的结构子集）。 */
+export interface DueIndexEntry {
+    /** 到期时刻（epoch ms）；v1/v2 老条目缺省。 */
+    readonly scheduledAt?: unknown;
+    /** 消化标记：存在即「这一次已经投递过」，见 `ownership-store` 的 `OwnedEntry`。 */
+    readonly dispatchedAt?: unknown;
+}
+/** 一条索引面条目的到期读数（三态，理由见上）。 */
+export type DueIndexReading = {
+    readonly kind: 'due';
+    readonly target: number;
+} | {
+    readonly kind: 'consumed';
+} | {
+    readonly kind: 'unknown';
+};
+/**
+ * 读一条 sidecar 条目的到期状态。
+ * @param entry - sidecar 条目（或它的结构子集）；`undefined` 按 `unknown` 处理。
+ * @returns 三态读数；`consumed` **优先**于时刻缺失，见模块内注释。
+ */
+export declare function readDueIndex(entry: DueIndexEntry | undefined): DueIndexReading;
+/**
+ * 索引面条目在 `now` 是否**已到期且尚未消化**。
+ *
+ * `unknown`（缺时刻）返回 false：与 `isDue` 对非法时刻的口径一致——没有可信时刻就不
+ * 做「立刻唤醒」的决定（回算与保守跳过在读侧 `resolveScheduledAt` 那一层处理）。
+ * @param entry - sidecar 条目。
+ * @param now - 当前时刻（epoch ms）。
+ */
+export declare function isDueIndex(entry: DueIndexEntry | undefined, now: number): boolean;

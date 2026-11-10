@@ -189,6 +189,38 @@ export declare class UserScheduleRuntime {
      * 下次这类事不用再跑一遍跨代次实测才能定位。
      */
     private noteUnconfirmed;
+    /**
+     * 索引面镜像：把 fold 的端态写回 sidecar（issue #139 的根治点）。
+     *
+     * ## 为什么这件事必须由 runtime 做
+     *
+     * 扫描器的到期视图只能读 sidecar：`ctx.sessions.get(id)` 按内核定义只返回**已发布
+     * （live）**的会话（`dsh-session` 的 `SessionStore.get`），而「要不要叫醒这条冷会话」
+     * 的判定恰恰发生在会话还冷的时候——让扫描器去读 fold 是一条循环依赖。所以「到期视图与
+     * 投递真相同源」只能反过来实现：**能读日志的那一方（runtime）在 dispatch 之后把日志
+     * 端态镜像进索引**，扫描器继续只读索引，但读的是带消化状态的索引（`due.ts` 的
+     * {@link readDueIndex}）。
+     *
+     * 端态直接取自已有的 fold 结果，本方法**不折 occurrence、不推下一次**：日志里该 id 还
+     * active 就用它的 `scheduledAt`（`every` 的 dispatch 已由 fold 推进到下一次），已经不
+     * active 就是「已消化」。再算第三遍就是本仓最贵的那类错误（两条通道口径分叉）。
+     *
+     * ## 三个调用点，各自钉住一条路径
+     *
+     *  1. `driveOnce` 派发之后（维护事务内、与 `append(dispatch)` 同一个同步块）——正常到点；
+     *  2. `steerById` 派发之后——GUI「插话发送」也是投递，不镜像就成了「投完了但索引还
+     *     写着到期」，与 `driveOnce` 同一种病；
+     *  3. `driveOnce` 决策之前——**遗留数据的自愈点**。1.12.1 及以下写下的条目没有标记，
+     *     重启后扫描器只能按旧时刻判定，于是每条最多**再白拉一次**；那一次唤醒里会话被附着，
+     *     本调用把标记补上，此后同一条目永不再叫。这条是「修复不追溯」的边界，写在
+     *     `docs/design-decisions.md` 的 D2，不许假装它不存在。
+     *
+     * 全程不抛：镜像失败（fold 读不动、磁盘写坏）只影响「下一次扫描看得见它吗」，绝不能把
+     * **已经发生的投递**说成失败——那是 #71 那一类「把成功报成失败」的回归。
+     *
+     * @returns 实际改动的条目数（`0` = 索引本来就和 fold 一致，没碰磁盘）。
+     */
+    private reconcileDueIndex;
     /** 执行一次用户提醒决策与派发。 */
     private driveOnce;
     /**
