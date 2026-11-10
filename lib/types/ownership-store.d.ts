@@ -63,6 +63,24 @@ export interface OwnedEntry {
      * 回算不出来的条目**保守跳过**并告警——既不静默丢任务，也绝不把它当成永久逾期去唤醒会话。
      */
     readonly scheduledAt?: number;
+    /**
+     * **消化标记**：这条条目所代表的那一次投递已经发生（issue #139）。
+     *
+     * 为什么必须有它：宿主级扫描器的到期视图只能读 sidecar（冷会话的日志读不到，
+     * `ctx.sessions.get` 按内核定义只返回 live 会话），而一次性提醒投递完之后日志里那条
+     * 记录已经出列、sidecar 里却仍留着同一个过去的时刻。扫描器于是把它永远判成
+     * 「到期且未消化」，5 次假失败之后 `gaveUp`，该会话此后不再被冷唤醒。
+     *
+     * 语义边界（三条都是承重的，改之前读 `src/due.ts` 的 `readDueIndex`）：
+     *  - 它**只**由 `mirrorDueIndex` 写入，值 = 镜像那一刻 fold 的端态，不是「投递时刻」的
+     *    精确记录（诊断用，不参与判定；判定只看「有没有标」）；
+     *  - 它**不**删除条目：`uid` / `attachments` / `windowSeconds` 必须留着——补偿重挂
+     *    （`runtime.ts` 的 `rearmOneShot`）在 dispatch **之后**才回读旧条目取这三样，
+     *    先摘条目就等于丢稳定身份（面板换 id、按 uid 的 pause/delete 失效、附件消失）；
+     *  - 任何**显式写入新到期时刻**的覆盖写（create / edit / resume / 补偿重挂）都会清掉它：
+     *    用户动了这条提醒，它就是待投递状态，见 {@link recordOwnership}。
+     */
+    readonly dispatchedAt?: number;
 }
 /** 暂停留档（仅 kind==='after'；不进会话日志）。 */
 export interface PausedEntry {
@@ -123,6 +141,34 @@ export interface SidecarSnapshot {
 export declare function listOwnershipSnapshots(warn?: (message: string) => void): readonly SidecarSnapshot[];
 /** 撤销一条所有权；幂等（不存在时无操作）。 */
 export declare function removeOwnership(sessionId: string, id: string): void;
+/**
+ * 把 fold 的端态镜像进索引面（issue #139 的唯一写入口）。
+ *
+ * ## 为什么需要一个专门的镜像函数
+ *
+ * 扫描器的到期视图只能读 sidecar（冷会话的日志读不到：`ctx.sessions.get` 按内核定义只
+ * 返回 live 会话，而「要不要叫醒」的判定恰好发生在会话还冷的时候）。所以「投递真相同源」
+ * 只能反过来落地：**由能读日志的那一方（runtime）在 dispatch 之后，把日志端态写回索引**。
+ * 本函数就是那一处写回，它自己**不折日志、不推 occurrence**——端态由调用方从已有的 fold
+ * 结果里取（本仓两条 fold 通道口径一致，见 `user-tools.ts` 的 `foldScheduleEventsCompat`
+ * 与 `projection.ts`；再算第三遍就是这两个月最贵的那类错误）。
+ *
+ * 每个 id 只有两种端态：
+ *  - `number` —— 日志里这条仍 active，它的下一次到期时刻（`every` 的 dispatch 已经把
+ *    日志记录推到下一次，所以这个值天然是「下一次」）；
+ *  - `undefined` —— 日志里已经没有它（一次性投完出列 / 被删除）⇒ 打消化标记。
+ *
+ * **只在真的不同时才落盘**：`driveOnce` 每轮都会调这里，无条件写会把 sidecar 变成
+ * 每次投递一次的固定磁盘写，并且——更要紧的——每次 `writeThrough` 都拨一代
+ * `sidecarGeneration`，而那是 fold 缓存的失效键，无条件写等于让 fold 缓存每轮自毁。
+ * 未出现在 `targets` 里的条目**一律不动**：那是别的读者的条目，或本方无法判定的条目，
+ * 保守跳过与 `resolveScheduledAt` 那一侧的「绝不猜」是同一条纪律。
+ *
+ * @param sessionId - 目标会话。
+ * @param targets - 日志 id → 端态（见上）。
+ * @returns 实际改动的条目数（`0` 表示没碰磁盘）。
+ */
+export declare function mirrorDueIndex(sessionId: string, targets: ReadonlyMap<string, number | undefined>): number;
 /** 按 uid 找当前仍 active 的 schedule id（缺失 undefined）。 */
 export declare function findScheduleIdByUid(sessionId: string, uid: string): string | undefined;
 /** 全部暂停留档（uid → entry）。 */
