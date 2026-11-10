@@ -239,7 +239,9 @@ export function SchedPanel({
     // 宿主错误文案不随 locale 变化，能在客户端拦下的就不发往宿主。
     const maxChars = promptLimits?.maxChars ?? 1000;
     if (text.length > maxChars) {
-      setError(t.errPromptTooLong);
+      // issue #141：文案里的上限必须就是这一行校验用的 maxChars——当场插值，
+      // 别改回直接取模板或写死数字（取舍说明见 strings.ts 的 errPromptTooLong）。
+      setError(format(t.errPromptTooLong, { maxChars }));
       return;
     }
     if (target === null) {

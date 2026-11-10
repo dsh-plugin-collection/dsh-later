@@ -1015,6 +1015,32 @@ export function userScheduleCommands(
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const value = parsed.value as Record<string, unknown>;
+      /**
+       * issue #142：「有 id、无 prompt」必须由命令层自己作答。
+       *
+       * 旧路径里裸 id（或只带 id 的 JSON）经 coercePayload 归一后 `prompt` 缺席，
+       * 下游 `validatePrompt` 把 undefined 折成空串，回一句「提醒内容不能为空。」——
+       * 把「没说要改成什么」误报成「内容被清空」，用户一头雾水。这里提前拦截并
+       * 给出命令自己的文案；动数据的是成功路径，本分支只读不写。
+       *
+       * 条件刻意收得窄，其余形状一律走下游原有错误：
+       *  - id 的判定复刻 `userScheduleEditPrompt` 的校验（去空白非空），
+       *    `{}` / 空白 id 仍由下游报 invalid_rule，不改它们的既有语义；
+       *  - 载荷**显式**给了 `prompt`（哪怕空串）不算本分支——那才是真·空内容，
+       *    下游文案语义正确。JSON 里 undefined 不存在，故 `=== undefined`
+       *    等价于「键缺席」。
+       *
+       * ⚠️ 不支持「裸 id + 空格 + 新内容」当编辑载荷：那是**解析契约变更**不是
+       * 文案修复（#126 定的双回车认领语义下，空格后内容走普通消息路径送达；
+       * 支持它还要连 `input.hint` 与载荷形状假设一起改）。如确有需求，另立
+       * issue 走产品决策，别从本分支顺手扩。
+       */
+      if (value['prompt'] === undefined) {
+        const id = value['id'];
+        if (typeof id === 'string' && id.length > 0 && id.trim() === id) {
+          return renderError('缺少要改成的新内容：/user-schedule-edit 的载荷必须同时给出 id 与 prompt，例如 {"id":"schedule-…","prompt":"新的提醒内容"}。');
+        }
+      }
       const { limits } = resolveSettings();
       const result = await userScheduleEditPrompt(value['id'], value['prompt'], invocation.agent, ctx, limits);
       if (!result.ok) {
