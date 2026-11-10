@@ -169,7 +169,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 - **Works across eleven kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.1`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
   - **Browser closed, server running**: always true — reminders live server-side and arrive on time across devices.
-  - **Server restarted, that session was never opened**: true since 1.13.0. A host-level expiry sweeper wakes the session at due time and delivers through the normal runtime path, so delivery no longer depends on somebody happening to open it.
+  - **Server restarted, that session was never opened**: true since 1.12.0. A host-level expiry sweeper wakes the session at due time and delivers through the normal runtime path, so delivery no longer depends on somebody happening to open it.
 
   Remaining bounds (all recorded under "remaining bounds" in [`docs/verification.md`](./docs/verification.md)):
   - The host must be able to rebuild the session: web profiles go through `sessionController`, every other profile falls back to `agents.resume`. When neither works the reminder is recorded as `undelivered` with a warning instead of being retried forever.
