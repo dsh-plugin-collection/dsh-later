@@ -39,11 +39,22 @@
  * 冷 resume 会真建一个 agent 并跑出一轮 turn（无 provider 时是 `turn/end` 带
  * `agent ... has no provider`，见入口注释）。所以这里必须**有节制**：
  *  - 每个会话同一时刻只允许一次唤醒（in-flight 去重）；
- *  - 唤醒后若这条提醒**仍在** sidecar 里、且仍然到期（= 这次唤醒没投出去），按
+ *  - 唤醒后若这条提醒**仍然**在到期视图里（= 这次唤醒没投出去），按
  *    退避（{@link backoffForFailures}：1s→2s→…→封顶 10 分钟）再试，**不是**每轮都试；
- *  - 同一个会话连续失败到 {@link MAX_WAKE_FAILURES} 次就**停下并告警一次**，之后只有
- *    「用户动了这条提醒」（sidecar 变更）才重新武装——不做重试风暴；
- *  - 有人接通了（`wake` 返回 true 且到期点消失 / 被推远）就清零退避。
+ *  - 同一个会话连续失败到 {@link MAX_WAKE_FAILURES} 次就**停下并告警一次**——不做重试风暴；
+ *  - 有人接通了（到期视图被消化 / 条目被推远 / 条目消失）就清零退避。
+ *
+ * ## 「到期视图」是什么（issue #139 修的就是这一处）
+ *
+ * 「这次唤醒有没有把提醒投出去」不能问 `wake()` 的返回值（投递是异步的），只能问
+ * **sidecar 里的那条目还在不在到期状态**。而 sidecar 是一份断点索引：它记着创建时的
+ * `scheduledAt`，**过去却没人把它改成"已经投递过"**——一次性提醒投完了、日志里那条记录
+ * 早就出列，索引里却仍是同一个过去的时刻。于是本模块的第 2、3 条节制全部反向生效：
+ * 一次**成功**的唤醒被永久判成"没投出去"，5 次之后 `gaveUp`，该会话此后任何新提醒都不
+ * 再被叫醒。实测链条与三种修法的取舍见 `docs/design-decisions.md` 的 D2；本模块只接受
+ * 一个结论：**到期视图必须是投递真图的投影**，由 runtime 在 dispatch 的同一同步块里
+ * 把 fold 的端态镜像进索引（`ownership-store.mirrorDueIndex`），本模块继续只读索引、
+ * 按 `due.readDueIndex` 的三态判定（`consumed` 优先于时刻，绝不回算复活）。
  *
  * ## 生命周期
  *
@@ -54,7 +65,7 @@
  * @module dsh-later/expiry-sweeper
  */
 import type { OwnedEntry } from './ownership-store.js';
-import { dueTargetOf } from './due.js';
+import { readDueIndex } from './due.js';
 
 /** 兜底 tick 周期：60s 量级（精确 timer 负责正常路径，它只负责"迟早会扫到"）。 */
 export const DEFAULT_SWEEP_INTERVAL_MS = 60_000;
@@ -135,6 +146,16 @@ export interface ExpirySweeper {
   sweepNow(): number;
   /** 重新按 sidecar 现状排一次精确 timer（用户增删改提醒后调用）。 */
   reschedule(): void;
+  /**
+   * 重新武装一个会话：清掉它的退避/`gaveUp` 状态并重排精确 timer。
+   *
+   * 与 {@link reschedule} 的区别只有一件事，但那是承重的：`reschedule` 是**纯重排**，
+   * 它不碰退避状态，所以一个已经 `gaveUp` 的会话在用户亲手改了提醒之后仍然不被叫醒
+   * （旧实现的模块头写着「用户动了这条提醒才重新武装」，代码里其实没有人做这件事）。
+   * 用户改动是唯一合法的解除触发，所以这个动作必须是显式的、由接线侧调用的。
+   * @param sessionId - 用户刚动过提醒的会话。
+   */
+  rearm(sessionId: string): void;
   /** 是否已经停摆（dispose 之后）。 */
   readonly stopped: boolean;
   /** 清掉两级定时器、等在途扫描收敛。 */
@@ -283,11 +304,21 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     }
   };
 
-  /** 一条条目的到期时刻：优先 sidecar 字段，缺了按日志回算（推不出来 = undefined）。 */
+  /**
+   * 一条条目的到期时刻：先看索引面的消化状态，再谈时刻（issue #139 的判定入口）。
+   *
+   * 三态的来源与代价（`due.ts` 的 `readDueIndex` 把这套语义钉成唯一口径）：
+   *  - `consumed` —— 投递已经发生、runtime 已把端态镜像进索引 ⇒ **不是到期**，也**绝不**
+   *    再走回算：回算只看 `create` 事件（它本来就该只看 create），会把刚投完的那一条从
+   *    它的原始时刻复活成「永久逾期」，#139 原地复发；
+   *  - `due` —— 直接用索引里的时刻，连比较口径都和 runtime 共用 `dueTargetOf`；
+   *  - `unknown` —— v1/v2 老条目缺 `scheduledAt`，按会话日志回算；回算不出来就保守跳过
+   *    并告警一次（既不静默丢任务，也绝不当成永久逾期反复唤醒会话）。
+   */
   const targetOf = (sessionId: string, scheduleId: string, entry: OwnedEntry): number | undefined => {
-    if (typeof entry.scheduledAt === 'number' && Number.isFinite(entry.scheduledAt) && entry.scheduledAt >= 0) {
-      return entry.scheduledAt;
-    }
+    const reading = readDueIndex(entry);
+    if (reading.kind === 'consumed') return undefined;
+    if (reading.kind === 'due') return reading.target;
     const resolved = safeResolve(sessionId, scheduleId);
     if (resolved === undefined) {
       // v2→v3：推不出来就**保守跳过**并告警一次——既不静默丢任务（会话被打开时它
@@ -315,7 +346,7 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     return earliest;
   };
 
-  const readSnapshots = (): readonly SweepSnapshot[] => {
+  const readSnapshots = (): readonly SweepSnapshot[] | undefined => {
     try {
       return options.snapshots();
     } catch (error) {
@@ -324,7 +355,11 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return [];
+      // `undefined` 而不是空数组：空数组是「确实没有任何会话有提醒」这一**事实**，
+      // 读失败不是。这个区别在 `runSweep` 的退避清算里是承重的——把「读不到」当成
+      // 「条目都消失了」，会在一次瞬时 IO 失败后把所有会话的退避清零，接着对每个
+      // 投不出去的会话重新攒一遍失败（等于自己造出重试风暴）。
+      return undefined;
     }
   };
 
@@ -344,7 +379,7 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
       if (value === undefined) return;
       nearest = nearest === undefined ? value : Math.min(nearest, value);
     };
-    for (const snapshot of readSnapshots()) {
+    for (const snapshot of readSnapshots() ?? []) {
       const state = backoff.get(snapshot.sessionId);
       if (state !== undefined) {
         if (state.gaveUp) continue;
@@ -449,10 +484,18 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
    *
    * 每个会话**每轮至多推进一次**：
    *  1. 上次尝试以来还没过一个宽限期（{@link WAKE_GRACE_MS}）→ 什么都不做（给投递留时间）；
-   *  2. 提醒已经不在了 / 被推远了 → 上次唤醒有效，退避清零；
+   *  2. 提醒已经不在了 / 被推远了 / **已被索引判定消化** → 上次唤醒有效，退避与
+   *     {@link BackoffState.gaveUp} 一起清零；
    *  3. 仍在到期且退避窗口已到 → 记一次失败（下次再试的间隔会翻倍）；
    *  4. 仍在到期、退避窗口未到 → 跳过。
    * 全部处理完仍然到期、且没在退避里的会话，才是本轮真正要 `poll` 的。
+   *
+   * ⚠️ **第 2 步必须排在 `gaveUp` 短路之前**（issue #139 的第 6 环，这里以前是反的）：
+   * 旧实现先 `if (state.gaveUp) return 'skip'` 再看「条目消失/推远」，于是清零分支对
+   * 一个已经放弃的会话**结构性不可达**——用户把提醒删掉、把它推到很远，甚至这条扫描器
+   * 自己的判定已经不再认为到期，都解不开 `gaveUp`；该会话直到进程重启都是哑的。
+   * 现在顺序是「先清算、再决定放不放弃」，两条解除路径都有测试钉住
+   * （`tests/due-index-consumption.test.mjs`）。
    */
   const settle = (snapshot: SweepSnapshot, at: number): 'poll' | 'skip' => {
     const sessionId = snapshot.sessionId;
@@ -465,17 +508,20 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
       // 这条必须在「是否仍然到期」之前——投递是异步的，确认窗口内条目当然还在到期，
       // 先下结论会把**一次成功的唤醒**算成失败。
       if (at < state.nextAttempt) return 'skip';
-      if (state.gaveUp) return 'skip';
       const unconsumed = earliest !== undefined && earliest <= at;
-      if (unconsumed) {
+      if (!unconsumed) {
+        // 条目没了 / 被推远 / 已被标记消化 = 上次唤醒有效：退避清零（连 `gaveUp` 一起），
+        // 回到正常节奏。清零必须早于下面的 `gaveUp` 短路，见方法头的 ⚠️。
+        backoff.delete(sessionId);
+        warnedGaveUp.delete(sessionId);
+      } else if (state.gaveUp) {
+        return 'skip';
+      } else {
         // 仍然到期 = 上一次唤醒没投出去：这次失败已经"观察到"，`noteFailure` 立刻把等待
         // 时间翻倍并重新排下一次扫描。
         noteFailure(sessionId, '唤醒后提醒仍然到期（未投递）');
         return 'skip';
       }
-      // 条目没了 / 被推远 = 上次唤醒有效：退避清零，回到正常节奏。
-      backoff.delete(sessionId);
-      warnedGaveUp.delete(sessionId);
     }
     if (earliest === undefined || earliest > at) return 'skip';
     return 'poll';
@@ -516,8 +562,14 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
   const runSweep = async (): Promise<void> => {
     const at = now();
     const snapshots = readSnapshots();
+    if (snapshots === undefined) {
+      // 读失败：本轮**什么都不清算**（见 {@link readSnapshots} 里那条注释），也不排新定时器。
+      return;
+    }
+    const seen = new Set<string>();
     for (const snapshot of snapshots) {
       if (stopped) return;
+      seen.add(snapshot.sessionId);
       if (settle(snapshot, at) !== 'poll') continue;
       if (options.wakeable(snapshot.sessionId)) {
         poll(snapshot, at);
@@ -525,7 +577,26 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
       }
       noteRefused(snapshot.sessionId, at);
     }
+    pruneUnseen(seen);
     reschedule();
+  };
+
+  /**
+   * 清算「本轮根本没见过」的会话的退避状态（issue #139 的第 6 环，第二条解除路径）。
+   *
+   * `settle()` 只对**出现在快照里**的会话跑，而 sidecar 文件被删、条目被清空、或这个
+   * 会话改成硬拒绝（子会话）时，它压根进不了快照集合——于是它的退避状态永远留在表里，
+   * `gaveUp` 也就永远解不开。模块头承诺的「条目消失 ⇒ 清零」在旧实现里其实只覆盖了
+   * 「文件还在但那条没了」，这一半才是「文件没了」。补在这一处：看不见 = 没有条目支撑
+   * 任何失败判定 = 按「上次唤醒有效」清零，回到正常节奏（下次真到期时重新攒）。
+   * @param seen - 本轮快照里出现过的会话 id。
+   */
+  const pruneUnseen = (seen: ReadonlySet<string>): void => {
+    for (const sessionId of [...backoff.keys()]) {
+      if (seen.has(sessionId)) continue;
+      backoff.delete(sessionId);
+      warnedGaveUp.delete(sessionId);
+    }
   };
 
   /** 入口：串行化扫描（不并发，重入合并成"再跑一轮"）。 */
@@ -583,11 +654,19 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
   return {
     sweepNow() {
       if (stopped) return 0;
-      const snapshots = readSnapshots();
+      const snapshots = readSnapshots() ?? [];
       void sweep();
       return snapshots.length;
     },
     reschedule,
+    rearm(sessionId: string) {
+      // 「用户动了这条会话的提醒」= 模块头承诺的唯一重新武装触发。清零必须是**显式**的：
+      // 光靠 `reschedule()` 重排定时器不够——`gaveUp` 的会话在 `reschedule` 里被 `continue`
+      // 跳过、在 `settle` 里被短路跳过，于是一条全新的 +2s 提醒要等 60s 兜底 tick 才可能被
+      // 看见（实测口径）。这里把退避与告警标记一起抹掉，下一次到期点立刻可被唤醒。
+      if (backoff.delete(sessionId)) warnedGaveUp.delete(sessionId);
+      reschedule();
+    },
     get stopped() {
       return stopped;
     },

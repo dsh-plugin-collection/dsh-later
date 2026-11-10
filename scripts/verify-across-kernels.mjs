@@ -28,7 +28,7 @@
  * | step | 面 | 判据 |
  * |---|---|---|
  * | `mount` | 装配 | 真内核冷启动、插件 `activated`、AgentRegistry 可用 |
- * | `function` | 功能 | `at` 五种文法经真实命令派发 + 到点投递的事件形状 + **冷会话**到点投递 |
+ * | `function` | 功能 | `at` 五种文法经真实命令派发 + 到点投递的事件形状 + **已关闭会话**到点投递 |
  * | `type` | 类型 | 把仓库 `@deepseek-ai/dsh*` 依赖线换成该代次后跑**两个** tsconfig（不短路） |
  * | `gate` | 门禁 | 用**该代次自己的** `evaluatePluginCompatibility` 判一遍，再用最新语义判一遍 |
  *
@@ -68,9 +68,16 @@
  * 1. **别用"日志里搜得到文本"当投递判据**：创建事件与命令回执里含同样的正文，
  *    会同时造成假绿和假红。真投递 = 一条 `agent/inbox/spliced` 且其 `inserted[].content`
  *    带 nonce，随后一条 `schedule/change operation:dispatch`。
- * 4. **冷会话与热会话的判据必须分开数**（issue #11b）：两个用例各用自己的 nonce，任何一方
- *    `spliced=0` 都单独判红。混在一起数时，"热会话投递成功"会替"冷会话没投出去"打掩护——
- *    而冷会话那一维恰恰是本任务要证明的东西（投递不再依赖会话是否 live）。
+ * 4. **已关闭会话与热会话的判据必须分开数**（issue #11b）：两个用例各用自己的 nonce，任何一方
+ *    `spliced=0` 都单独判红。混在一起数时，"热会话投递成功"会替"没投出去"打掩护。
+ *
+ *    ⚠️ **这一维的名字以前叫「冷会话」，那是误读**（issue #128 复核出来的）。它做的是
+ *    `create → 建提醒 → dispose() → 等`：会话**被打开过**又关掉，而且每次跑用全新 sessionId。
+ *    所以它证明的是「投递不再依赖会话是否 live」，**不**证明 #128 要的「会话从没被打开过也会
+ *    自己拉起来」，也覆盖不到「同会话第二条」与「重启后带历史已投条目」（`gaveUp` 是进程内状态）。
+ *    后两面由 `tests/due-index-consumption.test.mjs` 的验收①②③钉住（那里 sidecar 有、
+ *    `published` 里没有，才是"从没被打开过"的形状）。改名字是为了不让下一个看矩阵的人
+ *    把这一维当成 #128 那一面已经验过。
  * 2. 会话日志是**多帧 zstd 拼接**（每次 flush 追加一帧），`zstdDecompressSync` 只解第一帧；
  *    这里按帧 magic 切分逐帧解。
  * 3. 内核模块必须解析到**被测那一代**：插件目录直接挂载会让它用自己 `node_modules` 里
@@ -476,9 +483,9 @@ function unzstdAllFrames(buf) {
 /**
  * 读整个 home 下的事件，并按**日志文件**归组。
  *
- * 为什么要归组：`function` 面现在有两个用例（热会话 / 冷会话），它们的投递证据必须能
+ * 为什么要归组：`function` 面现在有两个用例（热会话 / 已关闭会话），它们的投递证据必须能
  * **各自归因**。早期版本把 `schedule/change operation: dispatch` 直接在全量事件里 `some()`，
- * 于是热用例与冷用例的 `dispatched` 字段**恒等**——两个字段永远同真同假，冷那一维对结论
+ * 于是热用例与关闭用例的 `dispatched` 字段**恒等**——两个字段永远同真同假，关闭那一维对结论
  * 的贡献是 0，却会在汇总里显示成 `true`。
  *
  * 归属口径是**确定性事实、不是猜**：内核把每个会话写成
@@ -669,15 +676,17 @@ async function runOne(version) {
 
     // 判据 2：到点投递（事件形状，不看文本命中）
     const nonce = `XK-FIRE-${Date.now().toString(36)}`;
-    // 判据 3：冷会话到点投递（issue #11b）。建完之后**把这个会话关掉**，模拟"宿主重启后
-    // 没有任何人打开过这条会话"。此时原来那条路径上没有任何组件知道它到点了，只有宿主级
-    // 扫描器会把它拉起来——所以这一维判定的是"投递不再依赖会话是否 live"。
+    // 判据 3：**已关闭会话**的到点投递（issue #11b）。建完之后**把这个会话关掉**——
+    // 注意这不是"从没人打开过"：agent 由本用例自己 create 出来，会话被打开过。这一维判定的
+    // 是"投递不再依赖会话是否 live"（关掉之后只剩宿主级扫描器会把它拉起来）；"从没被打开过"
+    // 那一面在真内核上等价于"重启后带历史已投条目"，见文件头纪律 4 的 ⚠️ 与
+    // `tests/due-index-consumption.test.mjs` 的验收②两条用例。
     const coldNonce = `XK-COLD-${Date.now().toString(36)}`;
     const coldSessionId = `xk-cold-${Date.now().toString(36)}`;
     const coldHandle = await ctx.agents.create({ sessionId: coldSessionId, meta: { cwd: home } });
     const coldAgent = coldHandle?.agent ?? coldHandle;
     const coldCreate = await ctx.commands.execute(coldAgent, `/user-schedule-create ${JSON.stringify({ prompt: coldNonce, after_seconds: 2 })}`, [], new AbortController().signal);
-    if (coldCreate?.result?.kind !== 'success') record.notes.push(`冷投递用例没建起来：${String(coldCreate?.result?.text ?? '').slice(0, 140)}`);
+    if (coldCreate?.result?.kind !== 'success') record.notes.push(`已关闭会话的投递用例没建起来：${String(coldCreate?.result?.text ?? '').slice(0, 140)}`);
     try { await coldHandle?.dispose?.(); } catch { /* 关不掉也继续：下面的判定会如实报出来 */ }
 
     const exec = await ctx.commands.execute(agent, `/user-schedule-create ${JSON.stringify({ prompt: nonce, after_seconds: 2 })}`, [], new AbortController().signal);
@@ -686,15 +695,15 @@ async function runOne(version) {
     await new Promise((r) => setTimeout(r, HOLD * 1000));
     const { events: evs, bySession } = readEvents(home);
     const spliced = evs.filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(nonce) && (e.data?.inserted?.length ?? 0) > 0).length;
-    // 冷会话的投递证据单独取：同一个日志目录里两个会话混在一起，必须按 nonce 分开数，
-    // 否则"热会话投递成功"会替"冷会话没投出去"打掩护（假绿）。
+    // 已关闭会话的投递证据单独取：同一个日志目录里两个会话混在一起，必须按 nonce 分开数，
+    // 否则"热会话投递成功"会替"关闭的那条没投出去"打掩护（假绿）。
     const coldSpliced = evs.filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(coldNonce) && (e.data?.inserted?.length ?? 0) > 0).length;
     /**
      * dispatch 记账必须**按会话归因**，不能在全量事件里 `some()`。
      *
      * 早期版本就是这么写的，于是热用例与冷用例的 `dispatched` / `coldDispatched` **恒等**：
      * 两个字段永远同真同假，冷那一维对结论的贡献是 0，却会在汇总里显示成 `true`——
-     * 下一个看矩阵的人会以为"冷会话的 dispatch 记账也验过了"。
+     * 下一个看矩阵的人会以为"已关闭会话那一维的 dispatch 记账也验过了"。
      *
      * 归属口径是确定性事实、不是猜：内核把每个会话写成
      * `<home>/sessions/<cwd 编码>/<sessionId>/session.v4.jsonl(.zstd)`，目录名就是 sessionId。
@@ -739,9 +748,9 @@ async function runOne(version) {
       const hist = {};
       for (const e of evs) hist[e.type ?? '?'] = (hist[e.type ?? '?'] ?? 0) + 1;
       record.eventHistogram ??= hist;
-      record.notes.push(`冷会话未投递（issue #11b）：spliced=0｜事件 ${Object.keys(hist).length} 种 ${JSON.stringify(hist).slice(0, 160)}`);
+      record.notes.push(`已关闭会话未投递（issue #11b）：spliced=0｜事件 ${Object.keys(hist).length} 种 ${JSON.stringify(hist).slice(0, 160)}`);
     }
-    else if (!coldDispatched) record.notes.push('冷会话注入了但没有自己的 dispatch 事件（按会话日志归属判定），状态账可能对不齐');
+    else if (!coldDispatched) record.notes.push('已关闭会话注入了但没有自己的 dispatch 事件（按会话日志归属判定），状态账可能对不齐');
     if (admission) record.notes.push(`v4 源校验拒绝：${admission.raw.replace(/\s+/g, ' ').slice(0, 150)}`);
     record.notes.unshift(note ? `内核树：${note}` : '内核树：复用本地');
     try { await ctx.fiber?.dispose?.(); } catch { /* 释放失败不改写结论 */ }
@@ -995,8 +1004,8 @@ function report(record) {
   if (record.delivery) {
     const d = record.delivery;
     // dispatch 两个字段**各自归因**（按会话日志目录）：热用例看热会话自己的日志，冷用例看
-    // 冷会话自己的日志。早期版本两者恒等，等于冷那一维没有证据，别退回那种写法。
-    bits.push(`投递 spliced=${d.spliced} dispatch=${d.dispatched ? 'Y' : 'N'} 冷会话 spliced=${d.coldSpliced ?? '?'} dispatch=${d.coldDispatched === undefined ? 'n/a' : d.coldDispatched ? 'Y' : 'N'}`);
+    // 已关闭会话自己的日志。早期版本两者恒等，等于那一维没有证据，别退回那种写法。
+    bits.push(`投递 spliced=${d.spliced} dispatch=${d.dispatched ? 'Y' : 'N'} 已关闭会话 spliced=${d.coldSpliced ?? '?'} dispatch=${d.coldDispatched === undefined ? 'n/a' : d.coldDispatched ? 'Y' : 'N'}`);
   }
   if (record.at?.length) bits.push(`at 形状 ${record.at.filter((a) => a.pass).length}/${record.at.length}`);
   if (record.type) bits.push(`type ${record.type.ok ? '绿' : record.type.projects.map((p) => `${p.project}:${p.errors}`).join(',')}`);

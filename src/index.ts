@@ -44,9 +44,9 @@ import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { createRuntimeRegistry } from './runtime-registry.js';
 import { createExpirySweeper, resolveScheduledAtFromLog } from './expiry-sweeper.js';
 import { listOwnershipSnapshots } from './ownership-store.js';
-import { isDue } from './due.js';
+import { isDueIndex } from './due.js';
 import { readOwnEvents } from './upstream-compat.js';
-import { hostDictFor, hostFormat } from './strings.js';
+import { hostDictFor } from './strings.js';
 import { registerBundledSkill } from './skill.js';
 import type { SkillHostLike } from './skill.js';
 
@@ -628,9 +628,10 @@ function hasOverdueEntry(sessionId: string): boolean {
     const snapshot = listOwnershipSnapshots().find((entry) => entry.sessionId === sessionId);
     if (snapshot === undefined) return false;
     const now = Date.now();
-    // 与 runtime 共用同一个判定（`due.ts`）：sidecar 存的是 epoch ms，runtime 读的是 ISO
-    // 字符串，两者最终都收窄成「epoch ms <= now」。时刻缺失/非法一律不算到期。
-    return Object.values(snapshot.entries).some((entry) => isDue({ scheduledAt: entry.scheduledAt }, now));
+    // 索引面那一版的同一判据（`due.ts`）。⚠️ 不能用 `isDue`：已投递的条目（带消化标记）
+    // 在这里不能再算"到期"，否则静默期会让路给一条根本不需要再投的提醒（#139 的另一面）。
+    // 时刻缺失/非法一律不算到期，回算在读侧另外那一处做。
+    return Object.values(snapshot.entries).some((entry) => isDueIndex(entry, now));
   } catch {
     return false;
   }
@@ -640,6 +641,75 @@ function hasOverdueEntry(sessionId: string): boolean {
 function isQuiet(sessionId: string, watch?: UserWatch): boolean {
   const lastTouch = watch?.recent.get(sessionId);
   return lastTouch !== undefined && Date.now() - lastTouch < COLD_WAKE_QUIET_MS;
+}
+
+/**
+ * 释放冷唤醒句柄的两个参数（完整取舍见 `docs/design-decisions.md` D1）。
+ * 轮询 50ms；上限 30s，**超时就留着**——句柄留在表里的代价是内存，而在投递收敛之前
+ * 拆掉它的代价是用户那条提醒。
+ */
+const COLD_WAKE_RELEASE_POLL_MS = 50;
+const COLD_WAKE_RELEASE_WAIT_MS = 30_000;
+
+/** agent 是否「没有 turn 在跑」（跨代次 duck-typing：认不出的形状按空闲处理）。 */
+function isAgentIdle(agent: Agent): boolean {
+  return (agent as unknown as { status?: unknown }).status !== 'running';
+}
+
+/**
+ * 叫醒之后释放**我们自己**创建的 agent 句柄（issue #140；为何必须释放、为什么不释放
+ * 路径一、以及它与「同会话第二条又到点」的竞态，都写在 `docs/design-decisions.md` D1）。
+ *
+ * 三条硬约束，代码上各自对应一处判断：
+ *  - 句柄归属：`ctx.agents.get(sessionId)` 必须仍是本次唤醒拿到的那个实例，否则用户或
+ *    宿主已经接管，本插件没有拆它的资格（宁可留热）；
+ *  - 收敛判据：agent 空闲 **且** 索引面里这个会话已无到期条目（`hasOverdueEntry` 走
+ *    `isDueIndex`，已消化的条目不算到期）——两条同时成立才拆，否则就是在 `driveOnce`
+ *    写完 dispatch 之前把 agent 连它的 `runMaintenance` 一起端掉；
+ *  - 自造的用户动作要抹掉：我们自己的 `dispose()` 会发 `agent/disposed`，而那个监听把它
+ *    当成「用户刚关过」；静默期的语义是"别打扰用户刚碰过的会话"，插件收尾不是打扰。
+ *
+ * @param handle - `agents.resume` 交回的能力型句柄；没有它就没有任何释放动作。
+ */
+async function releaseWokenAgent(
+  ctx: Context,
+  sessionId: string,
+  agent: Agent,
+  handle: { dispose?: () => unknown } | undefined,
+  watch?: UserWatch,
+): Promise<void> {
+  if (handle === undefined || typeof handle.dispose !== 'function') return;
+  const deadline = Date.now() + COLD_WAKE_RELEASE_WAIT_MS;
+  for (;;) {
+    // 插件正在拆：本次 apply 的 teardown 会 `unmountAll()`，这里不插第二手。
+    if (stopping) return;
+    let current: Agent | undefined;
+    try {
+      current = ctx.agents.get(sessionId as never);
+    } catch {
+      return;
+    }
+    if (current !== agent) return;
+    if (isAgentIdle(agent) && !hasOverdueEntry(sessionId)) break;
+    if (Date.now() >= deadline) {
+      // 没收敛 ⇒ **故意留热**并喊一声：不喊就等于这条边界不存在（D1）。
+      ctx.logger.warn(
+        `later: 会话 ${sessionId} 唤醒后 ${Math.round(COLD_WAKE_RELEASE_WAIT_MS / 1000)}s 内未收敛，` +
+          `本次不释放（提醒不能因为收尾而丢）；下次到期或收敛后再释放。`,
+      );
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, COLD_WAKE_RELEASE_POLL_MS));
+  }
+  try {
+    await handle.dispose();
+  } catch (error) {
+    ctx.logger.warn(
+      `later: 释放冷唤醒的会话句柄失败（不影响本次投递）: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+  if (watch !== undefined) watch.recent.delete(sessionId);
 }
 
 /**
@@ -664,6 +734,11 @@ async function wakeColdSession(
   watch?: UserWatch,
 ): Promise<void> {
   let agent: Agent | undefined;
+  /**
+   * 本次唤醒拿到的**能力型句柄**（issue #140）。只有路径二会给句柄；路径一交回的是控制器
+   * 持有的 agent，为 `undefined` 就是"不释放"——那是正确行为，不是漏做（取舍见 D1）。
+   */
+  let handle: { dispose?: () => unknown } | undefined;
   // 路径一：web profile 的会话控制器（`dsh-web-app` 挂载时才存在）。
   let controller: { resolveAgent?(id: string): Promise<unknown> } | undefined;
   try {
@@ -686,11 +761,17 @@ async function wakeColdSession(
       resume?: (options: { resumeSessionId: string }) => Promise<unknown>;
     };
     if (typeof agents.resume === 'function') {
-      const handle = (await agents.resume({ resumeSessionId: sessionId })) as
-        | { agent?: Agent }
+      const resumed = (await agents.resume({ resumeSessionId: sessionId })) as
+        | { agent?: Agent; dispose?: () => unknown }
         | Agent
         | undefined;
-      agent = handle !== undefined && handle !== null && 'agent' in handle ? (handle as { agent?: Agent }).agent : (handle as Agent);
+      if (resumed !== undefined && resumed !== null && 'agent' in resumed) {
+        const owned = resumed as { agent?: Agent; dispose?: () => unknown };
+        agent = owned.agent;
+        handle = owned;
+      } else {
+        agent = resumed as Agent;
+      }
     }
   }
   if (agent === undefined) {
@@ -725,6 +806,19 @@ async function wakeColdSession(
       `later: 会话 ${sessionId} 已被唤醒，但 runtime 未能驱动（root 判定未命中），` +
         `本轮按未投递处理；该会话被打开时会立即补投。`,
     );
+  }
+  /**
+   * 收尾：释放**我们自己**叫起来的会话（issue #140）。刻意**不 await**：`wake()` 的 promise
+   * 是扫描器的 in-flight 标记，把它吊到"这轮 turn 跑完"会让整个 turn 期间无法清算、扫描器
+   * 每秒空转排下一次尝试。释放任务只是投递事实的**读者**，不参与判定。
+   */
+  if (handle !== undefined) {
+    const releasing = releaseWokenAgent(ctx, sessionId, agent, handle, watch);
+    void releasing.catch((error: unknown) => {
+      ctx.logger.warn(
+        `later: 冷唤醒后的释放任务异常（不影响本次投递）: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 }
 
@@ -1010,10 +1104,13 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
    *   不能再给用户一句"将于 X 发送"。（#71 的教训：静默是最贵的部分。）
    */
   const notifyUserChange = (agent: Agent): boolean => {
-    // 宿主级扫描器也重排一次（它有自己的"最近到期点"缓存）。与 runtime 的驱动**并列**、
+    // 宿主级扫描器也**重新武装**一次（它有自己的"最近到期点"缓存）。与 runtime 的驱动**并列**、
     // 不在同一处 try 里：扫描器重排失败不该把"会话已挂上"这个事实说成失败。
+    //
+    // ⚠️ 是 `rearm` 不是 `reschedule`：后者纯重排、不碰退避，于是已 `gaveUp` 的会话在用户
+    // 亲手新建提醒之后仍不被叫醒（第三条解除路径，见 expiry-sweeper.ts 的 D2）。
     try {
-      activeSweeper?.reschedule();
+      activeSweeper?.rearm(agent.id);
     } catch {
       /* 重排失败只影响"多快被看见"，兜底 tick 仍会补上 */
     }
@@ -1098,7 +1195,7 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
    * 「建完 +2s 的提醒」就会晚几十秒。runtime 那边有 `requestDrive()`，扫描器这边
    * 目前没有任何人通知它，这是一个真实的设计缺口（跨内核用例第一次跑就撞上了）。
    */
-  let activeSweeper: { reschedule(): void } | undefined;
+  let activeSweeper: { reschedule(): void; rearm(sessionId: string): void } | undefined;
   ctx.effect(() => {
     // 监听必须在 effect 里注册：`apply()` 顶层那一刻 fiber 还是 LOADING，作用域外的
     // `ctx.on` 会被立刻拆掉（静默期曾经因此从未生效过）。

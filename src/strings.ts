@@ -47,7 +47,6 @@ const zh = {
 
   // 运行时错误消息
   errEmptyPrompt: '提醒内容不能为空。',
-  errPromptTooLong: '提醒内容不能超过 {maxChars} 字符。',
   errInvalidSelector: '必须提供 after_seconds、at 或 every_seconds 之一。',
   errMultipleSelectors: 'after_seconds、at、every_seconds 只能提供一个。',
   errNotFuture: '时间必须是未来。',
@@ -104,7 +103,6 @@ const en: { [K in keyof typeof zh]: string } = {
 
   // Runtime error messages
   errEmptyPrompt: 'Reminder content cannot be empty.',
-  errPromptTooLong: 'Reminder content cannot exceed {maxChars} characters.',
   errInvalidSelector: 'Must provide one of after_seconds, at, or every_seconds.',
   errMultipleSelectors: 'Can only provide one of after_seconds, at, or every_seconds.',
   errNotFuture: 'Time must be in the future.',

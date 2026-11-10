@@ -248,3 +248,103 @@ Gitea #32 原是一条混合 issue，按区域归属拆开执行：
 两处各写一遍就是徽标与行内读数漂移的起点。取色函数对**未知 tone 回落 info**——协议允许「新增 tone 取值
 不升版本」，直接下标取值会拿到 `undefined`，于是徽标跟着主题变色且无任何报错。
 
+
+## 10. #11b 的三条决策：叫起来的会话归谁（D1）、到期视图的事实源（D2）、叫醒走哪条路（D3）
+
+`src/expiry-sweeper.ts` 与 `src/index.ts` 的注释里一直用 D1/D2/D3 编号引用这三条，但**条目一直
+没写进本文件**（issue #140 的验收第 4 条点名的就是这个空档）。下面按代码里现有的编号补齐；
+`expiry-sweeper.ts` 模块头那句「唤醒是有代价的（D1：接受）」就是这里的 D1 的前半。
+
+### D1 · 冷唤醒有代价，代价的收尾是「投递收敛之后释放句柄」
+
+**决定**：接受唤醒的代价（`agents.resume` 真建 agent、真跑一轮 turn，无 provider 时那轮以
+`turn/end` 的 `has no provider` 错误收尾），并**在投递收敛之后释放本插件自己叫起来的那个句柄**。
+
+为什么不释放不行：`AgentHandle.dispose()` 是**能力型**句柄——只有持有者能让这个 agent 倒下，
+而 resume 会**以写者身份**打开那份持久会话。丢弃句柄有两个可观察后果：① 被叫醒过的会话在宿主
+重启前永久常驻 `ctx.agents`（原本它是冷的、不占 agent 资源），数量只增不减；② 那条会话被本插件
+占着写者位，web profile 的 `sessionController.resolveAgent` 对「写者持有」直接拒绝——用户反而
+打不开自己那条被"帮忙"叫醒过的会话。而 `README.md` 承诺的正是"服务端重启、会话从没被打开过也会
+自己拉起来投递"，所以这条边界必须被决定，不能被继承。
+
+释放的三个条件与另外两种选择的代价：
+
+1. **等投递收敛再拆**（判据两条同时成立：agent 不在跑 turn，**且**索引面里这个会话已无到期条目）。
+   不等的替代方案是"叫起来、drive 一下就走"，那是把 `driveOnce` 的维护事务连根端掉——**用户那条
+   提醒不会进会话**，用一份内存去换一次丢投递，方向反了。反过来"永远不拆"就是上面那两个后果。
+2. **超时就留着**（30s 上限）。投不出去/回合卡住时会话留在表里，是本仓一贯的「宁热不丢」：
+   这条边界写在代码里并带一条 warn，不静默。上限那一支在单测里**没驱动**（见
+   `docs/verification.md` 的「未判定」）。
+3. **只拆自己叫起来的**。路径一（`sessionController`）交回的 agent 归会话控制器所有，本插件没有
+   句柄也没有资格拆——那会拆掉用户正看着的会话。释放前还要核验 `ctx.agents.get(sessionId)` 仍是
+   本次唤醒拿到的那个实例，被用户或宿主接管过就放弃。
+
+与「同会话第二条又到点」怎么共存：会撞上，但撞上的后果只是**多叫醒一次**，不是丢提醒。释放的前提
+是索引面已无到期条目，于是任何后续到期都必然来自新建或新推进的提醒，扫描器对已变冷的会话会重新走
+`wakeColdSession`。残留窗口只有「检查之后、`dispose()` 之前刚好到点」这一小段，落进扫描器已有的
+退避重叫路径。释放之后会顺手清掉本插件自己写进静默期的标记——我们自己的 `agent/disposed` 不是
+用户动作。
+
+算不算一个 turn 成本：释放本身不产生 turn；唤醒那一轮的 turn 成本是 D1 前半已经接受的既有代价。
+
+**测试**：`tests/cold-wake-release.test.mjs`（四条：收敛即释放、busy 时不释放、控制器路径不释放、
+释放之后第二条仍能冷唤醒并投递）。
+
+### D2 · 到期视图的事实源：镜像 fold 的端态进 sidecar
+
+**决定**：扫描器继续**只读 sidecar**，但 sidecar 里多一个**消化标记**——由 runtime 在 `dispatch`
+的同一同步块里把 fold 的端态镜像进去（`ownership-store.mirrorDueIndex`），判据是 `due.readDueIndex`
+的三态（`due` / `consumed` / `unknown`）。
+
+要修的是这条链：一次性提醒投递成功之后，日志里那条记录已经出列，而 sidecar 里仍留着创建时那个
+过去的时刻；扫描器只看 sidecar，于是把它**永远判成「到期且未消化」**，5 次假失败之后 `gaveUp`，
+该会话此后任何新提醒都不再被冷唤醒（issue #139）。
+
+三种候选里为什么是这一种：
+
+- **「扫描器去读 fold」（把真相同源理解成读日志）不成立**：`ctx.sessions.get(id)` 按内核定义只返回
+  **已发布（live）**的会话（`SessionStore.get`：*"Look up a live session … undefined when no live
+  session has that id"*，`SessionStore` 全类没有 load/restore 入口），而「要不要叫醒这条冷会话」的
+  判定恰恰发生在会话还冷的时候——**读不到自己的判据，是循环依赖**。退一步只在清算时读也不行：
+  那必须先把会话叫醒才读得到，#139 验收里「重启后带历史已投条目不该被白白拉起」这一条就永远做不到。
+- **「投递时同步摘 sidecar 条目」不选，有实证代价**：`runtime.ts` 的 `rearmOneShot` 在 `dispatch`
+  **之后**才 `getOwnership(dispatchedId)` 回读 `uid` / `windowSeconds` / `attachments`（补偿重挂要
+  保住稳定身份与附件）。先摘条目就把这条提醒的稳定身份弄丢——面板上换一行、`delete`/`pause` 按 uid
+  找不到、附件消失。而且每条投递路径都要补一遍，漏一处就复发。
+- **只推进 `every` 的 `scheduledAt`** 只解决周期那一半，一次性提醒照样复发。
+
+`every` 的 `scheduledAt` **推进**，但**不是**扫描器或索引层自己算下一次：日志面本来就已经推进了
+（内核 `applyScheduleChanges` 把带 `acceptedAt` 的 dispatch 应用成 `nextScheduledAt`，本仓两条
+fold 通道同口径——`user-tools.ts` 的 `foldScheduleEventsCompat` 与 `projection.ts`，
+`tests/schedule-change-decode-parity.test.mjs` 钉着）。镜像只做「把 fold 的端态抄进索引」，
+**不存在第三次 occurrence 计算**，这是 `src/due.ts` 模块头那条「不要把 occurrence 解析搬进判定层」
+的纪律的延续。
+
+`gaveUp` 的解除条件因此变成三条，都可被测试驱动：① 条目被删/推远（这条以前**结构性不可达**——
+`settle()` 把 `state.gaveUp` 的短路排在清算之前，用户删干净也解不开，会话到进程重启都是哑的）；
+② 条目被正常消化（修复后的主路径）；③ 用户改动之后 `rearm(sessionId)` 显式解除（模块头一直写着
+「用户动了这条提醒才重新武装」，但接线侧此前只调 `reschedule()`，那是纯重排、不碰退避）。
+
+**遗留数据的边界**（必须说清，否则下一个读文档的人会以为修复追溯一切）：1.12.1 及以下写下的条目
+没有标记，冷会话又读不到日志，所以重启后**最多再白拉一次**；那一次唤醒里会话被附着，runtime 在
+`driveOnce` 开头对账补上标记，此后同一条目永不再叫。测试把这一面单独钉住（`验收②·遗留数据`），
+不与"新数据 0 次唤醒"混写成一条。
+
+**测试**：`tests/due-index-consumption.test.mjs`（三态判据与镜像的幂等、三条 `gaveUp` 解除路径、
+以及 #139 验收里那三条现有判据看不见的路径）。
+
+### D3 · 叫醒走哪条路：惰性取 `sessionController`，缺席回退 `agents.resume`
+
+**决定**：先 `ctx.get('sessionController')`（web profile 才有），拿到就用它的 `resolveAgent`；
+没有该服务或它交回 `{ error }`（子会话 / 不存在 / 写者持有）就回退 `ctx.agents.resume(...)`。
+
+为什么不写进顶层 `inject`：`sessionController` 只由 `dsh-web-app` 挂载，顶层 `inject` 是整个入口
+的**激活门控**——把它列进去，非 web profile 上整条 fiber 永久 pending（`waiting for service:
+sessionController`），插件整体消失，`/later` 与 `/schedule` 全体不见。这与 issue #34 那次 P0 是同
+一类错误：拿一个可选面去当激活门控。惰性取的代价是失败要自己兜住，所以两条路都不通时记
+`undelivered` 并告警一次，不抛出去变成没头没尾的异常。
+
+为什么两条路都要留：`resolveAgent` 是 web profile 里唯一**不与 GUI 抢会话生命周期**的入口（它自己
+管附着与释放，也正是 D1 里"路径一不释放"的依据）；`agents.resume` 是 CLI/ACP 那类 profile 唯一的
+出路。顺序反过来的话，web 上每次冷唤醒都会绕过控制器的写者校验，实测会撞出「用户打不开刚被叫醒的
+会话」那一类问题。
