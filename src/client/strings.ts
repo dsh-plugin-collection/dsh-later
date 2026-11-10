@@ -75,7 +75,25 @@ const zh = {
   promptFromDraft: '将以输入框内容作为提醒内容',
   /** 错误提示 */
   errPromptEmpty: '请先在输入框输入内容',
-  errPromptTooLong: '提醒内容不能超过 1000 字符',
+  /**
+   * issue #141：上限数字必须是**校验当场**的 `promptLimits.maxChars`，不是写死的
+   * 「1000」——旧文案写死默认值，把上限放开到 10000 后，12000 字的内容被告知
+   * 「不能超过 1000 字符」，与实际执行的限制自相矛盾。
+   *
+   * 与 #125（`5d147c6`）的取舍关系——那条给宿主工具描述 `paramPromptDesc`
+   * （宿主 `src/strings.ts`）选了「说明式、不插值」，这里选**插值**，两处不同是
+   * 因为数字的取值时机不同：
+   *  - 工具描述在**插件注册时**生成。hydrate 会话在设置注入回调之前就注册，
+   *    插值会把注册瞬间的旧值冻进描述里——#125 修的正就是这个；
+   *  - 本条是**运行时**文案：`SchedPanel.handleConfirm` 点击当次读出的 `maxChars`
+   *    同时喂给 `text.length > maxChars` 校验与这里的 `{maxChars}` 插值，
+   *    同源同瞬间，不可能漂移。宿主 `user-tools.ts` 的 `validatePrompt` 运行时
+   *    错误同样插真实上限值，本条与之对齐。
+   *
+   * 所以 #125 定下的规则是「静态说明不写死上限数字；运行时错误文案给出实际值」，
+   * 不是「任何文案都不许出现数字」。⚠️ 别据此把数字插回 `paramPromptDesc`。
+   */
+  errPromptTooLong: '提醒内容不能超过 {maxChars} 字符',
   errTimePast: '请选择未来的时间',
   errCreateFailed: '创建失败：{message}',
   errDeleteFailed: '删除失败：{message}',
@@ -186,7 +204,8 @@ const en: { [K in keyof typeof zh]: string } = {
   confirmAddNoTime: 'Pick a send time',
   promptFromDraft: 'The composer draft will be used as the reminder content',
   errPromptEmpty: 'Type something in the composer first',
-  errPromptTooLong: 'Reminder content cannot exceed 1000 characters',
+  // {maxChars} 由面板在校验当场插值，取舍与防回退说明见 zh 段同名键上方注释（issue #141）。
+  errPromptTooLong: 'Reminder content cannot exceed {maxChars} characters',
   errTimePast: 'Pick a future time',
   errCreateFailed: 'Create failed: {message}',
   errDeleteFailed: 'Delete failed: {message}',
