@@ -16,6 +16,41 @@
  * @module dsh-later/scripts/seam-check/criteria
  */
 
+/**
+ * ## 单位规则（#62 的落点，先看这条再看下面的函数）
+ *
+ * 本模块是**逐像素**的纯函数，所有长度参数（行/列下标、带宽、探针列数、缺口列数、
+ * 容差）一律是**图像像素** —— 也就是喂进来的那张 PNG 自己的行列下标。判据不知道
+ * CSS 的存在，也不该知道：合成图没有 DPR 概念，真实帧的 DPR 又只有采集脚本知道。
+ *
+ * #62 之前的 bug 恰恰是**两个单位混用**：`capture-demo.mjs` 用 `getBoundingClientRect()`
+ * 的 CSS px 算出锚点写进 manifest，本模块却拿它当图像行下标去切 `img.data`。DPR=1 时
+ * 两者数值相等，所以八帧全绿是**巧合**；DPR=2 时 `page.screenshot({clip})` 仍按 CSS px
+ * 收参数、PNG 却是 2 倍密度，锚点会指到真实位置上方一半的地方。
+ *
+ * 统一方向选「**判据吃图像像素，换算只发生在采集侧**」，而不是「全链路 CSS px、
+ * 判据内部再乘 dpr」，理由有两条：
+ *
+ *   1. 判据要能继续吃合成图与任意来源的 PNG —— 让它们都带一个 `dpr` 参数，等于把
+ *      采集细节塞进判定逻辑，而"这条线横贯了多少行宽"与 DPR 无关；
+ *   2. 换算只有在**同时握着未取整的 CSS 坐标、裁图原点和 DPR** 的地方才无损，那只有
+ *      采集脚本（见 `capture-demo.mjs` 的 `toCropPx()`：先减原点、再乘 dpr、最后取整）。
+ *
+ * 于是本模块只补一个显式换算口 `toImagePx()`：给「按 1x 定标」的长度（#42 原文的
+ * ±2px 带宽、16px 圆角探针、6 列缺口阈值……）在调用侧换算成图像像素，保证 2x 帧
+ * 量的是**同一段物理距离**——否则判据 1/2/3 在 2x 下用的是半宽的尺，"两档判定一致"
+ * 这条验收就失去意义（实测差异见 `docs/notes/dock-alignment.md` §8 第 10 项）。
+ *
+ * @param cssPx 按 1x（CSS px）定标的长度
+ * @param dpr   采集帧的 deviceScaleFactor，默认 1（1x 帧上恒等，既有调用点行为不变）
+ * @returns 图像像素下该长度对应的整数
+ */
+export function toImagePx(cssPx, dpr = 1) {
+  if (!Number.isFinite(cssPx)) throw new Error('toImagePx: 缺 cssPx');
+  if (!(dpr > 0)) throw new Error(`toImagePx: dpr 必须是正数，实得 ${dpr}`);
+  return Math.round(cssPx * dpr);
+}
+
 /** 行的平均亮度（Rec.601 加权，比简单均值更贴近人眼对"线"的感知）。 */
 export function rowLuminance(row, width) {
   let sum = 0;
@@ -56,13 +91,15 @@ export function maxDeviationSpan(row, width, baseline, delta) {
  * 判据 1：接缝带内不得存在横贯宽度的线。
  *
  * @param img decodePngRgb 的结果
- * @param opts.seamY 接缝锚点行（单一）。采集脚本由几何算出，不是猜的。
- * @param opts.seams 更精确的形式：两个锚点 `[队列面板底边, 提醒面板顶边]`。
+ * @param opts.seamY 接缝锚点行（单一，**图像行下标**）。采集脚本由几何算出，不是猜的。
+ * @param opts.seams 更精确的形式：两个锚点 `[队列面板底边, 提醒面板顶边]`（图像行下标）。
  *   **B2 的 3px 消缝重叠让这两个值不相等**，缝线可能落在两者之间 —— 只取单点 ±2px
  *   会漏判。实测踩过：scheme0 对照组的缝线在 `ssBody.top`(171)，而按 #42 原文取
  *   `hostPanel.bottom`(174)±2 的带恰好错过它，把一个**已知有缺陷**的帧判成 PASS。
  *   所以真实采集应传 `seams`；`seamY` 保留给单锚点场景（如已裁好的固定基准图）。
- * @param opts.band 采样带半宽，默认 2（#42 原文「±2px」）
+ * @param opts.band 采样带半宽，默认 2（#42 原文「±2px」）——**单位是图像像素**，
+ *   在 DPR=2 的帧上要判同一段物理距离就得传 `toImagePx(2, 2)`，直接用默认值等于把
+ *   窗口砍半。锚点同理：`seams` 必须是图像行下标（采集脚本已按此换算好）。
  * @param opts.delta 视为"偏离"的最小亮度差，默认 12
  * @param opts.spanRatio 连续段占行宽的判定阈值，默认 0.9
  */
@@ -109,9 +146,11 @@ export function detectSeamLine(img, { seamY, seams, band = 2, delta = 12, spanRa
  * 做法：在给定"面板顶边行"处，检查左右两端是否存在**圆角造成的背景缺口**
  * （角上若干列的亮度贴合面板背景而非描边）。顶边应当无缺口。
  *
- * @param opts.topY 待检查的面板顶边行
- * @param opts.cornerProbe 从边缘向内探测的列数（圆角半径量级）
- * @param opts.minOffsetColumns 判为圆角所需的最小缺口列数，默认 6。
+ * @param opts.topY 待检查的面板顶边行（图像行下标；采集侧按 dpr 换算好写进 manifest 的 `panelTopInCrop`）
+ * @param opts.cornerProbe 从边缘向内探测的列数（圆角半径量级）。#42 定标的 16 是 **CSS px**，
+ *   2x 帧要判同一段弧就得传 `toImagePx(16, 2)`，默认值只在 1x 帧上等价。
+ * @param opts.minOffsetColumns 判为圆角所需的最小缺口列数，默认 6（同样是 1x/CSS 定标，
+ *   非 1x 帧请用 `toImagePx(6, dpr)`，否则 2x 下缺口列数翻倍会让阈值形同虚设）。
  *   **这个阈值是按几何真值定标的，不是拍的**：在 `docs/media/seam-matrix` 的 8 帧上，
  *   直角组（计算 `border-radius: 0px`）缺口 1–3 列，圆角组（16px）缺口 11–12 列。
  *   定成 2 会把深色直角帧的描边抗锯齿（3 列）误报成圆角 —— 实测踩过。

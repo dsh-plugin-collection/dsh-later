@@ -5,10 +5,14 @@
     "sched": 1,
     "theme": "dark",
     "tag": "B2-r1-s1-dark",
+    "dpr": 1,
     "seamsInCrop": [
       24,
       21
     ],
+    "panelTopInCrop": 75,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": "docs/media/seam-matrix/B2-r1-s1-dark-seam.png",
     "tube": "docs/media/seam-matrix/B2-r1-s1-dark-tube.png",
     "geo": {
@@ -18,32 +22,32 @@
       },
       "dpr": 1,
       "schemeRect": {
-        "top": 940.640625,
-        "bottom": 1285.171875,
+        "top": -0.359375,
+        "bottom": 344.171875,
         "left": 50,
         "right": 1230,
         "width": 1180,
         "height": 344.53125
       },
       "ssBodyRect": {
-        "top": 1132.421875,
-        "bottom": 1173.921875,
+        "top": 191.421875,
+        "bottom": 232.921875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 41.5
       },
       "hostPanelRect": {
-        "top": 1059.421875,
-        "bottom": 1135.421875,
+        "top": 118.421875,
+        "bottom": 194.421875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 76
       },
       "composerRect": {
-        "top": 1170.921875,
-        "bottom": 1224.921875,
+        "top": 229.921875,
+        "bottom": 283.921875,
         "left": 220,
         "right": 1060
       },
@@ -61,10 +65,14 @@
     "sched": 3,
     "theme": "dark",
     "tag": "B2-r3-s3-dark",
+    "dpr": 1,
     "seamsInCrop": [
       24,
       21
     ],
+    "panelTopInCrop": 147,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": "docs/media/seam-matrix/B2-r3-s3-dark-seam.png",
     "tube": "docs/media/seam-matrix/B2-r3-s3-dark-tube.png",
     "geo": {
@@ -74,32 +82,32 @@
       },
       "dpr": 1,
       "schemeRect": {
-        "top": 463.640625,
-        "bottom": 991.171875,
+        "top": -0.359375,
+        "bottom": 527.171875,
         "left": 50,
         "right": 1230,
         "width": 1180,
         "height": 527.53125
       },
       "ssBodyRect": {
-        "top": 727.421875,
-        "bottom": 879.921875,
+        "top": 263.421875,
+        "bottom": 415.921875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 152.5
       },
       "hostPanelRect": {
-        "top": 582.421875,
-        "bottom": 730.421875,
+        "top": 118.421875,
+        "bottom": 266.421875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 148
       },
       "composerRect": {
-        "top": 876.921875,
-        "bottom": 930.921875,
+        "top": 412.921875,
+        "bottom": 466.921875,
         "left": 220,
         "right": 1060
       },
@@ -117,10 +125,14 @@
     "sched": 1,
     "theme": "light",
     "tag": "B2-r1-s1-light",
+    "dpr": 1,
     "seamsInCrop": [
       24,
       21
     ],
+    "panelTopInCrop": 75,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": "docs/media/seam-matrix/B2-r1-s1-light-seam.png",
     "tube": "docs/media/seam-matrix/B2-r1-s1-light-tube.png",
     "geo": {
@@ -130,32 +142,32 @@
       },
       "dpr": 1,
       "schemeRect": {
-        "top": 940.640625,
-        "bottom": 1285.171875,
+        "top": -0.359375,
+        "bottom": 344.171875,
         "left": 50,
         "right": 1230,
         "width": 1180,
         "height": 344.53125
       },
       "ssBodyRect": {
-        "top": 1132.421875,
-        "bottom": 1173.921875,
+        "top": 191.421875,
+        "bottom": 232.921875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 41.5
       },
       "hostPanelRect": {
-        "top": 1059.421875,
-        "bottom": 1135.421875,
+        "top": 118.421875,
+        "bottom": 194.421875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 76
       },
       "composerRect": {
-        "top": 1170.921875,
-        "bottom": 1224.921875,
+        "top": 229.921875,
+        "bottom": 283.921875,
         "left": 220,
         "right": 1060
       },
@@ -173,10 +185,14 @@
     "sched": 3,
     "theme": "light",
     "tag": "B2-r3-s3-light",
+    "dpr": 1,
     "seamsInCrop": [
       24,
       21
     ],
+    "panelTopInCrop": 147,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": "docs/media/seam-matrix/B2-r3-s3-light-seam.png",
     "tube": "docs/media/seam-matrix/B2-r3-s3-light-tube.png",
     "geo": {
@@ -186,32 +202,32 @@
       },
       "dpr": 1,
       "schemeRect": {
-        "top": 463.640625,
-        "bottom": 991.171875,
+        "top": -0.359375,
+        "bottom": 527.171875,
         "left": 50,
         "right": 1230,
         "width": 1180,
         "height": 527.53125
       },
       "ssBodyRect": {
-        "top": 727.421875,
-        "bottom": 879.921875,
+        "top": 263.421875,
+        "bottom": 415.921875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 152.5
       },
       "hostPanelRect": {
-        "top": 582.421875,
-        "bottom": 730.421875,
+        "top": 118.421875,
+        "bottom": 266.421875,
         "left": 236,
         "right": 1044,
         "width": 808,
         "height": 148
       },
       "composerRect": {
-        "top": 876.921875,
-        "bottom": 930.921875,
+        "top": 412.921875,
+        "bottom": 466.921875,
         "left": 220,
         "right": 1060
       },
@@ -229,10 +245,14 @@
     "sched": 1,
     "theme": "dark",
     "tag": "0-r1-s1-dark",
+    "dpr": 1,
     "seamsInCrop": [
       24,
       21
     ],
+    "panelTopInCrop": 75,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": "docs/media/seam-matrix/0-r1-s1-dark-seam.png",
     "tube": "docs/media/seam-matrix/0-r1-s1-dark-tube.png",
     "geo": {
@@ -285,10 +305,14 @@
     "sched": 1,
     "theme": "light",
     "tag": "0-r1-s1-light",
+    "dpr": 1,
     "seamsInCrop": [
       24,
       21
     ],
+    "panelTopInCrop": 75,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": "docs/media/seam-matrix/0-r1-s1-light-seam.png",
     "tube": "docs/media/seam-matrix/0-r1-s1-light-tube.png",
     "geo": {
@@ -341,7 +365,11 @@
     "sched": 1,
     "theme": "dark",
     "tag": "solo-r0-s1-dark",
+    "dpr": 1,
     "seamsInCrop": null,
+    "panelTopInCrop": 2,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": null,
     "tube": "docs/media/seam-matrix/solo-r0-s1-dark-tube.png",
     "geo": {
@@ -351,16 +379,16 @@
       },
       "dpr": 1,
       "schemeRect": {
-        "top": 1669.3125,
-        "bottom": 1920.453125,
+        "top": 0.3125,
+        "bottom": 251.453125,
         "left": 50,
         "right": 1230,
         "width": 1180,
         "height": 251.140625
       },
       "ssBodyRect": {
-        "top": 1767.703125,
-        "bottom": 1809.203125,
+        "top": 98.703125,
+        "bottom": 140.203125,
         "left": 236,
         "right": 1044,
         "width": 808,
@@ -368,8 +396,8 @@
       },
       "hostPanelRect": null,
       "composerRect": {
-        "top": 1806.203125,
-        "bottom": 1860.203125,
+        "top": 137.203125,
+        "bottom": 191.203125,
         "left": 220,
         "right": 1060
       },
@@ -387,7 +415,11 @@
     "sched": 1,
     "theme": "light",
     "tag": "solo-r0-s1-light",
+    "dpr": 1,
     "seamsInCrop": null,
+    "panelTopInCrop": 2,
+    "strokeLeftInCrop": 2,
+    "strokeRightInCrop": 809,
     "crop": null,
     "tube": "docs/media/seam-matrix/solo-r0-s1-light-tube.png",
     "geo": {
@@ -397,16 +429,16 @@
       },
       "dpr": 1,
       "schemeRect": {
-        "top": 1669.3125,
-        "bottom": 1920.453125,
+        "top": 0.3125,
+        "bottom": 251.453125,
         "left": 50,
         "right": 1230,
         "width": 1180,
         "height": 251.140625
       },
       "ssBodyRect": {
-        "top": 1767.703125,
-        "bottom": 1809.203125,
+        "top": 98.703125,
+        "bottom": 140.203125,
         "left": 236,
         "right": 1044,
         "width": 808,
@@ -414,8 +446,468 @@
       },
       "hostPanelRect": null,
       "composerRect": {
-        "top": 1806.203125,
-        "bottom": 1860.203125,
+        "top": 137.203125,
+        "bottom": 191.203125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": null,
+      "seamToComposer": -3,
+      "queuePanelRadius": null,
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 1,
+    "sched": 1,
+    "theme": "dark",
+    "tag": "B2-r1-s1-dark-dpr2",
+    "dpr": 2,
+    "seamsInCrop": [
+      49,
+      43
+    ],
+    "panelTopInCrop": 150,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": "docs/media/seam-matrix/B2-r1-s1-dark-dpr2-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r1-s1-dark-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": -0.359375,
+        "bottom": 344.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 344.53125
+      },
+      "ssBodyRect": {
+        "top": 191.421875,
+        "bottom": 232.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 118.421875,
+        "bottom": 194.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 229.921875,
+        "bottom": 283.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 3,
+    "sched": 3,
+    "theme": "dark",
+    "tag": "B2-r3-s3-dark-dpr2",
+    "dpr": 2,
+    "seamsInCrop": [
+      49,
+      43
+    ],
+    "panelTopInCrop": 294,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": "docs/media/seam-matrix/B2-r3-s3-dark-dpr2-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r3-s3-dark-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": -0.359375,
+        "bottom": 527.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 527.53125
+      },
+      "ssBodyRect": {
+        "top": 263.421875,
+        "bottom": 415.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 152.5
+      },
+      "hostPanelRect": {
+        "top": 118.421875,
+        "bottom": 266.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 148
+      },
+      "composerRect": {
+        "top": 412.921875,
+        "bottom": 466.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 1,
+    "sched": 1,
+    "theme": "light",
+    "tag": "B2-r1-s1-light-dpr2",
+    "dpr": 2,
+    "seamsInCrop": [
+      49,
+      43
+    ],
+    "panelTopInCrop": 150,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": "docs/media/seam-matrix/B2-r1-s1-light-dpr2-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r1-s1-light-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": -0.359375,
+        "bottom": 344.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 344.53125
+      },
+      "ssBodyRect": {
+        "top": 191.421875,
+        "bottom": 232.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 118.421875,
+        "bottom": 194.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 229.921875,
+        "bottom": 283.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "B2",
+    "rows": 3,
+    "sched": 3,
+    "theme": "light",
+    "tag": "B2-r3-s3-light-dpr2",
+    "dpr": 2,
+    "seamsInCrop": [
+      49,
+      43
+    ],
+    "panelTopInCrop": 294,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": "docs/media/seam-matrix/B2-r3-s3-light-dpr2-seam.png",
+    "tube": "docs/media/seam-matrix/B2-r3-s3-light-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": -0.359375,
+        "bottom": 527.171875,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 527.53125
+      },
+      "ssBodyRect": {
+        "top": 263.421875,
+        "bottom": 415.921875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 152.5
+      },
+      "hostPanelRect": {
+        "top": 118.421875,
+        "bottom": 266.421875,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 148
+      },
+      "composerRect": {
+        "top": 412.921875,
+        "bottom": 466.921875,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "0",
+    "rows": 1,
+    "sched": 1,
+    "theme": "dark",
+    "tag": "0-r1-s1-dark-dpr2",
+    "dpr": 2,
+    "seamsInCrop": [
+      48,
+      42
+    ],
+    "panelTopInCrop": 150,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": "docs/media/seam-matrix/0-r1-s1-dark-dpr2-seam.png",
+    "tube": "docs/media/seam-matrix/0-r1-s1-dark-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": -0.3125,
+        "bottom": 323.828125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 324.140625
+      },
+      "ssBodyRect": {
+        "top": 171.078125,
+        "bottom": 212.578125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 98.078125,
+        "bottom": 174.078125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 209.578125,
+        "bottom": 263.578125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "0",
+    "rows": 1,
+    "sched": 1,
+    "theme": "light",
+    "tag": "0-r1-s1-light-dpr2",
+    "dpr": 2,
+    "seamsInCrop": [
+      48,
+      42
+    ],
+    "panelTopInCrop": 150,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": "docs/media/seam-matrix/0-r1-s1-light-dpr2-seam.png",
+    "tube": "docs/media/seam-matrix/0-r1-s1-light-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": -0.3125,
+        "bottom": 323.828125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 324.140625
+      },
+      "ssBodyRect": {
+        "top": 171.078125,
+        "bottom": 212.578125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": {
+        "top": 98.078125,
+        "bottom": 174.078125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 76
+      },
+      "composerRect": {
+        "top": 209.578125,
+        "bottom": 263.578125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": 3,
+      "seamToComposer": -3,
+      "queuePanelRadius": "16px 16px 0px 0px",
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "solo",
+    "rows": 0,
+    "sched": 1,
+    "theme": "dark",
+    "tag": "solo-r0-s1-dark-dpr2",
+    "dpr": 2,
+    "seamsInCrop": null,
+    "panelTopInCrop": 4,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": null,
+    "tube": "docs/media/seam-matrix/solo-r0-s1-dark-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": 0.3125,
+        "bottom": 251.453125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 251.140625
+      },
+      "ssBodyRect": {
+        "top": 98.703125,
+        "bottom": 140.203125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": null,
+      "composerRect": {
+        "top": 137.203125,
+        "bottom": 191.203125,
+        "left": 220,
+        "right": 1060
+      },
+      "overlap": null,
+      "seamToComposer": -3,
+      "queuePanelRadius": null,
+      "ssPanelRadius": "16px 16px 0px 0px",
+      "ssMarginBottom": "-9px",
+      "stackGap": "6px"
+    }
+  },
+  {
+    "scheme": "solo",
+    "rows": 0,
+    "sched": 1,
+    "theme": "light",
+    "tag": "solo-r0-s1-light-dpr2",
+    "dpr": 2,
+    "seamsInCrop": null,
+    "panelTopInCrop": 4,
+    "strokeLeftInCrop": 4,
+    "strokeRightInCrop": 1619,
+    "crop": null,
+    "tube": "docs/media/seam-matrix/solo-r0-s1-light-dpr2-tube.png",
+    "geo": {
+      "viewport": {
+        "w": 1280,
+        "h": 2000
+      },
+      "dpr": 2,
+      "schemeRect": {
+        "top": 0.3125,
+        "bottom": 251.453125,
+        "left": 50,
+        "right": 1230,
+        "width": 1180,
+        "height": 251.140625
+      },
+      "ssBodyRect": {
+        "top": 98.703125,
+        "bottom": 140.203125,
+        "left": 236,
+        "right": 1044,
+        "width": 808,
+        "height": 41.5
+      },
+      "hostPanelRect": null,
+      "composerRect": {
+        "top": 137.203125,
+        "bottom": 191.203125,
         "left": 220,
         "right": 1060
       },
