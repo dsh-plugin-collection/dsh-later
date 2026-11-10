@@ -289,3 +289,48 @@ exit 0
 **口径变化一句话**：矩阵口径自本轮起包含 `package.json`，此前各代结果**不受影响**
 （缺陷只在缺少它时导致宿主 skip；之前没有一代因此被误判为绿 —— 这是本轮新发现的缺陷，
 不是旧结论要翻案）。
+
+## 11. 「冷会话」这一维：UI 面只有过一次**单代次、不可复跑**的真 GUI 证据，跨代次未判定（2026-11-10，基线 `main@3e6eef1`，插件 1.12.1）
+
+**结论先说**：#11b（宿主级到期扫描器，`9c586e5` → PR #133 `f6ac902`，2026-11-05，随 1.12.0 发布）之后，
+「服务端重启、那条会话从没被打开过」这一档在 UI 面**有过一次**真 GUI 运行，但只有**一代、一次、且不可复跑**；
+本文件的矩阵命令 `npm run verify:ui` **不覆盖**这一维。所以：**跨代次的 UI 结论 = 未判定**，
+空白不是绿，§5 的历次结论只回答「画没画出来」，读表的人不要把它当成投递语义的验证记录。
+
+**那一次实测在哪**：`docs/media/verify-1.12.0/issue-11b/`（`result.json` + 两张 real-gui jpg）。
+流程按该目录 README 的表格：建 `/later +2m`（dock 1 行）→ 停进程、重启、**全程不连浏览器** →
+过到期点再开 GUI（该会话从未被打开）。判据是事件形状：`result.json` 的 `verdict` 为
+`coldSpliced: 1`、`coldDispatched: 1`、`pass: true`；step C 另有 `dockRows: 0` 与「页面出现提醒文本」= `true`。
+**但它量到的 UI 面只有侧栏那一层**：`real-gui-2-after-restart-cold-delivered-PASS.jpg` 里是侧栏出现了
+「冷会话投递验证COLDUI11B」这条会话（时间戳「刚刚」），主区停在另一个会话上——**没有**入镜「已投递的行在 dock
+里长什么样」「badge 由红回落」这类形态判据。日志在 `/tmp/ui11b/`，未入库，这条流程在仓里**没有可复跑入口**。
+
+**本文件的矩阵为什么不算覆盖这一维**——三条可直接复跑的检索：
+
+| 要问的 | 量到的 | 所以 |
+|---|---|---|
+| 三面等到点了吗 | `scripts/ui-matrix/capture.mjs` 头部的三面清单（`1-composer` / `2-dock` / `3-panel`）用的是 `/later +30m`，同文件 4 处 `page.screenshot`（composer / dock / panel / badge）都在**建完提醒当场**拍，全程没有等到点 | 没有任何一帧涉及到期时刻 |
+| 采集件看投递吗 | `grep -rnE 'dispatch\|到期\|spliced' scripts/ui-matrix/` = **1 处命中**，且是 `run.mjs` 的分工注释（明说事件形状归 `verify:kernels`）；代码路径 **0 处** | 矩阵不判投递 |
+| 中途重启过实例吗 | `grep -rnE 'restart\|SIGTERM\|resumeSessionId' scripts/ui-matrix/` = **1 处命中**：`instance.mjs` 的 `stopInstance()`，只在**测完收尾**杀进程组 | 「重启后没人打开」这个状态在矩阵里根本不存在 |
+
+另两条边界事实：本文件此前**零次**提到冷会话（`git show 3e6eef1:docs/notes/ui-matrix.md \| grep -c '冷会话'` = **0**）；
+§5 最后一行是 2026-11-02 的回归确认、§10 是 2026-10-30 的副本缺陷修复，**两轮都早于 #11b**。
+`docs/media/ui-matrix*` 三个证据目录里**没有**任何冷会话帧（`ls \| grep -i 'cold\|冷'` 无命中）。
+
+**跨代次这一维的证据目前只在非 GUI 面**：`scripts/verify-across-kernels.mjs` 的判据 3（冷会话到点投递，
+进程内 `ctx.agents`，不起浏览器、不渲染 DOM）逐代次单列 `冷会话 spliced=N dispatch=Y`，
+以及 `docs/verification.md`「服务端重启后，没人打开过的会话不会按时投递」一节。
+
+**同一维度的口径分歧，登记但不在此判定**：`verify-across-kernels.mjs` 判据 3 的形状是
+`agents.create(...)` → 命令建提醒 → `coldHandle?.dispose?.()` → 等到点，量的是**打开过又被关掉**
+的会话；README「两档承诺」的第二档写的是**从没被打开过**的会话。所以「`冷会话 spliced=1`」现在
+不能被引用成「README 那一档已实测」——真正对上那一档的只有上面 `verify-1.12.0/issue-11b/` 那一次。
+改这一维归口在跨内核脚本那条流（动的是 `scripts/verify-across-kernels.mjs` 的 `function` 面与本文件之外的
+`docs/verification.md`），本文件只记录 UI 面覆盖到哪、差多少。
+
+**要让这一维在本文件变绿需要补什么**（本轮未做，未排期，归 Lead）：把 `verify-1.12.0/issue-11b/` 那次手工流程
+落成 `scripts/ui-matrix/` 里的**第四面**——在隔离实例用真实命令通道建一条 `+2m` 的提醒 → 杀进程并用同一
+`DSH_HOME` 重启 → 全程不连浏览器，直到过期之后再打开那条会话 → 断言 dock 出现这条**已投递**的行、
+侧栏 badge 由红回落、会话日志里有对应会话自己的 `schedule/change dispatch`，并逐代次跑。
+不该塞进现有三张截图里冒充它们覆盖过。
+
