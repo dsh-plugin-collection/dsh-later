@@ -609,10 +609,25 @@ if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true)
 
 - **30s 未收敛「故意保留 + warn」那一支没驱动**：单测不真等 30s（`COLD_WAKE_RELEASE_WAIT_MS` 是
   代码常量）。可达的那一半（busy ⇒ 不拆、转 idle ⇒ 补拆）有用例；上限本身属推断。
-- **跨内核四面本轮未复跑**：本流改的是 `expiry-sweeper` / `runtime` / `ownership-store` / `index`
-  的投递与叫醒收尾，`npm run verify:kernels` 需要逐代下载内核并起真进程，本轮只跑了
-  `npm run build` / `npm run typecheck` / `npm test` 三门。#139 验收里那句「三代不回归」要由
-  Lead 在合并后统一复跑，**这里不记成已验**。
+- **跨内核四面已在合并后的集成树上复跑（2026-11-10，`integration/closeout`）**：
+  `node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install` →
+  **11/11 绿、0 红、0 未判定，退出码 0**（明细 `/tmp/closeout-verify/across-kernels-2026-11-10T06-27-52-177Z.json`，
+  gitignore 目录，复跑即得）。逐代都报 `同源=same`、`投递 spliced=1 dispatch=Y`、
+  **`已关闭会话 spliced=1 dispatch=Y`**、`at 形状 5/5`、type 两 tsconfig 0 错、gate 本代与最新都 pass
+  （`0.1.2-rc.1` / `0.1.5-rc.3` 的 gate 本代仍是**结构性未判定** —— 那两代不导出
+  `evaluatePluginCompatibility`，不许记成绿）。
+  ⚠️ 这一维现在叫「已关闭会话」而不是「从没被打开过」：脚本做的是 create→`dispose()`→等，
+  每次跑还是**全新 sessionId**，所以它覆盖不到「同会话第二条」与「重启后带历史已投条目」，
+  那两条由 `tests/due-index-consumption.test.mjs` 在单测层覆盖。**矩阵绿 ≠ #139 被真内核验过**，
+  两边是不同的判据面。
+- **UI 面（本轮补跑）**：`PLAYWRIGHT_MODULE=… npm run verify:ui -- --versions 0.2.2-rc.1,0.2.1-rc.4,0.1.2-rc.1`
+  → 三代都是 `按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0`，退出码 0。
+  取最新 / 中间 / 最老三档是为了确认「镜像写进 sidecar」与「冷唤醒句柄释放」没有动到 dock 与
+  投影的读面；**其余 8 个代次的 UI 面本轮没跑**，仍是各自那轮的历史结论。
+- **越界自检**：本轮 nonce（`XK-FIRE` / `XK-COLD`）在真实 `~/.dsh/sessions` 下 **0 命中**；
+  临时 `DSH_HOME` 由脚本自己建。`find ~/.dsh -newermt …` 会列出一堆文件，但那是本机别的服务
+  （gitea-dispatch / wakatime / dsh-web）在写 —— **可归因的检查是 nonce，不是时间戳**。
+
 - **真宿主上「写者持有」那条后果没有直接实测**：D1 的依据是内核 `AgentHandle` 与
   `sessionController.resolveAgent` 的契约文本 + 本仓 `index.ts` 里那条 `{ error }` 分支注释，
   不是端到端跑出来的 GUI 现象。
