@@ -31,7 +31,6 @@ declare const zh: {
     readonly cmdResumeDesc: "恢复一条已暂停的 after 提醒（仅 GUI 内部通道）。";
     readonly cmdSteerDesc: "插话发送：把指定 id 的提醒立即推给 agent（仅 one-shot；GUI 内部通道）。";
     readonly errEmptyPrompt: "提醒内容不能为空。";
-    readonly errPromptTooLong: "提醒内容不能超过 {maxChars} 字符。";
     readonly errInvalidSelector: "必须提供 after_seconds、at 或 every_seconds 之一。";
     readonly errMultipleSelectors: "after_seconds、at、every_seconds 只能提供一个。";
     readonly errNotFuture: "时间必须是未来。";

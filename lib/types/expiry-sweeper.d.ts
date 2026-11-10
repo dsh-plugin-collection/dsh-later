@@ -39,11 +39,22 @@
  * 冷 resume 会真建一个 agent 并跑出一轮 turn（无 provider 时是 `turn/end` 带
  * `agent ... has no provider`，见入口注释）。所以这里必须**有节制**：
  *  - 每个会话同一时刻只允许一次唤醒（in-flight 去重）；
- *  - 唤醒后若这条提醒**仍在** sidecar 里、且仍然到期（= 这次唤醒没投出去），按
+ *  - 唤醒后若这条提醒**仍然**在到期视图里（= 这次唤醒没投出去），按
  *    退避（{@link backoffForFailures}：1s→2s→…→封顶 10 分钟）再试，**不是**每轮都试；
- *  - 同一个会话连续失败到 {@link MAX_WAKE_FAILURES} 次就**停下并告警一次**，之后只有
- *    「用户动了这条提醒」（sidecar 变更）才重新武装——不做重试风暴；
- *  - 有人接通了（`wake` 返回 true 且到期点消失 / 被推远）就清零退避。
+ *  - 同一个会话连续失败到 {@link MAX_WAKE_FAILURES} 次就**停下并告警一次**——不做重试风暴；
+ *  - 有人接通了（到期视图被消化 / 条目被推远 / 条目消失）就清零退避。
+ *
+ * ## 「到期视图」是什么（issue #139 修的就是这一处）
+ *
+ * 「这次唤醒有没有把提醒投出去」不能问 `wake()` 的返回值（投递是异步的），只能问
+ * **sidecar 里的那条目还在不在到期状态**。而 sidecar 是一份断点索引：它记着创建时的
+ * `scheduledAt`，**过去却没人把它改成"已经投递过"**——一次性提醒投完了、日志里那条记录
+ * 早就出列，索引里却仍是同一个过去的时刻。于是本模块的第 2、3 条节制全部反向生效：
+ * 一次**成功**的唤醒被永久判成"没投出去"，5 次之后 `gaveUp`，该会话此后任何新提醒都不
+ * 再被叫醒。实测链条与三种修法的取舍见 `docs/design-decisions.md` 的 D2；本模块只接受
+ * 一个结论：**到期视图必须是投递真图的投影**，由 runtime 在 dispatch 的同一同步块里
+ * 把 fold 的端态镜像进索引（`ownership-store.mirrorDueIndex`），本模块继续只读索引、
+ * 按 `due.readDueIndex` 的三态判定（`consumed` 优先于时刻，绝不回算复活）。
  *
  * ## 生命周期
  *
@@ -114,6 +125,16 @@ export interface ExpirySweeper {
     sweepNow(): number;
     /** 重新按 sidecar 现状排一次精确 timer（用户增删改提醒后调用）。 */
     reschedule(): void;
+    /**
+     * 重新武装一个会话：清掉它的退避/`gaveUp` 状态并重排精确 timer。
+     *
+     * 与 {@link reschedule} 的区别只有一件事，但那是承重的：`reschedule` 是**纯重排**，
+     * 它不碰退避状态，所以一个已经 `gaveUp` 的会话在用户亲手改了提醒之后仍然不被叫醒
+     * （旧实现的模块头写着「用户动了这条提醒才重新武装」，代码里其实没有人做这件事）。
+     * 用户改动是唯一合法的解除触发，所以这个动作必须是显式的、由接线侧调用的。
+     * @param sessionId - 用户刚动过提醒的会话。
+     */
+    rearm(sessionId: string): void;
     /** 是否已经停摆（dispose 之后）。 */
     readonly stopped: boolean;
     /** 清掉两级定时器、等在途扫描收敛。 */
