@@ -4,6 +4,50 @@
 
 ## 未发布
 
+- **chore** 产物体积（issue #145 A 面）：三个各一行的构建口径改动。连同下面 A-5 的布局重排，
+  整包 unpacked 从 1,189,762B 降到 567,218B（tarball 423,479B → 158,242B），这一条自身贡献的部分
+  见 `docs/verification.md` 的分账表。
+  1. `tsconfig.json` 开 `removeComments`：host 侧是逐文件 tsc emit、不 bundle 不 minify，维护注释
+     原本原样进 `lib/*.js` 与 `lib/types/*.d.ts`。代价说清楚——**线上排障读 `src/`**，profile 里那份
+     `lib/index.js` 不再带注释（决策记录见 `docs/design-decisions.md` §12）。
+  2. `build.mjs` 的 client esbuild 加 `charset: 'utf8'`：界面文案里的汉字不再写成 `\uXXXX`。
+     前提是送出侧声明 UTF-8，已取证：`dsh-client-modules` 的 `compose()` / `chunkResponse()` 与
+     `dsh-host-frontend-static` 的 MIME 表都是 `text/javascript; charset=utf-8`。产物里剩下的 3 处
+     转义全来自同一个正则字面量（控制字符），属 esbuild 文档写明的边界。
+  3. `src/client/styles.ts` 的分区注释从 `COMPONENTS` 的字符串元素改成数组元素之间的 TS 注释：
+     它们原先不是 JS 注释而是 CSS 文本，minify 与 `legalComments` 都动不了。注入的 CSS 里注释块
+     60 → 1（15,014B → 200B），剩下那 1 条是 `corner-shape` 那条规则内的就地说明，按约定保留。
+     等价性判据是「去掉注释、折叠空白后逐字节相等」，不是肉眼比对。
+  基线取自合并点 `0be9b8d` 的 `lib/`，逐项数字与复跑方法见 `docs/verification.md`。
+
+- **chore** `lib/` 里不再有宿主从不加载的模块（issue #145 A-5）：9 个只被客户端使用的模块
+  （`attachment-failure` / `bar-geometry` / `bubble-marker` / `command-outcome` / `media-url` /
+  `presence` / `schedule-facet` / `schedule-summary` / `schedule-summary-store`）从 `src/` 根目录
+  移进 `src/client/`。它们原先被 `tsconfig.json` 的 include 一并收进 host 编译，产物白占发布体积
+  却一次都不被加载。host 产物 js 从 32 个降到 22 个（净删 41,854B js + 38,546B d.ts）。
+  新增 `npm run check:lib-reach` 门禁：`lib/` 里每个 host 产物都必须能从 `lib/index.js` 静态走到，
+  以后再有 client-only 模块漏进 host 编译会直接判红。测试改为从源码读这 9 个模块
+  （`scripts/transpile-module.mjs`），不再依赖它们进 `lib/`。
+
+- **chore** 发布面收窄：`CHANGELOG.md` 不再随 npm 包发布（issue #145）。它是历史记录，从
+  仓库与 GitHub 上照常可读。同一版本源码上实测 `npm pack --dry-run`：文件数 72 → 71，
+  tarball 423,479B → 164,563B，unpacked 1,189,762B → 593,103B。
+  `README.en.md`（35,022B）**保留在包内**，没有随这次裁剪移出：npm 会把项目根目录下所有
+  `README*` 无条件收进 tarball，`files` 白名单与 `.npmignore` 都拦不住
+  （npm 11.19.1 实测：`files` 删掉这一项、`.npmignore` 点名排除，它照样在包里，一个字节没省）。
+- **chore** 新增 `npm run check:release`：真跑一次 `npm pack --dry-run --json`，断言包里
+  **实际**带着 `SKILL.md`、`SKILL.en.md`、`lib/`、`icon.svg`、`cordis.patch.yml` 与
+  `README.en.md`，且没有 `CHANGELOG.md`；另有 tarball 与解包体积的宽松上限。已接进 CI，
+  在构建与测试之后。`SKILL.md` 缺席时插件照样能加载，只是模型侧的 skill 目录少一行，
+  装上去才看得见，所以把这条从人脑里挪进 CI。
+- **chore** 8 个 `@deepseek-ai/dsh-*` 的 peer 范围串按版本段合并：11 条（`dsh-commands` 12 条）
+  区间写成 6 条（7 条），例如 `dsh-session` 的
+  `>=0.1.7-rc.1 <0.1.8-0 || >=0.1.7-rc.2 <0.1.8-0` 合为 `>=0.1.7-rc.1 <0.1.8-0`。
+  合并只在**同一版本段内**进行，段间空洞原样保留，所以可安装面逐点不变：新旧两串对每个
+  版本段边界、段间空洞与段上界的判定结果完全一致（`tests/peer-range-fold.test.mjs` 逐条核对）。
+  不合并的只有跨段的写法（比如把 0.1.2~0.1.7 写成一段），那会把 `0.1.3`、`0.1.4`、`0.1.6`
+  这些从没验证过的预发布放进来，判据逐条判红。`engines.dsh` 与兼容层不变。
+
 - **fix** 悬停卡的状态区从「并列」改成「合并」：有定时待发提醒的会话，卡片里不再单独显示
   宿主的「空闲」（issue #153）。「空闲」描述的是宿主 agent 没在跑 turn，对有提醒待发的会话
   它等于「没有别的事」—— 而恰恰有事。现在宿主空闲时把那一行换成定时读数（`有 1 条定时提醒，
@@ -62,6 +106,17 @@
     `spliced`/`dispatch`；且那一节没记跑的是哪个提交）/ **跨代次未判定**。
     同族的还有 `verify:kernels` 的冷那一维 —— 它做的是 create→dispose→等，量的是「打开过又被关掉」，
     不等于「从没被打开过」，已改名并写明。
+- **fix** `zod` 是运行时依赖，却只写在 `devDependencies`（issue #145 C 组）。`src/projection.ts`
+  的 `import { z } from 'zod'` 是值 import，emit 后 `lib/projection.js` 保留同一条 ESM import，
+  校验的是本地 sidecar 的不可信输入（`wireAttachmentSchema` / `wireItemSchema`，都带 `.strict()`）。
+  它一直能跑，只因为宿主自己的 `dsh-session-projection` 依赖 zod，pnpm 把它 hoist 到了 profile 的
+  `node_modules/zod`。宿主哪天不带 zod，`lib/index.js` 就在静态 import 期
+  `ERR_MODULE_NOT_FOUND`——整个插件一条 fiber 都不激活，`/later` 与三个工具一起消失。
+  现在写进 `peerDependencies`（不写 `dependencies`：宿主的 `ProjectionDefinition.stateSchema`
+  类型就是 `ZodType`，两份 zod 实例的 schema 不保证互通）。
+  `tests/runtime-dependency-declaration.test.mjs` 锁三层：`lib/` 里每条静态裸包 import 都必须在
+  `dependencies`/`peerDependencies` 里；在**摘掉 zod** 的隔离 `node_modules` 上真 import 一次
+  `lib/index.js`（改前实测红、补回后转绿）；以及 zod 在 `src/projection.ts` 里仍是值 import。
 
 ## 1.12.1 — 2026-11-06
 
