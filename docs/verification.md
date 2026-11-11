@@ -149,6 +149,22 @@
   第二层是上面那条端到端反证；第三层钉住 zod 仍是值 import，免得判据前提悄悄消失。
   变异验证：把 zod 从 `peerDependencies` 拿回 `devDependencies` → 前两层各红一条。
 
+  **这条判据自己踩过一次版本坑，记下来**：初版让「补回 zod 后再 import 一次」在**同一进程**里做，
+  用 query string 区分模块身份。它在 node **24**（本机）上绿、在 CI 的 node **22** 上红。实测隔离
+  （24.22.0 与 22.23.4 各跑一份探针）：先 import 一个依赖不存在的 `a.mjs`（`ERR_MODULE_NOT_FOUND`），
+  装上依赖后再 import `a.mjs?q=2`——**node 24 仍报 `ERR_MODULE_NOT_FOUND`，node 22 返回 OK**。
+  即 node 24 会把一次失败的解析按文件路径记住，此后换任何 query 都不再重新解析。
+  所以初版在两个版本上验的都不是那句话本身。现改为 `spawnSync` 起**新进程**重试（新进程没有
+  解析缓存），两个版本都是 4/4。
+
+  **node 22 上的复核（2026-11-11，`npx -p node@22`，22.23.4）**：全量 `scripts/run-tests.mjs`
+  **883 pass / 0 fail**，与 node 24 一致；两条门禁在 node 22 下的**变异路径**也验过——
+  塞 `lib/zzz-orphan.js` → `check:lib-reach` 退出码 1 并点名该文件；删 `SKILL.md` →
+  `check:release` 退出码 1 并报「包内缺 SKILL.md」。都不是静默放行。
+  ⚠️ 前提说明：本仓 `.gitea/workflows/ci.yml` 迄今**一次都没被 Gitea Actions 执行过**
+  （查过最近四个合并提交，commit status 全是 `pending` / 0 条），所以 CI 里的这两步目前
+  只是「写进去了」，门禁的实际执行要靠本地复跑或 Actions 打通之后。
+
   **未做（明确留给发布面决策）**：审计给的另一个选项是迁到已在 peers 的
   `@deepseek-ai/schemastery`，那样能少一个 peer。迁移要先验 `.strict()` 拒读与 optional 报错文案
   两处语义，本轮没验就不迁——「没验就迁」会把一个确定性修复换成一个未验的行为变更。
