@@ -39,11 +39,34 @@
  * （实测深度 4）携带 `memoizedProps.node.id`，与行元素用的是**同一套反查
  * 技术**，因此仍能把卡片关联回 sessionId。
  *
- * 增补方式是**纯追加**：仅在卡片状态区末尾追加一行与宿主 `.hoverStatus`
- * 同构的节点，不改写、不替换、不重排宿主已有状态行，故 pendingInteraction /
- * running 等既有状态的优先级天然不变；无活动定时任务的会话不做任何改动。
- * 卡片每次悬浮由 React 重建子树（注入节点会被清掉），重插同样交给既有的
- * MutationObserver 重扫循环。
+ * 增补方式**原本是纯追加**（issue #4 的决策：只在状态区末尾追加一行，绝不改写宿主的
+ * 状态行，好让 pendingInteraction / running 的优先级天然不变），**已被 issue #153 推翻**。
+ * 两条理由，一条是用户的，一条是实测的：
+ *
+ *  1. **纯追加读起来是错的**。有定时待发任务的会话，卡片里并排出现「● 空闲」和
+ *     「🕒 有 1 条定时提醒，下次 23:15」——用户先看到「空闲」，而那个「空闲」在这个语境里
+ *     根本不成立：到点会自动发出去，会话是被安排了事的。反馈原话是「状态区应合并而不是
+ *     并列」。同类插件 `dsh-group-status` 在同一个行/卡上聚合状态时空闲从不单独成句，
+ *     也是这个读感。（所以这里不是「加一行」的问题，是「同一句话说了两种状态」的问题。）
+ *  2. **纯追加这条其实一直没生效**。宿主卡片比当初记的形状多包了一层：
+ *     `body > span._portal_* > div._card_* > div.hoverContent`，而旧代码只看
+ *     `card.firstElementChild` 的直接子元素，于是状态区永远定位不到、插件行在所有会话
+ *     上都没注入过（真 DOM 取证见 {@link findHoverCard} 的注释）。#153 报的是"看不到合并"，
+ *     实际先是"什么都看不到"。
+ *
+ * 现在的规则是**按宿主档位分叉的合并**，边界只有一句：**只动 idle 这一档**。
+ *  - 宿主是「空闲」⇒ 把那一行的**文案**替换成插件的定时文案（点节点、行结构、类名一概
+ *    不碰，也**不做「空闲 · 定时中」这种拼接**——拼接等于把错的那句留着）；
+ *  - 宿主是**任何非空闲档**（进行中 / 等待审批 / 计划待审 / 待回答 / 已完成）⇒ 宿主行
+ *    **一字不改**，插件行追加在后：agent 正在做的事比定时安排更高优先级，不能被替换；
+ *  - **没有**活动定时任务 ⇒ 一个节点都不碰：替换过的还原原文案、追加过的删掉，卡片字节级
+ *    回到宿主自己渲染的样子（这条是回归面，也是卸载路径的收尾）。
+ * 改动全程可逆：接管只写 `data-ss-*` 标记并把原文案存在节点上，重扫（MutationObserver）
+ * 与卸载都走 {@link restoreAdoptedRow}。卡片每次悬浮由 React 重建子树，标记跟着节点一起消失。
+ *
+ * 判「是不是空闲」**优先用结构化判据**：状态点上的 `data-state="idle"`（实测宿主只在这里
+ * 表达档位，`ongoing` 甚至是另一个元素 `svg`）。文案白名单只在属性缺席时兜底。
+ * 详见 `HOST_DOM` 块与 `docs/design-decisions.md` §11。
  * @module dsh-later/client/session-presence
  */
 import {
@@ -80,6 +103,11 @@ export interface SessionPresenceOptions {
 const BADGE_CLASS = 'ss-presence';
 /** 悬浮卡片增补行类名（本插件命名空间）。 */
 const HOVER_ROW_CLASS = 'ss-hover-status';
+/**
+ * 被本插件「接管文案」的宿主空闲行上的标记属性（见 {@link adoptIdleRow}）。
+ * 卸载时要按它把宿主原文案还原回来——不能依赖卡片还能被定位，卸载时卡片可能已经换了形状。
+ */
+const ADOPTED_ROW_SELECTOR = '[data-ss-adopted]';
 /** fiber 探测的最大上溯层数（实测深度 3；留余量到 8）。 */
 const FIBER_MAX_DEPTH = 8;
 
@@ -114,10 +142,52 @@ const HOST_DOM = Object.freeze({
   workspaceRowAttr: 'aria-expanded',
   /** 行首 slot 内的「进行中」orb 图标：存在即 badge 插到 slot 之后，否则塞进 slot。 */
   slotIcon: 'svg',
-  /** 悬浮卡片状态行的前导状态点：该标签名 + 该属性值（用于识别宿主状态行）。 */
+  /**
+   * 状态点的前导属性：`aria-hidden="true"` **且带 `data-state`** 才是宿主的状态点。
+   *
+   * ⚠️ 这里原来还要求 `dot.tagName === statusDotTag`（`'SPAN'`），**已被真 DOM 证伪**
+   * （issue #153，2026-11-11，0.2.2-rc.1 真 GUI）：宿主 `StateDot` 是**按档位换元素**的——
+   * 空闲出 `SPAN[data-state="idle"]`，进行中的那两条出的是 **`svg[data-state="ongoing"]`**
+   * （spinner）。按标签筛的后果是：进行中的卡片里一条状态行都"认不出"，插件行连**追加**
+   * 都不会发生。所以读侧只看属性，不看标签名；`statusDotTag` 这个键保留是给产出侧
+   * （我们自己的点）与 `tests/presence-drift.test.mjs` 的断言用的，**不再参与识别**。
+   */
   statusDotTag: 'SPAN',
   statusDotAttr: 'aria-hidden',
   statusDotValue: 'true',
+  /**
+   * 状态点携带档位的属性名（结构化判据，见 {@link hostRowState}）。
+   * 实测取值：`idle` / `ongoing` / `warning` / `done`（宿主 `sessionStatuses` 的闭合链）。
+   */
+  statusDotStateAttr: 'data-state',
+  /** 「空闲」那一档的结构化值：判空闲**只认它**，文案白名单是属性缺席时的退路。 */
+  idleStateValue: 'idle',
+  /**
+   * 从 body 直系浮层往下最多钻几层去找状态行容器。
+   *
+   * 实测层级（issue #153）：浮层 → 卡片壳 → `hoverContent`（状态行的父容器）= 2 层。
+   * 留到 5 是给宿主以后多包一层留余量，同时保证「扫不到卡片就安静跳过」——
+   * 深度上限是**防御**，不是把猜测范围扩大。
+   */
+  statusHostMaxDepth: 5,
+  /**
+   * 宿主 `status.idle` 的文案白名单：**只在 `data-state` 缺席时兜底**（见 {@link isIdleRow}）。
+   *
+   * 首选判据是结构化的——真 DOM 实测（2026-11-11 真 GUI）空闲行的状态点是
+   * `SPAN[data-state="idle"]`，档位写在属性上，与界面语言无关，所以中文宿主、英文宿主
+   * 走同一条判据。这份白名单存在的唯一理由是：宿主早先的代次（以及 StateDot 若哪天去掉
+   * `data-state`）拿不到档位，那时只能退回文案。
+   *
+   * ⚠️ **这条退路有多脆弱就怎么写清楚**：八种语言的值是从宿主 bundle 的 locale 表里逐条
+   * 抄下来的（`"status.idle"` 的全部取值），宿主改字、加语言、或把「空闲」换成语境不同的
+   * 近义词，白名单就认不出来——后果是**退回追加**（宿主原行 + 插件行并列，即 #153 修复前
+   * 的形状），属安全侧：宁可少合并，也不会把「进行中」误当空闲替换掉。
+   * 反过来它也有误判面：若宿主某档位的**文案**恰好等于这里某个值而档位不是 idle，我们会
+   * 替换掉不该替换的行——所以白名单只在 `data-state` 完全拿不到时启用，有属性就不看文案。
+   */
+  idleLabels: [
+    '空闲', 'Idle', '待機中', 'inactivo', 'Inactif', 'Leerlauf', 'Простой', 'Inativo',
+  ] as readonly string[],
   /** fiber 反查：React 内部 key 的前缀与会话 id 的前缀。 */
   fiberKeyPrefix: '__reactFiber$',
   sessionIdPrefix: 'session-',
@@ -445,19 +515,24 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
   function findHoverCard(): { card: HTMLElement; statusHost: HTMLElement; sessionId: string } | null {
     for (const card of Array.from(document.body.children)) {
       if (!(card instanceof HTMLElement)) continue;
-      const statusHost = card.firstElementChild;
-      if (!(statusHost instanceof HTMLElement)) continue;
-      // 状态行：直接子块里含 aria-hidden 的前导 span（状态点）+ 文案 span。
-      const hasStatusRow = Array.from(statusHost.children).some((child) => {
-        const dot = child.firstElementChild;
-        return (
-          child.children.length >= 2 &&
-          dot !== null &&
-          dot.tagName === HOST_DOM.statusDotTag &&
-          dot.getAttribute(HOST_DOM.statusDotAttr) === HOST_DOM.statusDotValue
-        );
-      });
-      if (!hasStatusRow) continue;
+      /**
+       * ⚠️ 这里原来只取 `card.firstElementChild`，**实测证伪**（issue #153，2026-11-11，
+       * 0.2.2-rc.1 + 真 GUI）：
+       *
+       *     BODY > SPAN._portal_*          ← body 直系浮层（不是卡片本身）
+       *              > DIV._card_*         ← 卡片壳（firstElementChild，**没有**状态行）
+       *                > DIV.hoverContent  ← 状态行真正的父容器（隔 2 层）
+       *
+       * 真 DOM 里状态行 `<div class="*_hoverStatus"><span aria-hidden="true"/>空闲</div>`
+       * 是有的（状态点也在），但它在 `hoverContent` 里、比原来的假设深两层 —— 旧条件永远
+       * 不成立，于是插件那一行在**所有**会话上都没注入过，而侧栏徽标一切正常（数据面没漂，
+       * 纯 DOM 假设过期）。这正是本仓踩过的第二回：`[draggable="true"]` 那次也是同样的形状。
+       *
+       * 所以改成**下钻找状态行父容器**，而不是押固定层级。返回的是「行所在的容器」，
+       * 追加/替换都挂在它上面，层级再变也不影响行为。
+       */
+      const statusHost = findStatusHost(card);
+      if (statusHost === null) continue;
       const sessionId = sessionIdOfHoverCard(card);
       if (sessionId === undefined) continue;
       return { card, statusHost, sessionId };
@@ -466,10 +541,123 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
   }
 
   /**
-   * 对悬浮卡片追加一行定时状态（仅当该会话有活动任务时）。
+   * 从 body 直系浮层往下找「装着宿主状态行」的容器（深度受限，不扫整棵应用树）。
    *
-   * 纯追加：宿主既有状态行原样保留，故 pendingInteraction / running 的优先级
-   * 不受影响；已有本插件行时只更新文案（React 重建后由重扫重插）。
+   * 识别一条状态行只押**形状 + 属性**，不押构建期 hash 类名，见 {@link isHostStatusRow}。
+   * 找不到就返回 `null` —— 安静跳过，绝不在非卡片浮层上误标。
+   */
+  function findStatusHost(root: HTMLElement): HTMLElement | null {
+    const limit = HOST_DOM.statusHostMaxDepth;
+    const walk = (el: HTMLElement, depth: number): HTMLElement | null => {
+      if (depth > limit) return null;
+      if (Array.from(el.children).some(isHostStatusRow)) return el;
+      for (const child of Array.from(el.children)) {
+        if (!(child instanceof HTMLElement)) continue;
+        const found = walk(child, depth + 1);
+        if (found !== null) return found;
+      }
+      return null;
+    };
+    return walk(root, 0);
+  }
+
+  /**
+   * 这一条是不是宿主渲染出来的状态行。
+   *
+   * 三个条件同时成立：行有 ≥2 个元素子、前导子元素是 `aria-hidden="true"` 的状态点、
+   * 行自身有文本。刻意**不看标签名**（ongoing 的状态点是 `svg`，见 HOST_DOM 块的证伪
+   * 记录）、**不看类名**（`_dot_*` / `_*_hoverStatus` 都是构建期 hash）。
+   *
+   * 实测的排除效果：卡片里的标题行 / 时间行（前导不是 `aria-hidden` 的点）、宿主留给
+   * 插件的空 slot（`data-slot=…`，无子节点）都不命中；「已归档」那条命中「是行」但
+   * 不带 `data-state`，只会影响容器定位、不影响替换判定（{@link isIdleRow} 另有判据）。
+   * 本插件自己追加的行带 {@link HOVER_ROW_CLASS}，显式排除，免得把自己的行读成宿主的。
+   */
+  function isHostStatusRow(child: Element): boolean {
+    if (child.classList.contains(HOVER_ROW_CLASS)) return false;
+    if (child.children.length < 2) return false;
+    const dot = child.firstElementChild;
+    if (dot === null) return false;
+    if (dot.getAttribute(HOST_DOM.statusDotAttr) !== HOST_DOM.statusDotValue) return false;
+    return (child.textContent ?? '').trim().length > 0;
+  }
+
+  /**
+   * 宿主状态行的**档位**（结构化判据）：取状态点上的 `data-state`。
+   * 实测宿主只在状态点上写它（`idle` / `ongoing` / `warning` / `done`），
+   * 属性缺席或为空返回 `undefined`——调用方据此退回文案白名单。
+   */
+  function hostRowState(row: Element): string | undefined {
+    const dot = row.firstElementChild;
+    if (dot === null) return undefined;
+    const raw = dot.getAttribute(HOST_DOM.statusDotStateAttr);
+    return raw === null || raw === '' ? undefined : raw;
+  }
+
+  /**
+   * 宿主状态行 → 是否「空闲」。
+   *
+   * **判据顺序（issue #153 的要求）**：先读结构化的 `data-state`（{@link HOST_DOM.idleStateValue}），
+   * 与语言无关；只有拿不到档位属性时才退回 {@link HOST_DOM.idleLabels} 文案白名单，
+   * 且那条退路还要过 {@link findIdleRow} 的位置闸（标题那一行不许用文案判空闲）。
+   * 刻意不把「空闲」这个中文串当唯一判据——八种界面语言下它各不相同，而宿主换字比换
+   * 档位便宜得多。白名单的脆弱点写在 HOST_DOM 那块。
+   */
+  function isIdleRow(row: Element, allowTextFallback: boolean): boolean {
+    const state = hostRowState(row);
+    if (state !== undefined) return state === HOST_DOM.idleStateValue;
+    if (!allowTextFallback) return false;
+    const text = (row.lastElementChild?.textContent ?? '').trim();
+    return HOST_DOM.idleLabels.some((label) => text === label);
+  }
+
+  /**
+   * 找宿主那条「空闲」状态行（本插件自己的行不算）。
+   *
+   * `index > 0` 是给文案退路加的一道**位置闸**：`hoverContent` 里第一个子元素永远是标题
+   * （实测顺序 标题 → 路径 → 时间 → slot → 状态行…），而会话标题完全可能正好等于某个语言的
+   * 「空闲」（`Idle` 就是个普通英文词）——结构化判据不怕这种巧合，文案判据怕，所以退路只在
+   * 标题之后的行上生效。真带 `data-state="idle"` 的第一行照旧命中，位置闸只管退路。
+   */
+  function findIdleRow(statusHost: HTMLElement): Element | null {
+    const children = Array.from(statusHost.children);
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index] as Element;
+      /**
+       * ⚠️ **已被接管的那条要单独认**（真 GUI 实测复现过一次的 bug）：
+       * 接管之后这条行的文案已经换成插件文案、状态点的 `data-state` 也可能被改，
+       * 若只按「是不是 idle」判，第二轮扫描会得出「没有空闲行」→ 走追加分支，
+       * 于是同一条状态区里出现两份内容（插件文案 + 新增的那一行）。
+       * 所以先认 `dataset.ssAdopted`，再认「宿主原样 + idle」。
+       */
+      const host = child as HTMLElement;
+      if (host.dataset.ssAdopted === 'idle') return host;
+      if (!isHostStatusRow(child)) continue;
+      if (isIdleRow(child, index > 0)) return child;
+    }
+    return null;
+  }
+
+  /**
+   * 对悬浮卡片的状态区写入定时状态（仅当该会话有活动任务时）。
+   *
+   * ## 合并语义（issue #153，**这条取代了原来的「纯追加」约定**）
+   *
+   * 原来的约定是「只追加一行、绝不改写宿主状态行」。实测证伪了它的代价：有定时待发任务
+   * 的会话，卡片里同时显示「空闲」与本插件那行，用户读到的是「空闲」——
+   * 而「空闲」在那个语境里表达的是「没有别的事」，可恰恰有事（到点会自动发出去）。
+   *
+   * 现在的规则，**只动 idle 这一档**：
+   *  - 宿主状态是**空闲** ⇒ 把那条状态行的文案**替换**成插件的定时文案（保留宿主的
+   *    状态点节点，形状与 `HOST_DOM.statusDot*` 一致，所以下一轮仍能被识别）；
+   *  - 宿主状态**不是空闲**（进行中 / 等待审批 / 计划待审 / 待回答…）⇒ 宿主行**原样保留**，
+   *    插件的行追加在后 —— agent 正在做的事优先级更高，不能被替换掉；
+   *  - 会话**没有**活动任务 ⇒ 把替换过的宿主行**还原**，并把追加行移除（一个节点都不许碰地
+   *    回到宿主原样，含「有任务 → 删掉任务」的状态切换）。
+   *
+   * 依据：同类插件 `dsh-group-status` 在同一个侧栏行/悬停卡上聚合状态，空闲时它拼出空串、
+   * **从不单独输出「空闲」**（`src/client/badge-labels.ts` 的 `groupLiveLabel` 只在非零时 push）。
+   * 换句话说，「空闲」不该在一次悬停里成为唯一被说的话。
    */
   function applyHoverCard(now: number, dict: SchedStrings): void {
     const found = findHoverCard();
@@ -478,12 +666,34 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     const existing = statusHost.querySelector<HTMLElement>(`:scope > .${HOVER_ROW_CLASS}`);
     const entry = index.get(sessionId);
     if (entry === undefined) {
-      // 该会话无活动任务：移除可能残留的行（含从有任务行切到无任务行）。
+      // 该会话无活动任务：移除残留行，并把被替换过的宿主行还原（「有任务 → 删掉任务」）。
       existing?.remove();
+      restoreIdleRow(statusHost);
       return;
     }
     const { label } = hoverScheduleStatus(entry, now, labelsFor(dict), dict, formatHhmm, formatDate);
     const state = badgeStateFor(entry.nextAt, now);
+
+    /**
+     * 先处理「宿主空闲」这一档：替换文案而不是新增行。
+     *
+     * 判「是不是空闲」**不靠硬编码文案**：真 DOM 里空闲行的状态点是
+     * `SPAN[data-state="idle"]`、进行中的是 `svg[data-state="ongoing"]`，档位就写在
+     * 属性上（见 {@link hostRowState}）。只有宿主没给出 `data-state` 时才退回文案白名单，
+     * 那条退路的脆弱性记在 `HOST_DOM.idleLabels`。
+     *
+     * 替换保留宿主那个点节点本身（不动属性、不动形状），于是这一行下一轮仍然
+     * 是「宿主的行」、也仍然能被认成空闲档。
+     */
+    const idleRow = findIdleRow(statusHost);
+    if (idleRow !== null) {
+      // 空闲 + 有任务 ⇒ 接管这条行；同时把可能存在的追加行收掉，避免出现两行。
+      existing?.remove();
+      adoptIdleRow(idleRow, label, state);
+      return;
+    }
+    restoreIdleRow(statusHost);
+
     if (existing !== null) {
       const text = existing.lastElementChild;
       if (text !== null && text.textContent !== label) text.textContent = label;
@@ -495,14 +705,49 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     row.className = HOVER_ROW_CLASS;
     row.dataset.state = state;
     const dot = document.createElement('span');
-    // 这里是**产出**宿主同构形状（刻意不进 HOST_DOM 块：那块只描述「读」侧耦合），
-    // 但要与 HOST_DOM.statusDot* 保持一致，否则我们的行自己也不满足识别条件。
+    // 这里是**产出**宿主同构形状（刻意不进 HOST_DOM 块：那块只描述「读」侧耦合）。
+    // 点节点刻意**不带** `data-state`：档位属性留给宿主自己的行，我们的行只靠
+    // `.ss-hover-status` 类与行上的 `data-state`（tone）表达，`isHostStatusRow` 也显式
+    // 排除本插件行，两条都不会把我们的行读成宿主的（那会被当成空闲档替换掉）。
     dot.setAttribute('aria-hidden', 'true');
     dot.className = 'ss-hover-status-dot';
     const text = document.createElement('span');
     text.textContent = label;
     row.append(dot, text);
     statusHost.append(row);
+  }
+
+  /**
+   * 接管空闲行：**只换文案**，状态点节点与行属性原样留着。
+   *
+   * 原始文案记在 `dataset` 上（不是模块级 Map）：卡片每次悬浮由 React 重建子树，
+   * 记在节点上就跟着节点一起消失，不会残留到别的会话。
+   */
+  function adoptIdleRow(row: Element, label: string, state: PresenceBadgeState): void {
+    const host = row as HTMLElement;
+    const text = row.lastElementChild;
+    if (host.dataset.ssAdopted !== 'idle') {
+      if (text !== null) host.dataset.ssIdleLabel = text.textContent ?? '';
+      host.dataset.ssAdopted = 'idle';
+    }
+    if (text !== null && text.textContent !== label) text.textContent = label;
+    host.dataset.ssState = state;
+  }
+
+  /** 把一条被接管的行还原回宿主原文案（没被接管过则什么都不做）。 */
+  function restoreAdoptedRow(row: Element): void {
+    const host = row as HTMLElement;
+    if (host.dataset.ssAdopted !== 'idle') return;
+    const text = host.lastElementChild;
+    if (text !== null) text.textContent = host.dataset.ssIdleLabel ?? '';
+    delete host.dataset.ssAdopted;
+    delete host.dataset.ssIdleLabel;
+    delete host.dataset.ssState;
+  }
+
+  /** 还原这个状态区里所有被接管的宿主行（「有任务 → 删掉任务」/ 切到非空闲档）。 */
+  function restoreIdleRow(statusHost: HTMLElement): void {
+    for (const child of Array.from(statusHost.children)) restoreAdoptedRow(child);
   }
 
   // 数据/环境触发：摘要变化（含当前会话投影帧与状态 tick）、语言切换、DOM 变化。
@@ -525,6 +770,8 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     unsubscribeSummary();
     unsubscribeLocale?.();
     for (const badge of Array.from(document.querySelectorAll(`.${BADGE_CLASS}`))) badge.remove();
+    // 追加行整体删掉；被接管的宿主行**不能删**，只把文案还原回去（删了就是在改宿主的结构）。
     for (const row of Array.from(document.querySelectorAll(`.${HOVER_ROW_CLASS}`))) row.remove();
+    for (const row of Array.from(document.querySelectorAll(ADOPTED_ROW_SELECTOR))) restoreAdoptedRow(row);
   };
 }
