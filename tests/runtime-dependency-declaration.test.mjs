@@ -41,6 +41,7 @@ import {
   rmSync,
   symlinkSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -166,9 +167,34 @@ test('profile 里没有 zod 时 lib/index.js 仍能加载（判据前提：zod �
 
   // 复现完成后把 repo 那份 zod 放回去：证明同一份产物在有 zod（= peer 被宿主满足）时能加载。
   // 这才是「声明的 peer 被满足后插件能起来」的那一半。
+
+  // ⚠️ 必须在**新进程**里重试，不能在同进程里 import 第二次。
+  // 本文件最初用的就是同进程 `import(... + '?satisfied=' + Date.now())`，在 node 24 上
+  // **绿**、在本仓 CI 的 node 22 上**红**。实测隔离（探针见下）：node 24 会把一次失败的
+  // 解析按文件路径记住，此后换任何 query 都不再重新解析；node 22 会重新解析。
+  // 于是那条断言在 node 24 上「通过」的原因是错的——它压根没走到成功路径，
+  // 而在一半的受支持版本上是红的。这条失败本身就是「版本差异造成的假绿」的实例。
+  //
+  // 探针（可复跑）：先 import 一个依赖不存在的 a.mjs（ERR_MODULE_NOT_FOUND），装上依赖、
+  // 再用 `a.mjs?q=2` import —— node 24 仍报 ERR_MODULE_NOT_FOUND，node 22 返回 OK。
+  //
+  // 新进程没有任何解析缓存，它检验的正是「这份产物在 peer 被满足时能不能起来」。
   symlinkSync(join(sourceModules, 'zod'), join(dir, 'node_modules', 'zod'));
-  await assert.doesNotReject(
-    import(`${join(dir, 'lib/index.js')}?satisfied=${Date.now()}`),
-    '补回 zod 后 lib/index.js 仍加载失败：不是依赖声明问题，是别的激活问题',
+  const probe = `
+    import(${JSON.stringify(join(dir, 'lib/index.js'))})
+      .then(() => process.exit(0))
+      .catch((error) => {
+        process.stderr.write(String(error && error.stack || error));
+        process.exit(1);
+      });
+  `;
+  const retry = spawnSync(process.execPath, ['--input-type=module', '--eval', probe], {
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  assert.equal(
+    retry.status,
+    0,
+    `补回 zod 后 lib/index.js 仍加载失败：不是依赖声明问题，是别的激活问题\n${retry.stderr ?? ''}`,
   );
 });
