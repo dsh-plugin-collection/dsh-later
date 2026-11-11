@@ -89,6 +89,70 @@
   「一个隐蔽的构建耦合」：**任何类型错误都会让 `build.mjs` 从 tsc 回退到 esbuild bundle**，
   而 bundle 会内联本地模块、产生双副本，进而改变运行时语义。故 typecheck 干净
   不只是代码整洁问题，**它是构建产物形态的前置条件**。
+- **产物体积：注释不进 `lib/`、`lib/client.js` 按 UTF-8 写出（issue #145 A 面，2026-11-11 实测）**：
+  `tsconfig.json` 的 `removeComments: true` 让 tsc 逐文件 emit 时丢掉注释（`lib/*.js` 与
+  `lib/types/*.d.ts` 都受影响），`build.mjs` 的 client esbuild 步骤加 `charset: 'utf8'`，中文
+  界面文案不再写成 `\uXXXX`。
+
+  **两套口径**：基线取自合并点 `0be9b8d` 的已提交 `lib/`（`git ls-tree -r --name-only 0be9b8d lib/`
+  列文件 + `git cat-file -s 0be9b8d:<path>` 逐个取字节数求和，可复跑）；改后取本树 `npm run build`
+  之后的实测值。不把两者混成一列，也不引用 issue 审计正文里的数字（那是另一棵树上的测得）。
+
+  改后那一列的取样树里 **`lib/*.js` 与 `lib/types/*.d.ts` 是 31 个文件**，即 client-only 模块尚未
+  移出 host emit 的状态。两侧文件数相同，差值才归因于这两个选项；布局重排之后再测会再减少若干个
+  文件，那部分不计入本表，应由布局那一步单独记账。
+
+  | 产物 | 基线 = `0be9b8d` 的 `lib/` | 改后 = 本树实测 | 差 |
+  |---|---|---|---|
+  | `lib/*.js`（31 个文件，不含 `client.js`） | 489,782 B | 230,753 B | −259,029 B（−52.9%） |
+  | `lib/types/*.d.ts`（31 个文件） | 233,092 B | 55,821 B | −177,271 B（−76.1%） |
+  | `lib/client.js` | 237,314 B | 221,731 B | −15,583 B（−6.6%） |
+
+  `lib/client.js` 里 `\uXXXX` 出现次数 **5177 → 3**（基线取 `git show 0be9b8d:lib/client.js` 计数，
+  改后取本树产物），其中中日韩区间的 **5074 → 0**。剩下 3 处
+  是同一个正则字面量 `/[\u0000-\u001f\u007f]/u`（`isAbsoluteWorkspacePath` 的路径校验）里的
+  控制字符，属于 esbuild 文档写明的边界：它不处理正则字面量里的非 ASCII。控制字符在源码里
+  本来就必须写成转义，与 `charset` 无关。
+
+  `charset: 'utf8'` 的前提是**送出侧声明了 UTF-8**，这一条已在宿主侧取证：插件 bundle 经
+  `dsh-client-modules` 的 `/plugins/<id>/client.js` 与 combo 各条响应送出，`content-type` 一律是
+  `text/javascript; charset=utf-8`（`dsh-client-modules/lib/index.js` 的 `compose()` 与
+  `chunkResponse()`），前端静态服务对 `.js` 也是同一串（`dsh-host-frontend-static/lib/index.js`
+  的 `MIME` 表）。产物本身由 `writeFileSync` 以 UTF-8 落盘，两边一致。
+
+  **`removeComments` 的代价与口径：线上排障读 `src/`，不靠 profile 里 `lib/` 的注释。**
+  产物已经是逐文件 tsc 形态、模块边界看得见，方法名与结构也不变，缺的是注释；而注释的权威
+  版本永远在 `src/`，两者按同一处 `src/**/*.ts` 对应，读 `src/` 拿到的只会更全。例外是
+  `lib/types/*.d.ts` 面向第三方消费者的契约描述也一并被压掉，若后续要对外暴露这些类型，
+  这个选项需要重新取舍（见 [`design-decisions.md`](design-decisions.md) §12）。
+  **运行时依赖：`zod` 必须在 `peerDependencies`（issue #145 C 组，2026-11-11 实测）**
+
+  **结论（本地实测）**：`src/projection.ts` 的 `import { z } from 'zod'` 是**值 import**，emit 后
+  `lib/projection.js:28` 保留同一条 ESM import，文件里 `z.` 出现 47 次。而 `package.json` 原先没有
+  `dependencies`，`peerDependencies` 里也没有 zod——它只写在 `devDependencies`。
+
+  | 判据 | 实测 | 手段 |
+  |---|---|---|
+  | 缺 zod 时入口真的挂 | **成立**：`ERR_MODULE_NOT_FOUND: Cannot find package 'zod' imported from lib/projection.js` | 造一份摘掉 zod 的隔离 `node_modules`（其余包逐个软链回仓库），把真 `lib/` 放进去 `import()` |
+  | 补回 zod 后同一次加载转绿 | 成立 | 同一隔离目录里补 `node_modules/zod` 后再 `import()` |
+  | 谁在替它兜住 | 宿主 `@deepseek-ai/dsh-session-projection` 的 `dependencies` 里是 `zod: 4.4.3`；`~/.dsh/profiles/cc-tui` 与 `~/.dsh/profiles/web` 下都有 `node_modules/zod` | 读该包的 `package.json`；`ls` 两个 profile |
+  | 迁移到 schemastery 是否可行 | **未评估**（没做）。审计点了 `.strict()` 的拒读语义与 optional 字段报错文案两处要先验，本轮没验，所以没迁 | — |
+
+  修法取「写进 `peerDependencies`」而不是 `dependencies`：宿主 `ProjectionDefinition.stateSchema` 的
+  类型就是 `ZodType`（`node_modules/@deepseek-ai/dsh-session-projection/lib/types/index.d.ts:20,42,62`），
+  自带一份 zod 会引入两个实例的风险。`pnpm-lock.yaml` 不需要跟着改：本仓 lockfile 的 importer 段
+  不记录 peers（`@deepseek-ai/dsh-agent` 等既有 peer 也不在里面），`pnpm install --frozen-lockfile`
+  在只有 peers 变化时退出码 0，已实测。
+
+  **判据**：`tests/runtime-dependency-declaration.test.mjs`。第一层对 `lib/` 做静态说明符扫描——
+  每条裸包 import 都必须在 `dependencies`/`peerDependencies` 里（`devDependencies` 不算）；
+  第二层是上面那条端到端反证；第三层钉住 zod 仍是值 import，免得判据前提悄悄消失。
+  变异验证：把 zod 从 `peerDependencies` 拿回 `devDependencies` → 前两层各红一条。
+
+  **未做（明确留给发布面决策）**：审计给的另一个选项是迁到已在 peers 的
+  `@deepseek-ai/schemastery`，那样能少一个 peer。迁移要先验 `.strict()` 拒读与 optional 报错文案
+  两处语义，本轮没验就不迁——「没验就迁」会把一个确定性修复换成一个未验的行为变更。
+
 - **独立实例线上 E2E（Playwright 无头真点 UI）**（**2026-09-08 的记录，不是现状态口径**；
   「≈计划 75s，实测 72s」是那一轮的单次观测，别当 SLA 读）：按钮渲染→开面板→自定义时间→确认→
   芯片出现→任务列表可见→到期真触发→对话出现 `user/message`。
@@ -306,6 +370,7 @@
     核对后以宿主的校验逻辑复算：`0.2.0-rc.2` 上 **0 个不兼容 peer**（放行）；
     历史代次 `0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.{1,3} / 0.1.7-rc.2` **仍全部支持**；
     未核对的 `0.3.0-rc.1` **仍被正确拒绝**（护栏未被放宽）。
+
 
 ### `0.2.0` 的第二处差异：reminder framing 措辞变更（已修）
 

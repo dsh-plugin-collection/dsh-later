@@ -19,6 +19,7 @@
     "outDir": "lib",
     "rootDir": "src",
     "sourceMap": false,
+    "removeComments": true,
     "newLine": "lf"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

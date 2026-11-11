@@ -3,9 +3,14 @@
  *  1. tsc 编译 host 端（src/ → lib/，tsconfig.json 已排除 src/client）
  * 1b. client 端 tsc --noEmit（不过就中止构建，见下方注释；`npm publish` 也走这里）
  *  2. esbuild 打包 client 端单文件并包进 __ModuleLoader__.load 模板
- *  3. 把 shared 目录（smart-window/time-utils）同步进 lib/shared，供 host 引用
+ *  3. 显式部署：`--deploy` 时把 lib/ 重链进各 profile（默认跳过，见第 4 步的注释）
  *
- * 产物：lib/index.js（host）+ lib/client.js（浏览器端）
+ * 产物：lib/index.js（host）+ lib/client.js（浏览器端）。
+ *
+ * 没有「把共享模块同步进 lib/shared」这一步：host 与 client 共用的模块
+ * （smart-window / time-utils / domain）就留在 `src/` 根目录，由 `tsc` 直接编译成
+ * `lib/<模块>.js`，client 端 esbuild 再把同一份源码内联进 `lib/client.js`。两侧因此
+ * 共用一份源码，不存在第二份拷贝需要同步。
  */
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -37,7 +42,11 @@ try {
   }
   console.warn(FALLBACK_ALLOWED_NOTICE);
   hostFallbackUsed = true;
-  const entries = ['src/index.ts', 'src/domain.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/presence.ts', 'src/schedule-summary.ts', 'src/schedule-summary-store.ts', 'src/smart-window.ts', 'src/time-utils.ts', 'src/upstream-compat.ts', 'src/kernel-identity.ts', 'src/skill.ts'];
+  // 兜底路径的入口清单。presence / schedule-summary / schedule-summary-store 住在
+  // `src/client/`（只被客户端用，host 从不加载），这里**故意不列**它们：兜底产物是 host
+  // 产物，把这些模块内联进来只会让 lib/ 多出宿主永远不执行的文件，并被
+  // `npm run check:lib-reach` 判红。
+  const entries = ['src/index.ts', 'src/domain.ts', 'src/user-tools.ts', 'src/commands.ts', 'src/runtime.ts', 'src/projection.ts', 'src/smart-window.ts', 'src/time-utils.ts', 'src/upstream-compat.ts', 'src/kernel-identity.ts', 'src/skill.ts'];
   for (const entry of entries) {
     const name = entry.replace('src/', '').replace('.ts', '.js');
     const result = await build({
@@ -100,6 +109,22 @@ const result = await build({
   write: false,
   logLevel: 'warning',
   loader: { '.tsx': 'tsx', '.ts': 'ts' },
+  // 中文字面量按 UTF-8 原样写出，不转成 \uXXXX。默认 charset 是 'ascii'：界面文案里每个汉字
+  // 变成一个 6 字节转义（实测：改前 lib/client.js 里 5177 处 \uXXXX，其中 5074 处在中日韩
+  // 区间；237,314B → 214,231B）。
+  //
+  // 为什么安全：产物本身以 UTF-8 写出，宿主按 `content-type: text/javascript; charset=utf-8`
+  // 送出（见下方注释的宿主取证），浏览器按这个 charset 解码，因此源文本里的非 ASCII 字面量
+  // 走的是正常 UTF-8 解码路径。前提是这条链路不断：任何人改了送出侧的类型头，这里要先跟着改。
+  //
+  // esbuild 文档（https://esbuild.github.io/api/#charset）列的两条边界：
+  //  · 不处理正则字面量里的非 ASCII：esbuild 根本不解析正则内容，所以正则里的汉字仍会写成
+  //    转义（正则转义与字面量等价，不影响匹配）。本仓的实证：改后产物里剩下的 3 处 \uXXXX
+  //    全来自同一个正则字面量 `/[\u0000-\u001f\u007f]/u`（isAbsoluteWorkspacePath 的路径
+  //    校验），是控制字符，源码里本来也只能这么写；
+  //  · 不作用于注释：注释里的非 ASCII 不按这个选项处理，而本仓的注释主要留在 src/，产物里
+  //    由 tsc 的 removeComments 与 esbuild 的 tree shake 去掉，不进入这条取舍。
+  charset: 'utf8',
   // 与 DSH 官方 client 插件一致：JSX 走 react/jsx-runtime（automatic），
   // 由 __ModuleLoader__ 的 require 从宿主解析；不用 transform 模式（会生成
   // 全局 React.createElement，宿主无全局 React 导致渲染崩溃）。
@@ -108,6 +133,10 @@ const result = await build({
   // @deepseek-ai/dsh-client-ui-primitives 是宿主 seed 模块表基线（PLATFORM_MODULES），
   // 必须保持 external：内联会复制一份官方组件实例（模块身份/主题漂移），
   // require 到宿主 seed 表才能拿到官方同一份（issue #19）。
+  // 宿主取证：dsh-client-modules 在 `/plugins/<id>/client.js` 等各条资源响应里一律给
+  // `content-type: text/javascript; charset=utf-8`（node_modules/@deepseek-ai/dsh-client-modules/lib/index.js
+  // 的 compose() 与 chunkResponse()），前端静态服务对 `.js` 也是同一串（dsh-host-frontend-static/lib/index.js 的 MIME 表）。
+  // 即「产物是 UTF-8、MIME 也声明 UTF-8」，与上面 charset: 'utf8' 的前提一致。
   external: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/*', '@deepseek-ai/dsh-client-ui-primitives'],
 });
 
