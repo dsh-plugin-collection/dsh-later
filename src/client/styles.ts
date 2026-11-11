@@ -1,11 +1,11 @@
 export const STYLE_ID = 'dsh-later-styles';
 
 const COMPONENTS = [
-'/* ==================== 输入行容器 ==================== */',
+/* ==================== 输入行容器 ==================== */
 '.ss-sched-row { display: inline-flex; align-items: center; gap: 4px; flex: none; }',
 '',
-'/* ==================== ⏰ 按钮（输入框右侧工具按钮） ==================== */',
-'/* 对齐官方 ui-conversation trigger：28×28、secondary 色、hover interactive-bg-hover */',
+/* ==================== ⏰ 按钮（输入框右侧工具按钮） ==================== */
+/* 对齐官方 ui-conversation trigger：28×28、secondary 色、hover interactive-bg-hover */
 '.ss-sched-btn {',
 '  display: inline-grid; place-items: center; width: 28px; height: 28px;',
 '  border: none; border-radius: 999px; cursor: pointer; padding: 0;',
@@ -25,8 +25,8 @@ const COMPONENTS = [
 '  background: var(--dsw-alias-interactive-bg-active);',
 '}',
 '',
-'/* ==================== 待发送提醒 dock（像素级对齐 QueueDock；行内保留 boss 进度条） ==================== */',
-'/* 外壳几何与 QueueDock .dock 一致（含负下边距贴住 composer 栈）。 */',
+/* ==================== 待发送提醒 dock（像素级对齐 QueueDock；行内保留 boss 进度条） ==================== */
+/* 外壳几何与 QueueDock .dock 一致（含负下边距贴住 composer 栈）。 */
 '.ss-dock-root {',
 '  box-sizing: border-box; flex: none;',
 '  width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance)',
@@ -35,8 +35,8 @@ const COMPONENTS = [
 '  margin: 0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px);',
 '  padding: 0 var(--dsh-composer-dock-inset);',
 '}',
-'/* 面板与 QueueDock .panel 一致：顶部圆角 + 两层伪元素——::before 铺 menu 底（含毛玻璃），',
-'   ::after 画描边并留底边开口，与宿主 panel:before / panel:after 一一对应（issue #32）。 */',
+/* 面板与 QueueDock .panel 一致：顶部圆角 + 两层伪元素——::before 铺 menu 底（含毛玻璃），
+   ::after 画描边并留底边开口，与宿主 panel:before / panel:after 一一对应（issue #32）。 */
 '.ss-dock-body {',
 '  position: relative; overflow: hidden; width: 100%; padding: 2px 0;',
 '  isolation: isolate;',
@@ -49,43 +49,43 @@ const COMPONENTS = [
 "  backdrop-filter: var(--dsw-menu-backdrop-filter); content: '';",
 "  position: absolute; inset: 0; pointer-events: none;",
 '}',
-"/* 描边独立一层（宿主同款拆法）：粗细用 .5px，与宿主的 alias-border-l1 hairline 对齐；",
-'   留底边开口，让面板与 composer 卡片视觉上接成一体。 */',
+/* 描边独立一层（宿主同款拆法）：粗细用 .5px，与宿主的 alias-border-l1 hairline 对齐；
+   留底边开口，让面板与 composer 卡片视觉上接成一体。 */
 '.ss-dock-body::after {',
 "  border: .5px solid var(--dsw-alias-border-l1); border-bottom: none;",
 "  border-radius: inherit; content: '';",
 '  pointer-events: none;',
 '  position: absolute; inset: 0;',
 '}',
-'/* 管子接缝：判据从「上面那条是不是宿主队列条」（#41 嗅探宿主 QueueDock 的私有属性）换成「我在',
-'   dock 栈里排第几」。选择器只依赖 [data-slot]（渲染器给每个插槽出口的公开标记）与我们自己的',
-'   .ss-dock-root，与邻居是谁无关。唯一事实来源 docs/notes/dock-stack-contract.md §2：下面三条逐字照抄，',
-'   次序只是 A→B 的阅读因果、不承载优先级：A 改 .ss-dock-root 的 margin-bottom、B 改 .ss-dock-body 的顶边，',
-'   两者命中不同元素的不同声明、互不争优先级；能盖过基础规则靠的是特指度本身（基础规则 (0,1,0)、',
-'   A (0,3,0)、B (0,4,0)，走 ::after 的那支 (0,4,1)）。机制没变：上段底边本就是「直角 + 开口」（panel',
-'   的 :after 无 bottom 边），两段的侧描边在同一 x 上首尾相接、底色同为 --dsw-specific-menu，接缝处',
-'   不存在任何一条线；-9px 重叠保留（与接 composer 同款消缝手法，勿"修平"）。solo 时我们既 :first-child',
-'   又 :last-child，三条全不命中，单条 dock 逐像素不变。 */',
-'/* 为什么「位置」优于「邻居身份」（§1 三条理由）：① 耦合邻居身份——绑死在队列条一家的类名/属性上，',
-'   它改属性、或上面换成 goal／todo／第三方 dock，判据就静默失效；② 答不上真正的问题——要表达的从来',
-'   是「我上面还有东西」与「我是栈底」，邻居身份对了而位置不对时（上面是别的 dock）该方角仍是圆角，',
-'   观感照样错；③ 规模不对——同一条插槽宿主自己占着 todo(0)/goal(10)/queue(20)，各家各画自己的壳：',
-'   实测只有 queue 是 attach 式（margin:0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px)），',
-'   todo/goal 是 margin:0 auto 的浮卡。把「我是栈底」当隐含前提的是 queue 与我们（order: 30）两家，',
-'   而没有任何 API 说谁是栈底 —— 上面多一条 dock 就悄悄翻转，补特例收不了口。回归矩阵见 #42；',
-'   向宿主要 dock 栈契约（data-dock-attach 或共享壳导出）是上游那一半，另追 #43。 */',
-'/* fail-open 方向（刻意如此）：任何一条新选择器若在真实宿主里永不命中（例如 [data-slot] 的出口结构与',
-'   我们理解的不一致），结果只是退回 #41 之前的观感（接缝多一条描边），不会更糟——所以基础态仍是末位',
-'   attach、只有明确不是末位时才让位，常见路径不依赖「选择器必须命中」。两条已知边界（§4）：① 上方某条',
-'   dock 抛错时渲染器在同一父节点下留一个 [data-slot-error] 空 div，占掉一个兄弟位，于是',
-'   :not(:first-child) 成立而上方并无可见内容 → 顶边画成方角；那是「已经在降级」的场景里的次级观感',
-'   问题，不为此引入 :nth-child(… of …) 这类脆弱写法。② 仍然耦合 [data-slot] 这一手出口 DOM——它比',
-'   私有属性公开得多（那是渲染器给所有插槽的通用锚点，不是某一家 dock 的身份牌），但终归是结构耦合，',
-'   真正的收口在宿主侧（#43）。另：接缝像素判据目前只在 DPR=1 实测过，DPR=2 视网膜屏下的复测是遗留项',
-'   #62；本改动不动任何几何，对它既不利也不弊。 */',
-'/* A. 不是栈底 → 不再占「贴 composer」那个位置（负下边距收回 0） */',
+/* 管子接缝：判据从「上面那条是不是宿主队列条」（#41 嗅探宿主 QueueDock 的私有属性）换成「我在
+   dock 栈里排第几」。选择器只依赖 [data-slot]（渲染器给每个插槽出口的公开标记）与我们自己的
+   .ss-dock-root，与邻居是谁无关。唯一事实来源 docs/notes/dock-stack-contract.md §2：下面三条逐字照抄，
+   次序只是 A→B 的阅读因果、不承载优先级：A 改 .ss-dock-root 的 margin-bottom、B 改 .ss-dock-body 的顶边，
+   两者命中不同元素的不同声明、互不争优先级；能盖过基础规则靠的是特指度本身（基础规则 (0,1,0)、
+   A (0,3,0)、B (0,4,0)，走 ::after 的那支 (0,4,1)）。机制没变：上段底边本就是「直角 + 开口」（panel
+   的 :after 无 bottom 边），两段的侧描边在同一 x 上首尾相接、底色同为 --dsw-specific-menu，接缝处
+   不存在任何一条线；-9px 重叠保留（与接 composer 同款消缝手法，勿"修平"）。solo 时我们既 :first-child
+   又 :last-child，三条全不命中，单条 dock 逐像素不变。 */
+/* 为什么「位置」优于「邻居身份」（§1 三条理由）：① 耦合邻居身份——绑死在队列条一家的类名/属性上，
+   它改属性、或上面换成 goal／todo／第三方 dock，判据就静默失效；② 答不上真正的问题——要表达的从来
+   是「我上面还有东西」与「我是栈底」，邻居身份对了而位置不对时（上面是别的 dock）该方角仍是圆角，
+   观感照样错；③ 规模不对——同一条插槽宿主自己占着 todo(0)/goal(10)/queue(20)，各家各画自己的壳：
+   实测只有 queue 是 attach 式（margin:0 auto calc(0px - var(--dsh-composer-stack-gap) - 3px)），
+   todo/goal 是 margin:0 auto 的浮卡。把「我是栈底」当隐含前提的是 queue 与我们（order: 30）两家，
+   而没有任何 API 说谁是栈底 —— 上面多一条 dock 就悄悄翻转，补特例收不了口。回归矩阵见 #42；
+   向宿主要 dock 栈契约（data-dock-attach 或共享壳导出）是上游那一半，另追 #43。 */
+/* fail-open 方向（刻意如此）：任何一条新选择器若在真实宿主里永不命中（例如 [data-slot] 的出口结构与
+   我们理解的不一致），结果只是退回 #41 之前的观感（接缝多一条描边），不会更糟——所以基础态仍是末位
+   attach、只有明确不是末位时才让位，常见路径不依赖「选择器必须命中」。两条已知边界（§4）：① 上方某条
+   dock 抛错时渲染器在同一父节点下留一个 [data-slot-error] 空 div，占掉一个兄弟位，于是
+   :not(:first-child) 成立而上方并无可见内容 → 顶边画成方角；那是「已经在降级」的场景里的次级观感
+   问题，不为此引入 :nth-child(… of …) 这类脆弱写法。② 仍然耦合 [data-slot] 这一手出口 DOM——它比
+   私有属性公开得多（那是渲染器给所有插槽的通用锚点，不是某一家 dock 的身份牌），但终归是结构耦合，
+   真正的收口在宿主侧（#43）。另：接缝像素判据目前只在 DPR=1 实测过，DPR=2 视网膜屏下的复测是遗留项
+   #62；本改动不动任何几何，对它既不利也不弊。 */
+/* A. 不是栈底 → 不再占「贴 composer」那个位置（负下边距收回 0） */
 '[data-slot="conversation.input.dock"] > .ss-dock-root:not(:last-child) { margin-bottom: 0; }',
-'/* B. 上面还有兄弟 → 本段是管子的下段：顶边直角 + 无顶描边 */',
+/* B. 上面还有兄弟 → 本段是管子的下段：顶边直角 + 无顶描边 */
 '[data-slot="conversation.input.dock"] > .ss-dock-root:not(:first-child) .ss-dock-body { border-radius: 0; }',
 '[data-slot="conversation.input.dock"] > .ss-dock-root:not(:first-child) .ss-dock-body::after { border-top: none; }',
 '.ss-dock-header {',
@@ -102,19 +102,19 @@ const COMPONENTS = [
 '  font-size: 13px; font-weight: 500; line-height: 24px;',
 '}',
 '.ss-dock-chevron { display: grid; place-items: center; width: 14px; height: 14px; color: var(--dsw-alias-label-tertiary); flex: none; }',
-'/* 折叠态状态摘要（#31）：逐值对齐宿主 QueueDock 的 .status ——',
-'   color/tertiary + --dsw-font-xs-13 + nowrap + flex:none。缺了它，摘要会按继承样式渲染，',
-'   并在窄输入框下换行把 36px 的 header 顶高。 */',
+/* 折叠态状态摘要（#31）：逐值对齐宿主 QueueDock 的 .status ——
+   color/tertiary + --dsw-font-xs-13 + nowrap + flex:none。缺了它，摘要会按继承样式渲染，
+   并在窄输入框下换行把 36px 的 header 顶高。 */
 '.ss-dock-status {',
 '  color: var(--dsw-alias-label-tertiary);',
 '  font: var(--dsw-font-xs-13);',
 '  white-space: nowrap; flex: none;',
 '}',
-'/* P5 结论（集成核对表 §1 要求登记）：**有意保留 rotate，不追平宿主的换图标**。',
-'   宿主按展开态在 IconChevronUp/DownOutlineRegular 之间切换；本组件恒用 Down +',
-'   rotate(180deg)。chevron 上下对称，两种做法在展开态的视觉结果一致，故属实现差异',
-'   而非视觉漂移。保留 rotate 的理由：不引入条件图标分支与第二个图标依赖，且日后若要',
-'   给折叠加过渡，rotate 是连续量、换图标是离散跳变。登记于此，免得下轮走查重复报。 */',
+/* P5 结论（集成核对表 §1 要求登记）：**有意保留 rotate，不追平宿主的换图标**。
+   宿主按展开态在 IconChevronUp/DownOutlineRegular 之间切换；本组件恒用 Down +
+   rotate(180deg)。chevron 上下对称，两种做法在展开态的视觉结果一致，故属实现差异
+   而非视觉漂移。保留 rotate 的理由：不引入条件图标分支与第二个图标依赖，且日后若要
+   给折叠加过渡，rotate 是连续量、换图标是离散跳变。登记于此，免得下轮走查重复报。 */
 '.ss-dock-chevron.ss-open { transform: rotate(180deg); }',
 '.ss-dock-list {',
 '  margin: 0; padding: 0; list-style: none;',
@@ -125,7 +125,7 @@ const COMPONENTS = [
 '  width: 100%; min-height: 36px; padding: 4px 5px 4px 12px; border-radius: var(--dsw-radius-md);',
 '}',
 '.ss-dock-row + .ss-dock-row { box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1); }',
-'/* QueueDock 的 preview 是单行文本；同位放「时间 · 倒计时 · 内容」+ boss 进度条（保留插件特性）。 */',
+/* QueueDock 的 preview 是单行文本；同位放「时间 · 倒计时 · 内容」+ boss 进度条（保留插件特性）。 */
 '.ss-dock-preview {',
 '  flex: auto; min-width: 0; display: flex; flex-direction: column; gap: 4px;',
 '  font: var(--dsw-font-xs-13); font-family: Inter, var(--dsw-font-family);',
@@ -138,15 +138,15 @@ const COMPONENTS = [
 '  flex: 1; min-width: 0; color: var(--dsw-alias-label-primary-dimmed);',
 '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;',
 '}',
-'/* ==================== 行首附件带（issue #38）====================',
-'   取值逐条照抄宿主 QueueDock.module.css 的 .attachments / .thumb / .file /',
-'   .fileIcon / .fileName / .fileSize。**位置也与宿主一致**：附件带是 .ss-dock-row',
-'   的第一个子元素，在正文左侧同一行（原先独占正文下方一带，与头顶上的原生队列',
-'   叠在一起时观感明显不是一族，故改回行首）。',
-'   唯一保留的有意偏离：不抄宿主的 max-width:55% + overflow:hidden —— 那是给它',
-'   单行正文让路的折中，代价是超出就**静默裁切**；我们改成可收缩 + 横向滚动，',
-'   挤不下时用户能滚着看完，而不是永远看不见第 N 张。',
-'   滚动条外观不用额外声明：.ss-dock-body 上已设 --dsh-scrollbar-thumb，子级继承。 */',
+/* ==================== 行首附件带（issue #38）====================
+   取值逐条照抄宿主 QueueDock.module.css 的 .attachments / .thumb / .file /
+   .fileIcon / .fileName / .fileSize。**位置也与宿主一致**：附件带是 .ss-dock-row
+   的第一个子元素，在正文左侧同一行（原先独占正文下方一带，与头顶上的原生队列
+   叠在一起时观感明显不是一族，故改回行首）。
+   唯一保留的有意偏离：不抄宿主的 max-width:55% + overflow:hidden —— 那是给它
+   单行正文让路的折中，代价是超出就**静默裁切**；我们改成可收缩 + 横向滚动，
+   挤不下时用户能滚着看完，而不是永远看不见第 N 张。
+   滚动条外观不用额外声明：.ss-dock-body 上已设 --dsh-scrollbar-thumb，子级继承。 */
 '.ss-dock-attachments {',
 '  display: flex; gap: 4px; min-width: 0; flex: 0 1 auto; flex-wrap: nowrap; overflow-x: auto;',
 '}',
@@ -167,17 +167,17 @@ const COMPONENTS = [
 '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;',
 '}',
 '.ss-dock-file-size { flex: none; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; }',
-'/* 图片字节不可用时的退化 chip：与 .ss-dock-file 同形，只换个色档表明是异常。 */',
+/* 图片字节不可用时的退化 chip：与 .ss-dock-file 同形，只换个色档表明是异常。 */
 '.ss-dock-thumb-fallback { flex: 0 auto; max-width: 180px; }',
 '.ss-dock-thumb-fallback .ss-dock-file-name { color: var(--dsw-alias-label-tertiary); }',
-'/* 超出 #37 每任务上限时的「+N」尾巴。 */',
+/* 超出 #37 每任务上限时的「+N」尾巴。 */
 '.ss-dock-more {',
 '  box-sizing: border-box; flex: none; display: inline-flex; align-items: center;',
 '  height: 24px; padding: 0 6px; font-size: 10px; color: var(--dsw-alias-label-tertiary);',
 '  border: .5px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm);',
 '  background: var(--dsw-alias-bg-base);',
 '}',
-'/* boss 血条（保留）：单根长管 + 等比分隔线（每段 1h）。 */',
+/* boss 血条（保留）：单根长管 + 等比分隔线（每段 1h）。 */
 '.ss-dock-bars { display: block; }',
 '.ss-dock-bar {',
 '  position: relative; height: 6px; border-radius: 999px; overflow: hidden;',
@@ -192,16 +192,16 @@ const COMPONENTS = [
    旧实现是「每秒 tick 改一次宽度 + transition 补间」，1 分钟任务每秒跳约 8px，
    肉眼可见锯齿。改为动画后由合成器逐帧插值，真 60fps 且零重渲染。
    这里**不保留** transition: width —— 它与动画叠加会造成双重补间、反而更抖。 */
-'  /* 极短任务/早期暂停时进度比接近 0：给最小可见宽度，且 active 与 paused 同一规则，',
-'     避免暂停前后保底阈值不一致导致条长跳变。 */',
+  /* 极短任务/早期暂停时进度比接近 0：给最小可见宽度，且 active 与 paused 同一规则，
+     避免暂停前后保底阈值不一致导致条长跳变。 */
 '  min-width: 10px;',
 '}',
-'/* 进度推进：CSS 动画线性推进（替代「每秒 tick 改宽度 + transition 补间」）。',
-'   参数由 JS 注入 --ss-bar-duration / --ss-bar-delay：',
-'   duration 固定为完整窗口（否则每次 tick 都改变参数、浏览器会重启动画）；',
-'   delay 为 -(已过去) 的负值（把播放头定位到绝对相位，重挂载后不归零）。',
-'   JS 侧只传变量、不写 animationName 简写，避免覆盖这里的声明。',
-'   注意此处**不带** :not(.ss-paused)：暂停态另有 animation: none 覆盖。 */',
+/* 进度推进：CSS 动画线性推进（替代「每秒 tick 改宽度 + transition 补间」）。
+   参数由 JS 注入 --ss-bar-duration / --ss-bar-delay：
+   duration 固定为完整窗口（否则每次 tick 都改变参数、浏览器会重启动画）；
+   delay 为 -(已过去) 的负值（把播放头定位到绝对相位，重挂载后不归零）。
+   JS 侧只传变量、不写 animationName 简写，避免覆盖这里的声明。
+   注意此处**不带** :not(.ss-paused)：暂停态另有 animation: none 覆盖。 */
 '.ss-dock-bar-fill {',
 '  animation-name: ss-dock-bar-progress;',
 '  animation-duration: var(--ss-bar-duration, 3600s);',
@@ -212,17 +212,17 @@ const COMPONENTS = [
 '}',
 '@keyframes ss-dock-bar-progress { from { width: 0%; } to { width: 100%; } }',
 '@media (prefers-reduced-motion: reduce) {',
-'  /* 无障碍：关掉逐帧推进。此时 animation-fill-mode 会让宽度停在起始值(0)，',
-'     故由 JS 侧改走静态 width 路径（见 ScheduleDock 的 prefersReducedMotion）。 */',
+  /* 无障碍：关掉逐帧推进。此时 animation-fill-mode 会让宽度停在起始值(0)，
+     故由 JS 侧改走静态 width 路径（见 ScheduleDock 的 prefersReducedMotion）。 */
 '  .ss-dock-bar-fill { animation: none !important; }',
 '}',
-'/* 暂停态（P1：不额外加样式）。',
-'   暂停 = 原条 + 完全静止：不叠加斜纹/冰封/阻塞头，也不改底色、不变色。',
-'   状态由「动 / 静」对比表达——进行中进度条在推进，暂停时停住。',
-'   注意：**不额外叠流动纹理**。先前误把"进行中加流光"当作 P1 的一部分实现，',
-'   但那不在 P1 定义内（P1 原文：暂停 = 原条 + 静止，不加任何纹理），已移除。',
-'   只保留下面这行防御：万一动画因故残留，暂停时必须停住。',
-'   （几何与保底宽度沿用 .ss-dock-bar-fill 的公共规则，故暂停前后长度一致。） */',
+/* 暂停态（P1：不额外加样式）。
+   暂停 = 原条 + 完全静止：不叠加斜纹/冰封/阻塞头，也不改底色、不变色。
+   状态由「动 / 静」对比表达——进行中进度条在推进，暂停时停住。
+   注意：**不额外叠流动纹理**。先前误把"进行中加流光"当作 P1 的一部分实现，
+   但那不在 P1 定义内（P1 原文：暂停 = 原条 + 静止，不加任何纹理），已移除。
+   只保留下面这行防御：万一动画因故残留，暂停时必须停住。
+   （几何与保底宽度沿用 .ss-dock-bar-fill 的公共规则，故暂停前后长度一致。） */
 '.ss-dock-row.ss-paused .ss-dock-bar-fill {',
 '  animation: none;',
 '}',
@@ -234,14 +234,14 @@ const COMPONENTS = [
 '.ss-dock-row.ss-paused .ss-dock-row-time,',
 '.ss-dock-row.ss-paused .ss-dock-row-prompt { color: var(--dsw-alias-label-secondary); }',
 
-'/* 分隔线：absolute 跨整个 bar 画 N-1 条等比竖线，渲染在 fill 之前（fill 用 z-index:1 盖住「已填充段」上的刻度）。 */',
+/* 分隔线：absolute 跨整个 bar 画 N-1 条等比竖线，渲染在 fill 之前（fill 用 z-index:1 盖住「已填充段」上的刻度）。 */
 '.ss-dock-bar-divider {',
 '  position: absolute; inset: 0; pointer-events: none;',
 '  background-repeat: no-repeat;',
 '}',
 '.ss-dock-actions { display: flex; align-items: center; gap: 10px; flex: none; }',
-'/* 动作按钮的 tooltip 用 primitives 的 Tooltip（issue #29）：气泡样式与层级由它自带，',
-'   这里不再定义——原先自研气泡的类名、包装层与淡入 keyframes 一并删除。 */',
+/* 动作按钮的 tooltip 用 primitives 的 Tooltip（issue #29）：气泡样式与层级由它自带，
+   这里不再定义——原先自研气泡的类名、包装层与淡入 keyframes 一并删除。 */
 '.ss-dock-action {',
 '  corner-shape: round; /* 宿主 .action 显式声明了这条。注意 round 本就是该属性的初始值，',
 '   所以这是逐字对齐而非视觉修复：不支持的引擎忽略它，支持的引擎结果不变。 */',
@@ -252,16 +252,16 @@ const COMPONENTS = [
 '.ss-dock-action:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }',
 '.ss-dock-action:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -2px; }',
 '.ss-dock-action:disabled { cursor: default; opacity: 0.45; }',
-'/* 插话完成态：QueueDock 无此态，用成功色做轻提示（叠加 disabled 半透明）。 */',
+/* 插话完成态：QueueDock 无此态，用成功色做轻提示（叠加 disabled 半透明）。 */
 '.ss-dock-action-steer.ss-done { color: var(--dsw-alias-state-success-primary); }',
 '.ss-dock-steer-err {',
 '  color: var(--dsw-alias-state-warn-secondary); font-size: 12px; line-height: 16px;',
 '}',
-'/*',
-' * 投递未确认提示：条目被宿主保留（未写 dispatch），行仍在台上。',
-' * 与普通错误（纯文字）区分：它不是一个"失败"，而是"结果未知且可挽回"，',
-' * 语气应是提示而非报错，故给浅底 + 边框 + 可点的重试。',
-' */',
+/*
+ * 投递未确认提示：条目被宿主保留（未写 dispatch），行仍在台上。
+ * 与普通错误（纯文字）区分：它不是一个"失败"，而是"结果未知且可挽回"，
+ * 语气应是提示而非报错，故给浅底 + 边框 + 可点的重试。
+ */
 '.ss-dock-steer-warn {',
 '  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;',
 '  margin-top: 4px; padding: 4px 8px; border-radius: 6px;',
@@ -280,10 +280,10 @@ const COMPONENTS = [
 '.ss-dock-steer-retry:hover {',
 '  background: color-mix(in srgb, var(--dsw-alias-state-warn-secondary) 28%, transparent);',
 '}',
-'/* 行内编辑（宿主 QueueDock `.editor` 逐条对齐：textarea + 自适应高度，上限交 CSS）。',
-'   描边/圆角走 .5px + border-l4 + radius-sm，不再写 1px / 6px 字面量——只有用 token',
-'   才会跟着主题代次变；height 也必须让位给 min/max-height，否则 JS 回填的自适应高度',
-'   会被固定 28px 顶死（宿主的 clamp 就在 max-height，到顶后 textarea 自己滚动）。 */',
+/* 行内编辑（宿主 QueueDock `.editor` 逐条对齐：textarea + 自适应高度，上限交 CSS）。
+   描边/圆角走 .5px + border-l4 + radius-sm，不再写 1px / 6px 字面量——只有用 token
+   才会跟着主题代次变；height 也必须让位给 min/max-height，否则 JS 回填的自适应高度
+   会被固定 28px 顶死（宿主的 clamp 就在 max-height，到顶后 textarea 自己滚动）。 */
 '.ss-dock-edit-input {',
 '  box-sizing: border-box; flex: auto; min-width: 0;',
 '  min-height: 28px; max-height: 127px; padding: 3px 8px; overflow-y: auto;',
@@ -293,7 +293,7 @@ const COMPONENTS = [
 '  outline: none; resize: none;',
 '}',
 '.ss-dock-edit-input:focus { border-color: var(--dsw-alias-state-business-primary); }',
-'/* 提交在途：与 .ss-dock-row-save:disabled 同档，让「按了但还没回来」看得出状态。 */',
+/* 提交在途：与 .ss-dock-row-save:disabled 同档，让「按了但还没回来」看得出状态。 */
 '.ss-dock-edit-input:disabled { opacity: 0.45; cursor: default; }',
 '.ss-dock-row-save {',
 '  flex: none; font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 6px;',
@@ -306,20 +306,20 @@ const COMPONENTS = [
 '}',
 '.ss-dock-editing { flex-wrap: wrap; }',
 '',
-'/* ==================== 面板 ==================== */',
-'/*',
-' * 抬升面逐项对齐官方 PickerPopover（@deepseek-ai/dsh-client-ui-schedule 的',
-' * PickerPopover.module.css + primitives MenuSurface.module.css）：',
-' *   背景 --dsw-menu-surface-fill（带透明度的菜单面）+ blur(40px) 毛玻璃',
-' *   描边走主题的 --dsw-elevation-stroke（0 0 0 .5px），而不是手写 1px ——',
-' *     0.5px 描边是高分屏下的正确细线，1px 在 1x 上过重、在 2x 上又发虚。',
-' *   阴影 --dsw-elevation-prominent（含描边层，不是第二套阴影）。',
-' *   圆角 16px = --dsw-radius-lg（官方面板同一档；旧的 12px 是 --dsw-radius-md）。',
-' *   z-index 1100 = 官方浮层档（旧的 101 是自造值，排在 dock 之下）。',
-' *',
-' * ⚠️ 勿再引入 --dsw-shadow-lv3 / --dsw-alias-border-inverted：那是更早设计代次的',
-' *    token，混用会让面板在浅色/深色下都偏离官方观感（issue #24）。',
-' */',
+/* ==================== 面板 ==================== */
+/*
+ * 抬升面逐项对齐官方 PickerPopover（@deepseek-ai/dsh-client-ui-schedule 的
+ * PickerPopover.module.css + primitives MenuSurface.module.css）：
+ *   背景 --dsw-menu-surface-fill（带透明度的菜单面）+ blur(40px) 毛玻璃
+ *   描边走主题的 --dsw-elevation-stroke（0 0 0 .5px），而不是手写 1px ——
+ *     0.5px 描边是高分屏下的正确细线，1px 在 1x 上过重、在 2x 上又发虚。
+ *   阴影 --dsw-elevation-prominent（含描边层，不是第二套阴影）。
+ *   圆角 16px = --dsw-radius-lg（官方面板同一档；旧的 12px 是 --dsw-radius-md）。
+ *   z-index 1100 = 官方浮层档（旧的 101 是自造值，排在 dock 之下）。
+ *
+ * ⚠️ 勿再引入 --dsw-shadow-lv3 / --dsw-alias-border-inverted：那是更早设计代次的
+ *    token，混用会让面板在浅色/深色下都偏离官方观感（issue #24）。
+ */
 '.ss-backdrop {',
 '  position: fixed; inset: 0; z-index: 1099; background: transparent;',
 '}',
@@ -333,8 +333,8 @@ const COMPONENTS = [
 '  -webkit-backdrop-filter: var(--dsw-menu-backdrop-filter);',
 '  border: 0; border-radius: var(--dsw-radius-lg);',
 '  box-shadow: var(--dsw-elevation-prominent);',
-'  /* 描边与阴影同变量：--dsw-elevation-prominent 自身含 --dsw-elevation-stroke，',
-'     这里只需给 stroke 颜色。官方 schedule/input-trigger/subagent 三个包一致取 l1。 */',
+  /* 描边与阴影同变量：--dsw-elevation-prominent 自身含 --dsw-elevation-stroke，
+     这里只需给 stroke 颜色。官方 schedule/input-trigger/subagent 三个包一致取 l1。 */
 '  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);',
 '  color: var(--dsw-alias-label-secondary);',
 '  font-size: 12px; line-height: 20px; font-family: var(--dsw-font-family);',
@@ -362,7 +362,7 @@ const COMPONENTS = [
 '  outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px;',
 '}',
 '',
-'/* ==================== 快捷芯片（单视图，无 tab） ==================== */',
+/* ==================== 快捷芯片（单视图，无 tab） ==================== */
 '.ss-quick-grid {',
 '  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;',
 '}',
@@ -391,8 +391,8 @@ const COMPONENTS = [
 '.ss-custom-row .ss-input { flex: 1; min-width: 0; }',
 '.ss-tasklist-head { margin-top: 10px; }',
 '',
-'/* ==================== 表单字段 ==================== */',
-'/* 对齐官方 fields.module.css：column 布局、label 在上 13px/500，字段间无分隔线 */',
+/* ==================== 表单字段 ==================== */
+/* 对齐官方 fields.module.css：column 布局、label 在上 13px/500，字段间无分隔线 */
 '.ss-field {',
 '  display: flex; flex-direction: column; gap: 6px; padding: 12px 0;',
 '}',
@@ -409,7 +409,7 @@ const COMPONENTS = [
 '.ss-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }',
 '.ss-input.ss-inputInvalid { border-color: var(--dsw-alias-state-error-primary); }',
 '',
-'/* ==================== 任务列表 ==================== */',
+/* ==================== 任务列表 ==================== */
 '.ss-tasks { max-height: 160px; overflow-y: auto; margin-bottom: 8px; }',
 '.ss-task {',
 '  display: flex; align-items: center; gap: 8px; padding: 5px 6px;',
@@ -458,8 +458,8 @@ const COMPONENTS = [
 '  padding: 10px 0; font-size: 12px;',
 '}',
 '',
-'/* ==================== 底部操作栏 ==================== */',
-'/* 对齐官方按钮规格：radius 8、padding 5px 14px、13px、disabled opacity .4 */',
+/* ==================== 底部操作栏 ==================== */
+/* 对齐官方按钮规格：radius 8、padding 5px 14px、13px、disabled opacity .4 */
 '.ss-footer { display: flex; gap: 8px; align-items: center; }',
 '.ss-confirm {',
 '  flex: 1; appearance: none; border: 1px solid transparent; border-radius: 8px;',
@@ -488,29 +488,29 @@ const COMPONENTS = [
 '  outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px;',
 '}',
 '',
-'/* ==================== 错误提示 ==================== */',
-'/* 对齐官方：纯文字色、无背景色块；hint 12px */',
+/* ==================== 错误提示 ==================== */
+/* 对齐官方：纯文字色、无背景色块；hint 12px */
 '.ss-error {',
 '  color: var(--dsw-alias-state-error-primary); font-size: 12px;',
 '  line-height: 1.5; margin: 0;',
 '}',
 '.ss-hint { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1.5; margin: 0; }',
 '',
-'/* ==================== 侧栏会话行「定时状态」badge（docs/ui/09 路线 B） ==================== */',
-'/* 紫为定时专属（浅深通用，对白/深底对比均 ≥3:1）；urgent/overdue 复用宿主 warn/error 别名。 */',
+/* ==================== 侧栏会话行「定时状态」badge（docs/ui/09 路线 B） ==================== */
+/* 紫为定时专属（浅深通用，对白/深底对比均 ≥3:1）；urgent/overdue 复用宿主 warn/error 别名。 */
 '.ss-presence { display: inline-flex; flex: none; color: #8b5cf6; }',
 '.ss-presence-beside { margin-left: 4px; }',
 '',
-'/* ── 旧版点阵时钟（classic） ── */',
+/* ── 旧版点阵时钟（classic） ── */
 '.ss-presence rect { fill: currentColor; }',
 '.ss-presence .ss-presence-ring { opacity: 0.8; animation: ss-presence-breathe 2.4s var(--ds-ease-in-out, ease-in-out) infinite; }',
 '.ss-presence .ss-presence-hand { opacity: 1; }',
 '.ss-presence[data-state="urgent"] .ss-presence-ring { animation-name: ss-presence-pulse; animation-duration: 0.9s; }',
 '.ss-presence[data-state="overdue"] .ss-presence-ring { animation: none; }',
 '',
-'/*  新版描边时钟（modern）— 对齐 DSH 官方 spinner 样式 ── */',
-'/* 双环：track 恒定为底（给出「总窗口」的视觉参照），prog 是从 12 点起的进度弧。',
-'   无从算进度时 JS 把 prog 置为 display:none —— 此时视觉与改造前的单环完全一致。 */',
+/*  新版描边时钟（modern）— 对齐 DSH 官方 spinner 样式 ── */
+/* 双环：track 恒定为底（给出「总窗口」的视觉参照），prog 是从 12 点起的进度弧。
+   无从算进度时 JS 把 prog 置为 display:none —— 此时视觉与改造前的单环完全一致。 */
 '.ss-presence .ss-clock-track {',
 '  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;',
 '  opacity: 0.25; animation: ss-clock-breathe 2.4s var(--ds-ease-in-out, ease-in-out) infinite;',
@@ -522,15 +522,15 @@ const COMPONENTS = [
 '.ss-presence .ss-clock-hand { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }',
 '.ss-presence .ss-clock-hand-h { opacity: 1; }',
 '.ss-presence .ss-clock-hand-m { opacity: 0.85; }',
-'/* urgent 只脉冲底环：进度弧承载确定信息，跟着闪会让比例不可读。 */',
+/* urgent 只脉冲底环：进度弧承载确定信息，跟着闪会让比例不可读。 */
 '.ss-presence[data-state="urgent"] .ss-clock-track { animation-name: ss-clock-pulse; animation-duration: 0.9s; }',
 '.ss-presence[data-state="overdue"] .ss-clock-track { animation: none; opacity: 1; }',
 '',
-'/* ── 三态颜色 ── */',
+/* ── 三态颜色 ── */
 '.ss-presence[data-state="urgent"] { color: var(--dsw-alias-state-warn-secondary); }',
 '.ss-presence[data-state="overdue"] { color: var(--dsw-alias-state-error-primary); }',
 '',
-'/* ── 动画关键帧 ── */',
+/* ── 动画关键帧 ── */
 '@keyframes ss-presence-breathe { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }',
 '@keyframes ss-presence-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }',
 '@keyframes ss-clock-breathe { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }',
@@ -538,30 +538,30 @@ const COMPONENTS = [
 '@media (prefers-reduced-motion: reduce) {',
 '  .ss-presence .ss-presence-ring { animation: none; }',
 '  .ss-presence .ss-clock-track { animation: none; }',
-'  /* 减少动效：进度弧的位移过渡也一并停，避免"进度自己在爬"的观感。 */',
+  /* 减少动效：进度弧的位移过渡也一并停，避免"进度自己在爬"的观感。 */
 '  .ss-presence .ss-clock-prog { transition: none; }',
 '}',
 '',
-'/* ==================== 悬浮卡片状态行增补（issue #4） ==================== */',
-'/* 与宿主 .hoverStatus 行严格同构。宿主 StateDot 实测结构（dsh-client-ui-primitives',
-'   的 ._dot_* 运行时样式，10×10 relative + ::before 10px/inset:0 + ::after 6px/inset:2px，',
-'   两层同色 → 视觉直径约 8px）：本插件按下述同样的双层写法自绘，避免复用其构建期 hash',
-'   类名（_dot_xxxxxx_n 不稳定，宿主升级会静默失效）。',
-'   颜色跟随宿主语义色板，不引入插件专属色——文案已说明是定时提醒，点不必再承担',
-'   「区分来源」的职责；混入第五种颜色反而与宿主 warning 语义撞车。',
-'',
-'   ⚠️ 已知限制（浅色适配尚未处理）：以下色值是在**当前深色主题**下从宿主',
-'   实测得到的运行时值，宿主自身引用 --dsw-alias-* token，会随主题变化，',
-'   而此处是硬编码常量。因此当前仅在深色主题下与宿主一致；切换到浅色主题/',
-'   其他配色方案时，本行不会跟随，可能与该卡片其余内容不同步。',
-'   修法：实测浅色主题下该卡片的实际底色后，改用对应 token（待办）。 */',
+/* ==================== 悬浮卡片状态行增补（issue #4） ==================== */
+/* 与宿主 .hoverStatus 行严格同构。宿主 StateDot 实测结构（dsh-client-ui-primitives
+   的 ._dot_* 运行时样式，10×10 relative + ::before 10px/inset:0 + ::after 6px/inset:2px，
+   两层同色 → 视觉直径约 8px）：本插件按下述同样的双层写法自绘，避免复用其构建期 hash
+   类名（_dot_xxxxxx_n 不稳定，宿主升级会静默失效）。
+   颜色跟随宿主语义色板，不引入插件专属色——文案已说明是定时提醒，点不必再承担
+   「区分来源」的职责；混入第五种颜色反而与宿主 warning 语义撞车。
+
+   ⚠️ 已知限制（浅色适配尚未处理）：以下色值是在**当前深色主题**下从宿主
+   实测得到的运行时值，宿主自身引用 --dsw-alias-* token，会随主题变化，
+   而此处是硬编码常量。因此当前仅在深色主题下与宿主一致；切换到浅色主题/
+   其他配色方案时，本行不会跟随，可能与该卡片其余内容不同步。
+   修法：实测浅色主题下该卡片的实际底色后，改用对应 token（待办）。 */
 '.ss-hover-status {',
 '  display: flex; align-items: center; gap: 8px;',
 '  color: #adb2b8; font-size: 12px; line-height: 20px;',
 '}',
-'/* 状态点：宿主同款双层结构。关键——::before 是 10% 透明度的**光晕**，',
-'   不是实心外环；::after 才是 6px 实心核心。若 ::before 不设 opacity，',
-'   它会盖住核心并渲染成 10px 实心圆（比宿主明显偏大偏实）。 */',
+/* 状态点：宿主同款双层结构。关键——::before 是 10% 透明度的**光晕**，
+   不是实心外环；::after 才是 6px 实心核心。若 ::before 不设 opacity，
+   它会盖住核心并渲染成 10px 实心圆（比宿主明显偏大偏实）。 */
 '.ss-hover-status-dot {',
 '  position: relative; display: block; flex: none;',
 '  width: 10px; height: 10px;',
@@ -573,20 +573,20 @@ const COMPONENTS = [
 '}',
 '.ss-hover-status-dot::before { inset: 0; opacity: 0.1; }',
 '.ss-hover-status-dot::after { inset: 2px; }',
-'/* 语义映射（对齐宿主 done/ongoing/warning/error 四态色值）：',
-'   scheduled → ongoing 灰（中性：已排期，无紧迫性）',
-'   urgent    → warning 琥珀（≤5min 即将触发）',
-'   overdue   → error 红（已到期，等待会话空闲发送） */',
+/* 语义映射（对齐宿主 done/ongoing/warning/error 四态色值）：
+   scheduled → ongoing 灰（中性：已排期，无紧迫性）
+   urgent    → warning 琥珀（≤5min 即将触发）
+   overdue   → error 红（已到期，等待会话空闲发送） */
 '.ss-hover-status[data-state="urgent"] .ss-hover-status-dot { color: #f59e0b; }',
 '.ss-hover-status[data-state="overdue"] .ss-hover-status-dot { color: #f25a5a; }',
 '',
-'/* ==================== 设置页（定时提醒表单） ==================== */',
-'/* 视觉对齐官方 SettingsForm（dsh-client-ui-primitives）：裸表单，无卡片容器，',
-'   字段按 section 分组，每组有标题，底部保存按钮。类名统一 ss- 前缀。 */',
+/* ==================== 设置页（定时提醒表单） ==================== */
+/* 视觉对齐官方 SettingsForm（dsh-client-ui-primitives）：裸表单，无卡片容器，
+   字段按 section 分组，每组有标题，底部保存按钮。类名统一 ss- 前缀。 */
 '.ss-settings-form {',
 '  display: flex; flex-direction: column;',
 '}',
-'/* Section 分组（对齐官方 AZSXYW_section 结构） */',
+/* Section 分组（对齐官方 AZSXYW_section 结构） */
 '.ss-section {',
 '  padding: 16px 0;',
 '}',
@@ -656,8 +656,8 @@ const COMPONENTS = [
 '  min-width: 0; color: var(--dsw-alias-label-primary); flex: 1;',
 '  font-size: 13px; font-weight: 500; line-height: 1.5;',
 '}',
-'/* label 末尾内联图标（如时钟风格预览）：横向排布、图标紧跟文字，',
-'   flex:0 0 auto 覆盖基类的 flex:1，让 label 收缩到内容宽而非撑满整行。 */',
+/* label 末尾内联图标（如时钟风格预览）：横向排布、图标紧跟文字，
+   flex:0 0 auto 覆盖基类的 flex:1，让 label 收缩到内容宽而非撑满整行。 */
 '.ss-card-label--withIcon {',
 '  display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto;',
 '}',
@@ -674,10 +674,10 @@ const COMPONENTS = [
 '.ss-card-reset:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }',
 '.ss-card-reset:disabled { cursor: default; }',
 '.ss-card-invalid { color: var(--dsw-alias-state-error-primary); margin: 0; font-size: 12px; line-height: 1.5; }',
-'/*',
-' * 选项风险提示（steer 可能被回合启动吞掉 / discard 会让静默丢失复活）。',
-' * 常驻显示而非 tooltip：这几项配置的后果是"静默失败"，藏在悬浮提示里等于没有。',
-' */',
+/*
+ * 选项风险提示（steer 可能被回合启动吞掉 / discard 会让静默丢失复活）。
+ * 常驻显示而非 tooltip：这几项配置的后果是"静默失败"，藏在悬浮提示里等于没有。
+ */
 '.ss-card-risk {',
 '  margin: 6px 0 0; padding: 6px 9px; border-radius: 6px;',
 '  font-size: 12px; line-height: 1.55;',
@@ -685,13 +685,13 @@ const COMPONENTS = [
 '  background: color-mix(in srgb, var(--dsw-alias-state-warn-secondary) 12%, transparent);',
 '  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-secondary) 30%, transparent);',
 '}',
-'/*',
-' * 联动锁说明（§6.3：maxPromptChars 因「允许长文本」关闭而不可编辑）。',
-' * 与 .ss-card-risk 区分：那是**后果警告**（会静默丢数据），故用 warn 色 + 底色框；',
-' * 这里只是「为什么现在不能改」的中性说明，用次级文字色、无底色，避免把',
-' * 一个正常状态渲染成像是出错了。常驻而非 tooltip：disabled 控件上的 title',
-' * 在多数浏览器里不触发，等于没有提示。',
-' */',
+/*
+ * 联动锁说明（§6.3：maxPromptChars 因「允许长文本」关闭而不可编辑）。
+ * 与 .ss-card-risk 区分：那是**后果警告**（会静默丢数据），故用 warn 色 + 底色框；
+ * 这里只是「为什么现在不能改」的中性说明，用次级文字色、无底色，避免把
+ * 一个正常状态渲染成像是出错了。常驻而非 tooltip：disabled 控件上的 title
+ * 在多数浏览器里不触发，等于没有提示。
+ */
 '.ss-card-gate {',
 '  margin: 0; font-size: 12px; line-height: 1.5;',
 '  color: var(--dsw-alias-label-tertiary);',
