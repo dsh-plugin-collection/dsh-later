@@ -1,13 +1,3 @@
-/**
- * 宿主侧微文案字典（双语：跟随宿主 DSH 的 locale 设置）。
- *
- * 与客户端 strings.ts 对称，但宿主侧文案在工具注册时一次性确定（模型 system-prompt
- * 工具清单 + GUI 工具调用行标题 + slash 命令描述），不随 locale 实时切换。
- *
- * 语言解析：工具注册时从 locale 服务读取当前 active id（zh/en），据此选择字典。
- * locale 服务缺失或 id 未收录时回退中文（v1 默认语言）。
- * @module dsh-later/strings
- */
 export type HostLocaleId = 'zh' | 'en';
 declare const zh: {
     readonly toolCreateDesc: string;
@@ -47,14 +37,10 @@ declare const zh: {
     readonly errInternalError: "操作失败。";
     readonly warnSchedulerNotArmed: "注意：本会话的调度器未挂载，这条提醒到点不会触发。请重启宿主进程或新开一个会话后重建（插件热重载后，重载前就已存在的会话可能挂不回来）。";
 };
-/** 单语言文案字典类型（宽化为 string，zh/en 通用）。 */
 export type HostStrings = {
     [K in keyof typeof zh]: string;
 };
-/** 全部 locale 字典（键集一致，由 en 的映射类型保证）。 */
 export declare const hostDicts: Record<HostLocaleId, HostStrings>;
-/** 按 locale id 取字典；未收录 id 回退中文。 */
 export declare function hostDictFor(localeId: string | undefined): HostStrings;
-/** 把 {maxChars} / {max} 类占位符替换为参数。 */
 export declare function hostFormat(template: string, params: Record<string, string | number>): string;
 export {};

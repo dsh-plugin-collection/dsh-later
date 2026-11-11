@@ -13,7 +13,7 @@
  * store）与 `useScheduleSummary`（React hook），消费方按需选用。
  *
  * 本模块零 DOM / 零 React 依赖：宿主、浏览器与 `node --test` 都能直接跑。
- * @module dsh-later/schedule-summary
+ * @module dsh-later/client/schedule-summary
  */
 import {
   badgeStateFor,

@@ -10,7 +10,7 @@
  *
  * 这个分类抽成纯函数，供客户端与测试共用；宿主返回的其他错误仍归为 `unavailable`。
  *
- * @module dsh-later/attachment-failure
+ * @module dsh-later/client/attachment-failure
  */
 
 /** 图片读不到的两种性质。 */

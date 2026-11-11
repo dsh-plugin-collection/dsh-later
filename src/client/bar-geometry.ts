@@ -13,10 +13,11 @@
  * 现在统一为：`barWindow()` 求窗口，冻结帧只把 `now` 换成冻结时刻，并把冻结
  * 时刻**钳到 ≤ 客户端已渲染时刻**。因此暂停瞬间条长与点击前严格一致。
  *
- * 本模块被 host 与 client 两侧共用（与 command-outcome / smart-window /
- * time-utils 同款：同时列出在 tsconfig.json 与 tsconfig.client.json 的 include 中）。
+ * 本模块**仅 client 侧使用**（本文件在 `src/client/` 下，只被 `tsconfig.client.json` 编译，
+ * 不进 host 的 `lib/` 产物）。它不引 Node 内置模块、不引 React，因此 `tests/` 能经
+ * `scripts/transpile-module.mjs` 直接从源码跑它的决策表。
  *
- * @module dsh-later/bar-geometry
+ * @module dsh-later/client/bar-geometry
  */
 
 /** 每根进度条代表的时长（1 小时 = 一根满管）。 */

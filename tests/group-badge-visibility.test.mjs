@@ -20,13 +20,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GROUP_BADGE_SETTING_KEY, isGroupBadgeVisible } from '../lib/schedule-facet.js';
+import { loadTranspiledTree } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { GROUP_BADGE_SETTING_KEY, isGroupBadgeVisible } = await loadTranspiledTree('src/client/schedule-facet.ts');
 
 const host = () => readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const card = () => readFileSync(new URL('../src/client/components/SchedulerSettingsCard.tsx', import.meta.url), 'utf8');
 const client = () => readFileSync(new URL('../src/client/index.tsx', import.meta.url), 'utf8');
 const facetGlue = () => readFileSync(new URL('../src/client/group-status-facet.ts', import.meta.url), 'utf8');
-const logic = () => readFileSync(new URL('../src/schedule-facet.ts', import.meta.url), 'utf8');
+const logic = () => readFileSync(new URL('../src/client/schedule-facet.ts', import.meta.url), 'utf8');
 const readme = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 
 /** 剥掉块注释与行注释，只留代码体（同 `group-status-facet.test.mjs` 的 `codeOf`）。 */

@@ -38,7 +38,7 @@
  * `<base>api/file?path=<encodeURIComponent(path)>`。
  * @module dsh-later/client/workspace-path-compat
  */
-import { fileMediaUrlFallback } from '../media-url.js';
+import { fileMediaUrlFallback } from './media-url.js';
 
 /**
  * 本地绝对路径 → 媒体 URL。
@@ -53,10 +53,11 @@ export function fileMediaUrlCompat(base: string, path: string): string | undefin
 }
 
 /**
- * 实现住在 `src/media-url.ts`，这里只转发。
+ * 实现住在 `src/client/media-url.ts`，这里只转发。
  *
- * 为什么不在本文件里写：客户端模块会被 bundle 进 `lib/client.js`，`tests/` 只能对着源码文本
- * 断言、跑不了行为；放在宿主侧既能共用，又能被 `lib/media-url.js` 直接测——现在它是**唯一**
- * 实现，那几条行为测试也从「装饰」变成了真正的守护。
+ * 为什么分成两个文件：`media-url.ts` 是纯函数、无浏览器依赖，`tests/` 能经
+ * `scripts/transpile-module.mjs` 直接从源码 import 它跑行为断言；而本文件连同它的
+ * 其它导出被 bundle 进 `lib/client.js`，`tests/` 只能对着源码文本断言。把那几条行为
+ * 测试真正守住的实现单独放在能被 import 的位置，它们才不是装饰。
  */
-export { fileMediaUrlFallback } from '../media-url.js';
+export { fileMediaUrlFallback } from './media-url.js';

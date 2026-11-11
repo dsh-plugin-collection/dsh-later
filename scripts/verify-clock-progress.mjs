@@ -24,7 +24,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { progressOf, summarizeSchedules } from '../lib/presence.js';
+import { loadTranspiledTree } from './transpile-module.mjs';
+
+// presence 只被客户端用，不进 host 的 lib/ 产物（见 scripts/transpile-module.mjs），从源码读。
+const { progressOf, summarizeSchedules } = await loadTranspiledTree('src/client/presence.ts');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const clientSrc = fs.readFileSync(path.join(ROOT, 'lib/client.js'), 'utf8');

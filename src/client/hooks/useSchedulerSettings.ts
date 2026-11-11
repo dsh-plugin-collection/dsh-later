@@ -17,7 +17,7 @@
  */
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { sanitizeSmartWindowConfig, type SmartWindowConfig } from '../../smart-window.js';
-import { resolveBubbleMarker, type BubbleMarkerStyle } from '../../bubble-marker.js';
+import { resolveBubbleMarker, type BubbleMarkerStyle } from '../bubble-marker.js';
 
 export type { BubbleMarkerStyle };
 

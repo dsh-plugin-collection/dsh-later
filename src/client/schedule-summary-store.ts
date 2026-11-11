@@ -17,7 +17,7 @@
  *
  * 本模块零 DOM / 零 React 依赖（`document` / `window` 一律经 `globalThis`
  * 结构化探测），宿主 tsc 与浏览器 esbuild 都能编译，`node --test` 也能直接跑。
- * @module dsh-later/schedule-summary-store
+ * @module dsh-later/client/schedule-summary-store
  */
 import { buildScheduleSummary, sameScheduleSummary, type ScheduleSummaryMap, type ScheduleSummarySource } from './schedule-summary.js';
 

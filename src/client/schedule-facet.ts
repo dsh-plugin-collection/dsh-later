@@ -17,7 +17,7 @@
  * 的会话数」、overdue / urgent 才脉冲、文案 `N 定时任务` / `N Scheduled`。本文件与它
  * 逐字段对齐；注册后徽标若有任何一处与迁移前不同，要么是本仓语义写错，要么是对方
  * bug，两种都回 issue #36 说一声，而不是顺手改口径。
- * @module dsh-later/schedule-facet
+ * @module dsh-later/client/schedule-facet
  */
 import type { PresenceBadgeState } from './presence.js';
 import { STATE_RANK, summarizeScheduleGroup, type GroupScheduleSummary, type ScheduleSummaryMap } from './schedule-summary.js';

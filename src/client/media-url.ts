@@ -1,11 +1,11 @@
 /**
  * 本地绝对路径 → 媒体 URL 的**纯字符串**实现（跨代兼容用）。
  *
- * 为什么住在 host 侧：它没有任何浏览器依赖（只做 scheme 判断 + URL 拼接），而宿主那个同名的
+ * 为什么单独成模块：它没有任何浏览器依赖（只做 scheme 判断 + URL 拼接），而宿主那个同名的
  * `fileMediaUrl`（`@deepseek-ai/dsh-util-workspace-path`）**在浏览器里不可解析**——8 个代次都不在
- * 宿主模块表里，外置只会在 factory 求值期抛错。放在这里有两个好处：① 宿主侧与客户端 bundle
- * 共用同一份实现（不必在 client 里复制）；② 它是纯函数，可以被 `tests/` 直接测（客户端模块被
- * bundle 进 `lib/client.js`，测不到）。
+ * 宿主模块表里，外置只会在 factory 求值期抛错。它住 `src/client/`（只被 client 用，不进 host 的
+ * `lib/` 产物），但因为是纯函数，`tests/` 能经 `scripts/transpile-module.mjs` 直接 import 源码来测
+ * ——不像那些被 bundle 进 `lib/client.js` 的客户端模块，测不到。
  *
  * 契约（与宿主 `fileMediaUrl` 一致，取自当前代实现的分支判据）：
  *
@@ -18,7 +18,7 @@
  * 这份是**唯一**实现，不存在「新代次优先走宿主、缺了才降级」那套（`workspace-path-compat.ts`
  * 里记了为什么）。因此宿主若改变合法路径判定，需要手工同步这里——这条职责以前被那句假承诺
  * 掩盖，现在是显式的。改动前后曾按 42 组 `(base, path)` 与宿主实现差分过，逐位一致。
- * @module dsh-later/media-url
+ * @module dsh-later/client/media-url
  */
 
 /** 路径是否是绝对路径（POSIX 或 Windows 拼写）—— 与宿主 `isAbsoluteWorkspacePath` 同义。 */

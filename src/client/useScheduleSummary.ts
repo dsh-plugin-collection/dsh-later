@@ -14,12 +14,12 @@
  * @module dsh-later/client/useScheduleSummary
  */
 import { useMemo, useSyncExternalStore } from 'react';
-import type { ScheduleSummaryMap } from '../schedule-summary.js';
+import type { ScheduleSummaryMap } from './schedule-summary.js';
 import {
   getScheduleSummaryStore,
   subscribeScheduleSummaryStore,
   type ScheduleSummaryStore,
-} from '../schedule-summary-store.js';
+} from './schedule-summary-store.js';
 
 /** 无 store 时的空快照（引用恒定，避免无限重渲染）。 */
 const EMPTY_SUMMARY: ScheduleSummaryMap = new Map();

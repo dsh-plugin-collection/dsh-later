@@ -1,12 +1,13 @@
 /**
  * 定时消息气泡标记的**纯逻辑**（issue #112）：设置解析 + 注册决策。
  *
- * 放在 host/client 共用的位置（不在 `src/client` 下）有两个理由：
+ * 住在 `src/client/`（不在 `src/` 根目录）有两个理由：
  *  1. 客户端渲染器与控制器都要用同一份「档位怎么解析」的口径；
- *  2. `node --test` 能直接 import `lib/bubble-marker.js` 跑决策表，不必拉起 React 或浏览器。
+ *  2. 它不引任何 Node 内置模块、也不引 React，`tests/` 能经
+ *     `scripts/transpile-module.mjs` 直接从源码跑决策表，不必拉起 React 或浏览器。
  *
  * 不引任何 Node 内置模块，也不引 React。
- * @module dsh-later/bubble-marker
+ * @module dsh-later/client/bubble-marker
  */
 
 /** 标记档位（与 host `Config.bubbleMarker` 的取值同源）。 */

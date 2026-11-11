@@ -25,7 +25,10 @@ import {
   resetFileBlockSupport,
 } from '../lib/attachment-blocks.js';
 import { readFileSync } from 'node:fs';
-import { fileMediaUrlFallback } from '../lib/media-url.js';
+import { loadTranspiled } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { fileMediaUrlFallback } = await loadTranspiled('src/client/media-url.ts');
 
 /** 造一个"宿主给我们的图片块"（两代都认，必须原样透传）。 */
 const imageBlock = { type: 'image', attachment: { attachmentId: 'img-1', name: 'a.png' } };
