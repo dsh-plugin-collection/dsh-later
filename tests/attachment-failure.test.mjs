@@ -14,7 +14,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyAttachmentFailure } from '../lib/attachment-failure.js';
+import { loadTranspiled } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { classifyAttachmentFailure } = await loadTranspiled('src/client/attachment-failure.ts');
 
 test('宿主「未被本会话引用」→ pending-send（待发送提醒的预期状态）', () => {
   assert.equal(

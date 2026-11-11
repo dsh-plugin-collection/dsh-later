@@ -385,3 +385,37 @@ sessionController`），插件整体消失，`/later` 与 `/schedule` 全体不�
 **别把它改回去**：现有 `tests/hover-card.test.mjs` 仍按旧口径断言，它的桩写的是小写 `idle` 且不带 `data-state`，
 所以新旧两版实现都能通过，它不构成这条规则的回归线；「空闲 / 非空闲 / 无提醒」三档的 DOM 级用例尚未在本仓落地，
 在补齐之前，这条规则只有代码注释与本条兜着。
+
+## 12. 产物瘦身：注释不进 `lib/`，`lib/client.js` 按 UTF-8 写出（issue #145）
+
+**现在的取舍**：`tsconfig.json` 开 `removeComments: true`，`build.mjs` 的 client esbuild 步骤加
+`charset: 'utf8'`。两条都只改 `build.mjs` 与 `tsconfig.json`，不动 `src/` 一行，产物的模块边界、
+导出名、运行时语义都不变。实测数字与核对方法在 [`verification.md`](verification.md) 的「产物体积」一条。
+
+**为什么接受**：`lib/` 是逐文件 tsc emit，注释随每个文件复制一遍；client bundle 默认 `charset: 'ascii'`，
+界面文案里的每个汉字都变成 6 字节转义。这两份体积在每次 `npm install` 拉包和每次内核冷启动读文件时
+都要付一遍，而它们承载的信息（注释、中文写法）都不是运行时需要的：
+
+1. 注释的权威版本在 `src/`，`lib/` 里的只是副本。要读实现就读 `src/`，对应关系是一一对应的文件名，
+   读 `src/` 拿到的信息只会更全。
+2. 中文转义纯属字节开销：产物是 UTF-8 写盘，宿主也按 `text/javascript; charset=utf-8` 送出
+   （`dsh-client-modules` 与 `dsh-host-frontend-static` 两处都是这个值），浏览器解码路径本来就按
+   UTF-8 走，写成转义反而多一道无谓的转换。
+
+**代价，以及为什么还是接受**：
+
+- **profiles 里的 `lib/` 不能当调试底本**。线上排障若习惯翻 `~/.dsh/profiles/*/node_modules/dsh-later/lib/`，
+  现在只能看到代码、看不到注释。排障口径统一成：**读 `src/`，`lib/` 只用来确认「装的是哪一版、产物形态对不对」**。
+  这个代价是有意的：把注释留在产物里会让「读哪一份」变成每次都要判断的分叉，而 `src/` 与 `lib/` 一旦不同步，
+  翻 `lib/` 反而更容易得出过期结论。
+- **`lib/types/*.d.ts` 的契约注释一并被压掉**。这些类型目前只在宿主运行时与 `scripts/verify-across-kernels.mjs`
+  的类型面里被消费，不对外发布 API；若将来有第三方要读这份声明，`removeComments` 需要重议。
+- **`charset: 'utf8'` 依赖送出侧的 charset 声明**。宿主侧已按上一条取证过；这条链路一旦改动
+  （比如换了静态服务或手写响应头），必须同步核对，否则中文会按错误编码渲染。这正是把依据写进
+  `build.mjs` 注释的原因。
+- 两条都有已知盲区：esbuild 文档写明 `charset` 不处理正则字面量里的非 ASCII、也不作用于注释。
+  产物里现在只剩 3 处正则控制字符转义，控制字符在源码里本来就只能写成转义，因此不影响体积也不影响匹配。
+
+**可逆性**：两条各是一行配置，删掉即回到原状，产物形态判据（`tests/build-artifact-shape.test.mjs`）与
+`npm test` 都能继续用来复盘。
+

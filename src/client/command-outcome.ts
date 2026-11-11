@@ -7,13 +7,14 @@
  * 暂停项时 host 可能返回 `deleted:false`，而这里照样是 `matched: true`。
  * 需要业务事实时以 `userSchedules` 投影为准（见 ScheduleDock 的观察窗对账）。
  *
- * 本模块被 host 与 client 两侧共用（与 smart-window / time-utils 同款：
- * 同时列出在 tsconfig.json 与 tsconfig.client.json 的 include 中）。
+ * 本模块**仅 client 侧使用**（本文件在 `src/client/` 下，只被 `tsconfig.client.json` 编译，
+ * 不进 host 的 `lib/` 产物）。类型本身由 `dsh-commands` 的 admission 契约决定。
  *
- * @module dsh-later/command-outcome
+ * @module dsh-later/client/command-outcome
  */
+
 /** 一条命令的执行结果。 */
 export interface CommandOutcome {
-    /** 命令是否被受理（matched）。false 表示未受理（无会话面 / 网络异常 / 无此命令）。 */
-    readonly matched: boolean;
+  /** 命令是否被受理（matched）。false 表示未受理（无会话面 / 网络异常 / 无此命令）。 */
+  readonly matched: boolean;
 }

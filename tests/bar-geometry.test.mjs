@@ -12,13 +12,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  barSegments,
-  frozenBarSegments,
-  barWindow,
-  planBarAnimation,
-  BAR_UNIT_MS,
-} from '../lib/bar-geometry.js';
+import { loadTranspiledTree } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { barSegments, frozenBarSegments, barWindow, planBarAnimation, BAR_UNIT_MS } = await loadTranspiledTree('src/client/bar-geometry.ts');
 
 const firstSeen = new Map();
 const t0 = 1_700_000_000_000;

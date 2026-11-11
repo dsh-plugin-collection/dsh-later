@@ -76,9 +76,9 @@ import {
   relativeFireLabel,
   type PresenceBadgeState,
   type RelativeFireLabels,
-} from '../presence.js';
-import type { ScheduleSummaryEntry, ScheduleSummaryMap } from '../schedule-summary.js';
-import type { ScheduleSummaryStore } from '../schedule-summary-store.js';
+} from './presence.js';
+import type { ScheduleSummaryEntry, ScheduleSummaryMap } from './schedule-summary.js';
+import type { ScheduleSummaryStore } from './schedule-summary-store.js';
 import { dictFor, format, type SchedStrings } from './strings.js';
 
 /** 宿主 locale 服务的结构化子集。 */

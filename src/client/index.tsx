@@ -37,7 +37,7 @@ import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from '
 import { name } from '../domain.js';
 import { dictFor, schedDicts } from './strings.js';
 import { injectStyles } from './styles.js';
-import { isGroupBadgeVisible } from '../schedule-facet.js';
+import { isGroupBadgeVisible } from './schedule-facet.js';
 import { mountLaterScheduleFacet } from './group-status-facet.js';
 import { SchedButton } from './components/SchedButton.js';
 import { ScheduleDock } from './components/ScheduleDock.js';
@@ -53,7 +53,7 @@ import {
   getScheduleSummaryStore,
   setActiveScheduleSummaryStore,
   type ScheduleSummarySessionsLike,
-} from '../schedule-summary-store.js';
+} from './schedule-summary-store.js';
 
 /** Filled slot：输入框右侧工具行。 */
 const INPUT_RIGHT_SLOT = 'conversation.input.right';
@@ -696,21 +696,21 @@ export {
   buildScheduleSummary,
   schedulesOfProjection,
   summarizeScheduleGroup,
-} from '../schedule-summary.js';
+} from './schedule-summary.js';
 export {
   createScheduleSummaryStore,
   getScheduleSummaryStore,
   subscribeScheduleSummaryStore,
-} from '../schedule-summary-store.js';
+} from './schedule-summary-store.js';
 export { useScheduleSummary } from './useScheduleSummary.js';
 export type {
   GroupScheduleSummary,
   ScheduleSummaryEntry,
   ScheduleSummaryMap,
   ScheduleSummarySource,
-} from '../schedule-summary.js';
+} from './schedule-summary.js';
 export type {
   ScheduleSummarySessionsLike,
   ScheduleSummaryStore,
   ScheduleSummaryStoreOptions,
-} from '../schedule-summary-store.js';
+} from './schedule-summary-store.js';

@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientSchedule, CreateCommandPayload } from '../types.js';
-import type { CommandOutcome } from '../../command-outcome.js';
+import type { CommandOutcome } from '../command-outcome.js';
 import { detectTimeZone } from '../../time-utils.js';
 import {
   appendPending,

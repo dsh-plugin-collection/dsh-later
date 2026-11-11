@@ -17,14 +17,17 @@
  * 的会话数」、overdue / urgent 才脉冲、文案 `N 定时任务` / `N Scheduled`。本文件与它
  * 逐字段对齐；注册后徽标若有任何一处与迁移前不同，要么是本仓语义写错，要么是对方
  * bug，两种都回 issue #36 说一声，而不是顺手改口径。
- * @module dsh-later/schedule-facet
+ * @module dsh-later/client/schedule-facet
  */
 import type { PresenceBadgeState } from './presence.js';
-import { type GroupScheduleSummary, type ScheduleSummaryMap } from './schedule-summary.js';
+import { STATE_RANK, summarizeScheduleGroup, type GroupScheduleSummary, type ScheduleSummaryMap } from './schedule-summary.js';
+
 /** facet id：`'<包名>.<状态名>'`，与过渡适配器同名，注册即顶掉它（同 id 由来源决胜）。 */
-export declare const LATER_SCHEDULE_FACET_ID = "dsh-later.schedule";
+export const LATER_SCHEDULE_FACET_ID = 'dsh-later.schedule';
+
 /** 本文件实现的协议版本（provider 必须原样填进 `protocol`；对不上对方会拒绝登记）。 */
-export declare const LATER_SCHEDULE_FACET_PROTOCOL = 1;
+export const LATER_SCHEDULE_FACET_PROTOCOL = 1;
+
 /**
  * 本插件自己的「在分组徽标中显示定时任务」开关，在 `Config` 里的字段名（issue #83）。
  *
@@ -37,12 +40,14 @@ export declare const LATER_SCHEDULE_FACET_PROTOCOL = 1;
  * 不去登记 facet。三处字面量（host `Config`、设置卡 SECTIONS、下面的读取处）由
  * `tests/group-badge-visibility.test.mjs` 锁成同一份——写错不会报错，只会让开关失灵。
  */
-export declare const GROUP_BADGE_SETTING_KEY = "showInGroupBadge";
+export const GROUP_BADGE_SETTING_KEY = 'showInGroupBadge';
+
 /** 读开关所需的最小快照视图（两代 harness 的 scope 快照都落在这个形状里）。 */
 export interface GroupBadgeSettingSnapshot {
-    readonly status: string;
-    readonly value?: unknown;
+  readonly status: string;
+  readonly value?: unknown;
 }
+
 /**
  * 「在分组徽标中显示定时任务」当前是否生效。
  *
@@ -55,11 +60,18 @@ export interface GroupBadgeSettingSnapshot {
  * @param snapshot - 本插件设置 scope 的原始快照。
  * @returns 是否应当登记 facet。
  */
-export declare function isGroupBadgeVisible(snapshot: GroupBadgeSettingSnapshot): boolean;
+export function isGroupBadgeVisible(snapshot: GroupBadgeSettingSnapshot): boolean {
+  if (snapshot.status !== 'ready') return true;
+  const value = (snapshot.value ?? {}) as Record<string, unknown>;
+  return value[GROUP_BADGE_SETTING_KEY] !== false;
+}
+
 /** 图标排列顺序：沿用过渡适配器的 10，注册前后时钟在徽标排格里的位置不动。 */
-export declare const LATER_SCHEDULE_FACET_ORDER = 10;
+export const LATER_SCHEDULE_FACET_ORDER = 10;
+
 /** 徽标可用的三档语义色（对方色板；本插件只选档，不选具体颜色）。 */
 export type FacetTone = 'info' | 'warn' | 'error';
+
 /**
  * 语义色档 → 宿主色令牌。
  *
@@ -67,7 +79,12 @@ export type FacetTone = 'info' | 'warn' | 'error';
  * 对比均 ≥3:1；urgent / overdue 走宿主 warn / error 别名），也与过渡适配器画的一致，
  * 所以行内 badge 与折叠徽标不会出现「同一件事两种颜色」。
  */
-export declare const FACET_TONE_COLOR: Readonly<Record<FacetTone, string>>;
+export const FACET_TONE_COLOR: Readonly<Record<FacetTone, string>> = {
+  info: '#8b5cf6',
+  warn: 'var(--dsw-alias-state-warn-secondary)',
+  error: 'var(--dsw-alias-state-error-primary)',
+};
+
 /**
  * 取图标颜色，**未知色档回落 info**。
  *
@@ -77,22 +94,37 @@ export declare const FACET_TONE_COLOR: Readonly<Record<FacetTone, string>>;
  * @param tone - 折果里的色档。
  * @returns 可用的 CSS 颜色值。
  */
-export declare function facetIconColor(tone: FacetTone | string): string;
+export function facetIconColor(tone: FacetTone | string): string {
+  return tone === 'warn' ? FACET_TONE_COLOR.warn : tone === 'error' ? FACET_TONE_COLOR.error : FACET_TONE_COLOR.info;
+}
+
 /** 一个 facet 折出来的事实（协议形状；`data` 是本插件私有形状，对方从不读）。 */
 export interface LaterFacetFold {
-    /** 贡献给徽标数字的条数：组内**有任务的会话数**（与行级读数同口径）。 */
-    readonly count: number;
-    readonly tone: FacetTone;
-    readonly pulse: boolean;
-    /** 私有形状：组级定时摘要，供 merge 与后续文案使用。 */
-    readonly data: GroupScheduleSummary;
+  /** 贡献给徽标数字的条数：组内**有任务的会话数**（与行级读数同口径）。 */
+  readonly count: number;
+  readonly tone: FacetTone;
+  readonly pulse: boolean;
+  /** 私有形状：组级定时摘要，供 merge 与后续文案使用。 */
+  readonly data: GroupScheduleSummary;
 }
+
+/**
+ * 空快照（store 还没产出数据时用它代替「undefined 到处判」）。
+ *
+ * 常量而非每次 `new Map()`：`fold` 在对方**每次渲染**里都会被调用，为一个永远为空
+ * 的映射反复分配没有意义。
+ */
+const NO_SCHEDULES: ScheduleSummaryMap = new Map();
+
 /**
  * 状态 → 色档：overdue 红、urgent 橙、其余（含无任务）紫。与过渡适配器逐档一致。
  * @param state - 组内最高优先级状态；无任务时 undefined。
  * @returns 徽标色档。
  */
-export declare function toneOfState(state: PresenceBadgeState | undefined): FacetTone;
+export function toneOfState(state: PresenceBadgeState | undefined): FacetTone {
+  return state === 'overdue' ? 'error' : state === 'urgent' ? 'warn' : 'info';
+}
+
 /**
  * 要不要脉冲。
  *
@@ -102,7 +134,10 @@ export declare function toneOfState(state: PresenceBadgeState | undefined): Face
  * @param state - 组内最高优先级状态。
  * @returns 是否脉冲。
  */
-export declare function pulseOfState(state: PresenceBadgeState | undefined): boolean;
+export function pulseOfState(state: PresenceBadgeState | undefined): boolean {
+  return state === 'overdue' || state === 'urgent';
+}
+
 /**
  * 把一组会话折成徽标事实。
  *
@@ -111,7 +146,19 @@ export declare function pulseOfState(state: PresenceBadgeState | undefined): boo
  * @param sessionIds - 组内会话 id（顺序无关；对方按前缀原样传，口径归本插件判定）。
  * @returns 徽标事实。
  */
-export declare function foldLaterSchedule(snapshot: ScheduleSummaryMap | undefined, sessionIds: readonly string[]): LaterFacetFold;
+export function foldLaterSchedule(
+  snapshot: ScheduleSummaryMap | undefined,
+  sessionIds: readonly string[],
+): LaterFacetFold {
+  const group = summarizeScheduleGroup(snapshot ?? NO_SCHEDULES, sessionIds);
+  return {
+    count: group.sessions,
+    tone: toneOfState(group.state),
+    pulse: pulseOfState(group.state),
+    data: group,
+  };
+}
+
 /**
  * 合并同一 facet 在子树两层的折果（多层文件夹）。
  *
@@ -122,7 +169,43 @@ export declare function foldLaterSchedule(snapshot: ScheduleSummaryMap | undefin
  * @param b - 子层折果。
  * @returns 合并后的折果。
  */
-export declare function mergeLaterSchedule(a: LaterFacetFold, b: LaterFacetFold): LaterFacetFold;
+export function mergeLaterSchedule(a: LaterFacetFold, b: LaterFacetFold): LaterFacetFold {
+  const state = moreUrgent(a.data.state, b.data.state);
+  const nextAt = earliestNextAt(a.data.nextAt, b.data.nextAt);
+  const group: GroupScheduleSummary = nextAt === undefined
+    ? {
+        sessions: a.data.sessions + b.data.sessions,
+        count: a.data.count + b.data.count,
+        pausedCount: a.data.pausedCount + b.data.pausedCount,
+        ...(state === undefined ? {} : { state }),
+      }
+    : {
+        sessions: a.data.sessions + b.data.sessions,
+        count: a.data.count + b.data.count,
+        pausedCount: a.data.pausedCount + b.data.pausedCount,
+        nextAt,
+        ...(state === undefined ? {} : { state }),
+      };
+  return { count: group.sessions, tone: toneOfState(state), pulse: pulseOfState(state), data: group };
+}
+
+/** 更紧急的一档（overdue > urgent > scheduled）；两边都没有时 undefined。 */
+function moreUrgent(
+  a: PresenceBadgeState | undefined,
+  b: PresenceBadgeState | undefined,
+): PresenceBadgeState | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return STATE_RANK[b] > STATE_RANK[a] ? b : a;
+}
+
+/** 更早的触发时刻；两边都没有（全部暂停 / 无任务）时 undefined。 */
+function earliestNextAt(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return b < a ? b : a;
+}
+
 /**
  * 进徽标 `aria-label` / `title` 与悬停明细的那句话。
  *
@@ -133,4 +216,6 @@ export declare function mergeLaterSchedule(a: LaterFacetFold, b: LaterFacetFold)
  * @param word - 「定时任务 / Scheduled」这个词，由调用方按当前语言取。
  * @returns 文案；`word` 为空串时返回空串（协议把空串当作「我没有文案」）。
  */
-export declare function laterScheduleFacetLabel(fold: LaterFacetFold, word: string): string;
+export function laterScheduleFacetLabel(fold: LaterFacetFold, word: string): string {
+  return word === '' ? '' : `${fold.count} ${word}`;
+}

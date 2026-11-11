@@ -11,7 +11,7 @@ import { IconClock } from '../primitives-compat.js';
 import { detectTimeZone } from '../../time-utils.js';
 import { useSchedT, type LocaleFaceLike } from '../useSchedT.js';
 import type { ClientSchedule, CreateCommandPayload } from '../types.js';
-import type { CommandOutcome } from '../../command-outcome.js';
+import type { CommandOutcome } from '../command-outcome.js';
 import { SchedPanel } from './SchedPanel.js';
 import { useSchedules } from '../hooks/useSchedules.js';
 import { useSchedulerSettings, type SchedulerSettingsScopeLike } from '../hooks/useSchedulerSettings.js';

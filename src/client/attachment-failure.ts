@@ -10,16 +10,20 @@
  *
  * 这个分类抽成纯函数，供客户端与测试共用；宿主返回的其他错误仍归为 `unavailable`。
  *
- * @module dsh-later/attachment-failure
+ * @module dsh-later/client/attachment-failure
  */
+
+/** 图片读不到的两种性质。 */
+export type AttachmentImageFailure = 'pending-send' | 'unavailable';
+
 /**
  * 判定一次图片读取失败的性质。
  * @param error 宿主 `imageUrl()` / `readAttachment()` 的拒绝原因
  * @returns `pending-send`（尚未被会话引用，等到点发送后自然可见）或 `unavailable`（真读不到）
  */
-export function classifyAttachmentFailure(error) {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    return /session\/attachment-invalid|not referenced by this session/i.test(message)
-        ? 'pending-send'
-        : 'unavailable';
+export function classifyAttachmentFailure(error: unknown): AttachmentImageFailure {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /session\/attachment-invalid|not referenced by this session/i.test(message)
+    ? 'pending-send'
+    : 'unavailable';
 }

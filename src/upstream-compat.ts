@@ -373,25 +373,61 @@ function segmentCeiling(base: string): string {
 /**
  * 单代的 peer 条款：`>=<id> <该段下一 patch>-0`。
  *
- * **为什么不写成 `^<id>`**（本轮修复点）：caret 带预发布时展开为
+ * **为什么不写成 `^<id>`**：caret 带预发布时展开为
  * `>=0.1.2-rc.1 <0.2.0-0`，即**整条 minor 都命中**。于是六枚逐代 caret 的并集照样放行
  * `0.1.3-alpha.2` / `0.1.6-alpha.1` / `0.1.7-alpha.1` / `0.1.5-rc.1` —— 拿真内核评估器对
  * 当前 manifest 实测，四条全 pass。而这几个运行时**恰好只读 peer、不读 `engines.dsh`**
  * （0.2.1 起才反过来），所以收紧 engines 对它们毫无作用：peer 是它们唯一的门。
  * 只修 engines 等于把门修在了没人走的那一侧。
  *
- * 逐代一条 + 各带上界，既保住「下界恰为该代本身、逐代留痕」这条既有政策（见
- * `tests/upstream-compat.test.mjs` 的注释），又真的收住。形状由 id **推导**而不是手抄：
+ * 这里给出的是**单代**的区间；`peerRangeFor` 再按段合并（同段内下界冗余，见
+ * {@link foldSegmentClauses}），段间空洞一律保留。形状由 id **推导**而不是手抄：
  * 手抄一定会漂，engines 与 peer 上一轮就是这样各说各话的。
  */
 export function genPeerRange(id: string): string {
   return `>=${id} <${segmentCeiling(id.split('-')[0]!)}`;
 }
 
-/** 由 KERNEL_GENERATIONS 拼出的 peer 范围串（`a || b`）。 */
+/**
+ * 把同一个版本段内的多条 peer 条款合成一条：`>=a <C || >=b <C` → `>=a <C`。
+ *
+ * 只有当 `b` 落在 `>=a <C` 之内时才能合，合出来是**同一个区间**，可安装面逐点相同。
+ * 这里用 semver §11 的版本比较判断（`compareVersions(b, a) > 0` 且 `b < C`），
+ * 不按字符串猜。段外、或下界不连续的两段之间留着空洞，不跨越合并。
+ *
+ * 用它的原因：11 段条款表达的实际区间只有 6 段，同一段里几个 rc 各写一条是噪声，
+ * 且每加一个同段 rc 都要重发一次插件才能改这一行。
+ */
+function foldSegmentClauses(clauses: ReadonlyArray<{ floor: string; ceiling: string }>): string[] {
+  const out: string[] = [];
+  for (const clause of clauses) {
+    const previous = out.at(-1);
+    const parts = previous === undefined ? null : /^>=(\S+) <(\S+)$/.exec(previous);
+    const inside =
+      parts !== null &&
+      parts[2] === clause.ceiling &&
+      (compareVersions(clause.floor, parts[1]!) ?? -1) > 0;
+    if (inside) continue;
+    out.push(`>=${clause.floor} <${clause.ceiling}`);
+  }
+  return out;
+}
+
+/**
+ * 由 KERNEL_GENERATIONS 拼出的 peer 范围串（`a || b`）。
+ *
+ * 形状：**每个版本段一条**，段内同 tuple 的 rc 合并到该段最早的已验证下界之上
+ * （见 {@link foldSegmentClauses}）。合并只是去掉同段内冗余的下界，区间本身不变，
+ * 所以可安装面与逐代枚举**并集完全一致**；证据与探针覆盖见
+ * `tests/peer-range-fold.test.mjs`。
+ */
 export function peerRangeFor(packageName: string): string {
   const extras = EXTRA_PEER_GENERATIONS[packageName] ?? [];
-  return [...extras, ...KERNEL_GENERATIONS.map((g) => g.id)].map((id) => genPeerRange(id)).join(' || ');
+  const clauses = [...extras, ...KERNEL_GENERATIONS.map((g) => g.id)].map((id) => {
+    const [floor, ceiling] = genPeerRange(id).split(' ');
+    return { floor: floor!.slice(2), ceiling: ceiling!.slice(1) };
+  });
+  return foldSegmentClauses(clauses).join(' || ');
 }
 
 /** 全部需逐代枚举的 `{ package, range }`（sync-peer-matrix / 矩阵测试共用）。 */
@@ -405,10 +441,10 @@ export function peerMatrixEntries(): ReadonlyArray<{ packageName: string; range:
 /**
  * 由 KERNEL_GENERATIONS 推导 `engines.dsh` 的范围串（**逐 tuple 上界**写法）。
  *
- * ## 为什么 engines 与 peer 用两种形状，而不是照抄 peer 的逐代 `^id`
+ * ## 为什么 engines 与 peer 用两种形状
  *
- * peer 侧刻意逐代枚举、且「下界恰为该代本身」（见 `tests/upstream-compat.test.mjs`
- * 那条「逐代留痕，不借用更早下界」）——那是**证据台账**。engines 侧要解决的是另一个
+ * peer 侧按段收口，段内下界取该段最早的已验证代次（同段更晚的 rc 由区间一并放行，
+ * 见 {@link peerRangeFor}）。engines 侧要解决的是另一个
  * 问题：node-semver **不把预发布算进普通范围**，所以 `>=0.1.2-rc.1 <0.2.0-0` 这种写法
  * 会把别的 tuple 上的预发布也放进来（实测 `0.1.3-alpha.2`、`0.1.6-alpha.1`、
  * `0.1.7-alpha.1`、`0.2.2-alpha.2`、`0.1.5-rc.1/rc.2` 全判「支持」，而这些当时一次都没跑过；

@@ -10,6 +10,18 @@
  * 宿主这代有这个类型就直接用（结构天然一致、随宿主升级自愈），没有才按当前代形状本地声明。
  * 形状漂移会在新代 tsc 上立刻报错，而不是静默错下去。
  *
+ * ## 唯一一个「可达性自检会点名」的模块
+ *
+ * 全是 `type` / `interface`，所以 `tsc` 的 emit 是一份**空的** `lib/upstream-shims.js`
+ * （内容只有 `export {};`）。它因此永远不会出现在任何人的静态 import 闭包里，会被
+ * `npm run check:lib-reach`（`scripts/lib-reachability.mjs`）列进不可达清单。
+ *
+ * 这条是可接受的例外，而且是**自检脚本自己的**判断依据，不是先例：这个文件必须留在
+ * `src/` 根目录、必须继续进 host 编译（它的 `.d.ts` 是 `lib/types/` 的组成部分），
+ * 所以既不能移进 `src/client/`（那是 client-only 的去处），也不能让 `tsconfig.json`
+ * 把它 exclude 掉（那样 `lib/types/upstream-shims.d.ts` 会消失）。判据里按「产物
+ * 只有 `export {};`」识别它，见 `REEXPORT_ONLY_JS`。
+ *
  * @module dsh-later/upstream-shims
  */
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands';

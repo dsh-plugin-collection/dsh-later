@@ -1,46 +1,8 @@
-/**
- * `userSchedules` 会话投影：宿主侧维护的「用户创建的、当前活动的定时提醒」，
- * 通过 `session/projection` 帧实时推给客户端（GUI 用 `useProjection` 读取）。
- *
- * fold 输入两路事件：
- *  - `schedule/change`：dsh-schedule 的严格 v1 事件（我们写入时与其完全兼容），
- *    用其导出的 `decodeScheduleChange` 解码；
- *  - `session-scheduler/user-schedule`：本插件自有的所有权记录（哪种来源）。
- *
- * 「哪些事件属于本会话」按 **seq 切点**判，不按 `session/end-seed` 事件判。
- * 宿主把**整份**日志（含继承前缀）从 seq 0 折进本单元，并在
- * `init(header, inheritedEventCount)` 的第二参数给出前缀长度——那个长度就是这里的
- * `seedSeq`，`seq < seedSeq` 的事件一律不进状态，因此派生会话不继承父会话的提醒
- * （AC-07）。投递通道 `foldUserState`（`src/user-tools.ts` → `readFoldInput`）吃的
- * 是**同一个数字**，两条通道对「本会话的历史」的口径由此一致。
- *
- * 为什么不能拿 `session/end-seed` 当边界（issue #11 的缺陷本体）：内核**每次冷恢复
- * 会话**都会在日志尾部补一条 `session/end-seed {}`（`dsh-session/lib/index.js:1428`，
- * 0.1.2-rc.1 是 `:1322`，措辞略异但同样只发 `{}`）——它标记的是「本会话自己历史的
- * 重放结束」，不是归属边界。旧实现见该事件即清空 active，于是投影被抹空而投递通道
- * 照常工作：提醒到点照发，dock 倒计时条与侧栏却是空的，用户看不见也就取消不掉。
- * 也不能改按 `data.inherited === true` 分派：`0.1.2-rc.1` 的 fork 边界也只发 `{}`
- * （那代根本没有 `inherited` 这个字段），按 data 形状判会把那一代的 fork 隔离弄坏。
- *
- * 注意 `apply` 为增量 fold：无关事件必须返回同一状态引用，否则会误触发推送。
- * @module dsh-later/projection
- */
 import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 declare function decodeScheduleChangeCompat(data: unknown): ScheduleChange;
-/**
- * 仅供 `tests/schedule-change-decode-parity.test.mjs` 使用的兜底解码器出口。
- *
- * 为什么必须导出：开发树里 `dsh-schedule` 一直有 `decodeScheduleChange`，所以
- * 正常路径**永远走不到兜底分支**——不导出就只能靠真内核复现，而这正是 issue #12
- * 第二段「只改了一处、单测全绿」的成因。导出让单测能直接钉住兜底语义。
- */
 export declare const __decodeScheduleChangeCompatForTest: typeof decodeScheduleChangeCompat;
 import type { AfterScheduleRecord, AtScheduleRecord, EveryScheduleRecord } from '@deepseek-ai/dsh-schedule';
-/**
- * `schedule/change` 事件解出的三种操作。上游 `0.2.2-alpha.3` 起类型面不再导出
- * `ScheduleChange`（GitHub issue #12），本仓按旧版语义自行声明。
- */
 type ScheduleChange = {
     readonly operation: 'create';
     readonly schedule: unknown;
@@ -54,26 +16,11 @@ type ScheduleChange = {
 };
 import type { PausedEntry, ScheduledAttachment } from './ownership-store.js';
 import type { UserScheduleProjectionValue } from './domain.js';
-/**
- * 耐久图片引用 → 宿主绝对路径的解析器（由 `index.ts` 在 apply 时注入）。
- *
- * 为什么是**注入**而不是让本模块直接依赖 `ctx`：投影单元是纯 fold + 纯 view，
- * 宿主按事件到达推进它、并按 seq 消费 view 出的帧，模块内不持有任何服务引用
- * （`ownership-store` 同理，走的是 sessionId 键控的模块级状态）。注入一个函数
- * 既能拿到 `ctx.attachments`，又保住这条边界，也让 `attachmentWireOf` 可在
- * 无服务环境下（`node --test`）直接测。
- *
- * 未注入（旧宿主 / 无 attachments 后端 / 测试）时返回 `undefined`，即不带
- * `host_path`，客户端退回 `uiConversation.imageUrl` 那条通道。
- */
-/** 耐久图片引用（= sidecar 里 image 块的 `attachment`，宿主 `imageHostPath` 的入参）。 */
 type ImageRefLike = Extract<ScheduledAttachment, {
     type: 'image';
 }>['attachment'];
 type ImageHostPathResolver = (ref: ImageRefLike) => string | undefined;
-/** 注入解析器（幂等；插件重载时重复调用是预期行为）。 */
 export declare function setImageHostPathResolver(resolver: ImageHostPathResolver | undefined): void;
-/** 投影 wire 值 schema（wire.viewSchema：离开宿主前校验客户端载荷）。 */
 export declare const userSchedulesSchema: z.ZodObject<{
     schedules: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -127,18 +74,6 @@ export declare const userSchedulesStateSchema: z.ZodObject<{
         pausedAt: z.ZodNumber;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
-/**
- * 活动存储记录：dsh-schedule 记录 + 创建时刻（来自 create 事件的 time）。
- *
- * 显式按**本插件产出的三种 kind** 收窄，而非直接用 `ScheduleRecord`：
- * 0.1.7 的联合新增了 daily/weekly/cron，它们的字段面
- * （`afterSeconds` / `everySeconds`）与本插件的 wire 契约不同，透传会让
- * `wireItemOf` 读到不存在的字段。
- *
- * 逐个具名引用而非 `Extract`：`Extract<ScheduleRecord, {kind:'after'|…}>`
- * 在本仓库的 tsc 配置下不触发收窄（判别式联合的 `Extract` 需 kind 为
- * 单字面量，逐个列举后交集才正确）。
- */
 export type StoredScheduleRecord = (AfterScheduleRecord & {
     readonly createdAt?: number;
 }) | (AtScheduleRecord & {
@@ -146,62 +81,18 @@ export type StoredScheduleRecord = (AfterScheduleRecord & {
 }) | (EveryScheduleRecord & {
     readonly createdAt?: number;
 });
-/** 投影内部状态（plain JSON：owned/active 用数组承载）。 */
 export interface UserScheduleProjectionState {
-    /** 会话 id（init 由 header 注入）。 */
     readonly sessionId: string;
-    /** 用户工具创建的 schedule id 集合。 */
     readonly owned: readonly string[];
-    /** 当前活动记录（按 schedule/change 严格 fold）。 */
     readonly active: readonly StoredScheduleRecord[];
-    /**
-     * 继承前缀切点（= `init` 第二参数 `inheritedEventCount`，与投递通道同源）：
-     * `seq < seedSeq` 的事件属于祖先会话，一条都不进状态。
-     */
     readonly seedSeq: number;
-    /** sidecar 暂停留档镜像。 */
     readonly paused: readonly PausedEntry[];
 }
-/** 初始状态：按会话 id 从所有权 sidecar 装载（进程重启后恢复 GUI 归属）。
- *
- * 第二个参数是宿主 `ProjectionDefinition.init(header, inheritedEventCount)` 契约里的
- * **继承前缀长度**（fork 点之前那些条目的条数）。表内 9 代（`0.1.2-rc.1` …
- * `0.2.2-alpha.2`）都在 `def.init(session.header, session.inheritedEventCount)` 处传它
- * ——逐代 grep 各自 `dsh-session-projection/lib/index.js` 的调用点核实，本模块因此
- * **不依赖任何只在较新代次出现的字段**。本模块把它折成 `seedSeq`，作为「哪些事件
- * 属于本会话」的**唯一**判据——与投递通道 `foldUserState` → `readFoldInput` 吃的是
- * 同一个数字。
- */
 export declare function initUserScheduleProjection(header?: {
     readonly id?: string;
 }, inheritedEventCount?: number): UserScheduleProjectionState;
-/**
- * 增量 fold。返回同一引用当事件无关；返回新状态当 owned/active 发生变化。
- */
 export declare function applyUserScheduleProjection(state: UserScheduleProjectionState, event: SessionEvent): UserScheduleProjectionState;
-/**
- * 投影 view：活动 + 暂停（同列表；paused 靠 status 区分，dock 原地冻结）。
- *
- * ⚠️ 这里是**唯一**能让「删除暂停项」生效的地方。原因链：
- *  - 删除暂停项只清 sidecar、**不写会话事件**（补写 `schedule/change` delete 会
- *    因为该 id 在 pause 时已被删除而抛 `targets inactive id`，把日志读坏）；
- *  - 投影 cell 只在事件到达时由 `apply` 推进，且跨进程持久化（projcache），
- *    客户端又按 seq「更高者胜」消费控制帧——没有新事件就没有新帧；
- *  - 于是 `state.paused` 会永久停留在最后一次事件时的快照上。
- * 因此 view 不能直接信任 `state.paused`，必须**以 sidecar 为准重读**：
- * sidecar 是暂停留档的权威存储（`ownship-store`），`state.paused` 只是镜像。
- * 这样无论 cell 多陈旧，读出来的 paused 列表都与真实留档一致。
- */
 export declare function viewUserScheduleProjection(state: UserScheduleProjectionState): UserScheduleProjectionValue;
-/**
- * 投影单元声明（传给 sessionProjections.register）。
- *
- * 形状必须匹配 `ProjectionDefinition`：
- *  - `stateSchema`（不是 schema）：宿主持久化缓存恢复前校验内部状态；
- *  - `wire: { viewSchema, view }`（不是顶层 view）：**只有带 wire 的单元才是
- *    client-visible 的**——`snapshot()`/变更帧都会跳过无 wire 的单元，
- *    客户端 `useProjection(key)` 将永远读到 undefined。
- */
 export declare const userSchedulesProjectionUnit: {
     readonly key: "userSchedules";
     readonly stateSchema: z.ZodObject<{

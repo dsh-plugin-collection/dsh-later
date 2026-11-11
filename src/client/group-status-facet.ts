@@ -39,7 +39,7 @@
  */
 import { createElement, type ReactNode } from 'react';
 import { IconClock } from './primitives-compat.js';
-import type { ScheduleSummaryMap } from '../schedule-summary.js';
+import type { ScheduleSummaryMap } from './schedule-summary.js';
 import {
   LATER_SCHEDULE_FACET_ID,
   LATER_SCHEDULE_FACET_ORDER,
@@ -49,7 +49,7 @@ import {
   laterScheduleFacetLabel,
   mergeLaterSchedule,
   type LaterFacetFold,
-} from '../schedule-facet.js';
+} from './schedule-facet.js';
 
 /**
  * 客户端 factory 作用域里的模块解析器。

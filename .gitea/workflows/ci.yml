@@ -25,6 +25,18 @@ jobs:
         # 别在这后面补 `git diff --exit-code -- lib` 当新鲜度门禁：esbuild 的分节注释会随检出
         # 布局与依赖解析变（符号链接 node_modules 下实测每次差 1 行），那道门禁只会随机红。
         run: npm run build
+      - name: lib 可达性（每个 host 产物都必须能从 lib/index.js 走到）
+        # tsc 为 include 里每个源文件都产一份 lib/*.js，宿主却只加载 index.js 的静态 import 闭包。
+        # 只被客户端用的模块混进 host 编译、或某个 host 模块的导入断了线，二者产物形态完全一样，
+        # review 分不出来，只能靠这条 BFS 门禁。必须在 build 之后跑：它读的是产物，不是源码。
+        run: npm run check:lib-reach
       - name: 测试
         # 走 scripts/run-tests.mjs 而非裸 node --test：glob 零匹配时 node 仍以 0 退出（绿色空步骤）。
         run: npm test
+      - name: 发布面自检（包内真的带着 skill / 入口 / 装配补丁，且没把纯文档塞回来）
+        # 真跑一次 `npm pack --dry-run --json` 读文件清单，不只看 package.json 的 files 字段：
+        # files 只是输入，.npmignore / exports / npm 默认排除规则都能在它之上再砍一刀。
+        # SKILL.md / SKILL.en.md 缺席时 src/skill.ts 的 readFileSync 读不到文件，插件照样加载，
+        # 只是模型侧的 skill 目录少一行 —— 装上去才看得见，所以放在 CI 里拦。
+        # 必须在 build 之后：判据读的是 lib/ 的实际产物。
+        run: npm run check:release

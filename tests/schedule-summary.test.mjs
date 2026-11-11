@@ -10,12 +10,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  buildScheduleSummary,
-  schedulesOfProjection,
-  sameScheduleSummary,
-  summarizeScheduleGroup,
-} from '../lib/schedule-summary.js';
+import { loadTranspiledTree } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { buildScheduleSummary, schedulesOfProjection, sameScheduleSummary, summarizeScheduleGroup } = await loadTranspiledTree('src/client/schedule-summary.ts');
 
 const NOW = Date.parse('2026-09-05T12:00:00Z');
 const iso = (offsetMs) => new Date(NOW + offsetMs).toISOString();

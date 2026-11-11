@@ -27,16 +27,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import {
-  GROUP_BADGE_SETTING_KEY,
-  LATER_SCHEDULE_FACET_ID,
-  LATER_SCHEDULE_FACET_ORDER,
-  LATER_SCHEDULE_FACET_PROTOCOL,
-  facetIconColor,
-  foldLaterSchedule,
-  laterScheduleFacetLabel,
-  mergeLaterSchedule,
-} from '../lib/schedule-facet.js';
+import { loadTranspiledTree } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { GROUP_BADGE_SETTING_KEY, LATER_SCHEDULE_FACET_ID, LATER_SCHEDULE_FACET_ORDER, LATER_SCHEDULE_FACET_PROTOCOL, facetIconColor, foldLaterSchedule, laterScheduleFacetLabel, mergeLaterSchedule } = await loadTranspiledTree('src/client/schedule-facet.ts');
 
 /**
  * 兼容层可能查询的图标名清单 —— **从源码里读**，不在这里另抄一份。

@@ -29,15 +29,15 @@ import { detectTimeZone, formatHhmm } from '../../time-utils.js';
 import type { SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
 import { useSchedT, type SchedTranslate } from '../useSchedT.js';
-import type { CommandOutcome } from '../../command-outcome.js';
-import { classifyAttachmentFailure, type AttachmentImageFailure } from '../../attachment-failure.js';
+import type { CommandOutcome } from '../command-outcome.js';
+import { classifyAttachmentFailure, type AttachmentImageFailure } from '../attachment-failure.js';
 import {
   barSegments,
   barWindow,
   frozenBarSegments,
   planBarAnimation,
   type BarAnimationPlan,
-} from '../../bar-geometry.js';
+} from '../bar-geometry.js';
 import type { ClientAttachment, ClientSchedule } from '../types.js';
 
 /** 精确剩余时长：超过 1 小时 `H:MM:SS`，否则 `MM:SS`（负值截为 00:00）。 */

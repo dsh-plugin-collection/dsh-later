@@ -11,7 +11,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planBubbleMarker, resolveBubbleMarker } from '../lib/bubble-marker.js';
+import { loadTranspiledTree } from '../scripts/transpile-module.mjs';
+
+// 从 src/ 读而不是从 lib/ 读：该模块只被客户端用，tsconfig.client.json 是 noEmit、tsconfig.json 又 exclude 了 src/client，lib/ 下没有它的产物。
+const { planBubbleMarker, resolveBubbleMarker } = await loadTranspiledTree('src/client/bubble-marker.ts');
 
 test('解析：四档原样返回', () => {
   for (const style of ['off', 'left', 'meta', 'hover']) {

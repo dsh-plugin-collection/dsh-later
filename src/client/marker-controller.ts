@@ -20,7 +20,7 @@ import type {
   ClientSettingsScope,
   ClientSlotRegistry,
 } from './runtime-augment.js';
-import { planBubbleMarker, resolveBubbleMarker } from '../bubble-marker.js';
+import { planBubbleMarker, resolveBubbleMarker } from './bubble-marker.js';
 import { LaterUserMessageView } from './components/LaterUserMessageView.js';
 import type { LocaleFaceLike } from './useSchedT.js';
 

@@ -151,6 +151,25 @@ function clauseSatisfied(clause, version) {
   return (versionAtLeast(version, m[1]) ?? false) && (compareVersions(version, m[2]) ?? 1) < 0;
 }
 
+/**
+ * 独立重算 peer 串：同段内只保留该段**最早**的下界，段间空洞原样保留。
+ *
+ * 期望值由测试自己算（不调 `peerRangeFor`），实现把两段合并或漏掉空洞时这里会红。
+ * 语义等价性本身在 `tests/peer-range-fold.test.mjs` 里按版本逐点核对。
+ */
+function segFoldedPeerRanges(ids) {
+  const segments = new Map();
+  for (const id of ids) {
+    const ceiling = expectedCeiling(id);
+    const floor = segments.get(ceiling);
+    if (floor === undefined || verGt(floor, id)) segments.set(ceiling, id);
+  }
+  return [...segments.entries()]
+    .sort((a, b) => (verGt(a[0], b[0]) ? 1 : -1))
+    .map(([ceiling, floor]) => `>=${floor} <${ceiling}`)
+    .join(' || ');
+}
+
 test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，范围自洽）', () => {
   assert.ok(KERNEL_GENERATIONS.length >= 2, '至少覆盖两代');
   // issue #95（2026-10-26）先用跨代 tsc 量了一遍：0.1.1 / 0.1.2 / 0.1.5 三代都红，于是先把下界
@@ -164,18 +183,19 @@ test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，�
   for (const gen of KERNEL_GENERATIONS) {
     // 0.1.1 出表后表里不应再有 legacy-events 的一代；read* 的兜底分支保留为防御。
     assert.equal(gen.sessionApi, 'own-events', `${gen.id} 应为 own-events（0.1.2 起形状未变，0.1.1 已出表）`);
-    // 条款必须**自满足**：范围的下界高于自身 id 就等于声明了一个自己都不满足的区间。
+    /**
+     * 单代条款必须**自满足**：范围的下界高于自身 id 就等于声明了一个自己都不满足的区间。
+     * 下界也必须**恰为该代次本身**（不借更早下界），否则"这一代验证过"这条记录就没了。
+     *
+     * 注意这条只校验单代形状（`genPeerRange`）；package.json 里的 peer 串是**按段合并**
+     * 之后的形状，同段更晚的 rc 由区间一并覆盖，不要求字面出现 `>=<每个 rc>`。
+     * 合并的等价性由 `tests/peer-range-fold.test.mjs` 逐点核对。
+     */
     const clause = genPeerRange(gen.id);
     assert.ok(
       clauseSatisfied(clause, gen.id),
       `${gen.id} 不满足自己的 peer 条款 ${clause}`,
     );
-    /**
-     * 下界必须**恰为**该代次本身，不能借更早的 range 蒙混。
-     * 例：给 `0.1.5-rc.1` 写 `^0.1.2-rc.1` 在 semver 上"覆盖"了它（同 minor），但那等于
-     * 声明插件从 0.1.2 起就支持这一代次 —— 两代是**分别验证**过的（兼容面不同：0.1.2 缺
-     * FileTypeIcon/fileSizeText，见 #95/#101），代次表的意义正是逐代留痕。
-     */
     assert.ok(clause.startsWith(`>=${gen.id} `), `${gen.id} 的条款下界必须恰为该代：${clause}`);
     /**
      * 且**必须带上界**。这条是 2026-10-28 补的：此前写成 `^<id>`，而 caret 在 0.x 上锁的是
@@ -192,6 +212,13 @@ test('KERNEL_GENERATIONS 结构不变量（只登记能过类型面的代次，�
       `${gen.id} 的条款缺该段排他上界（应为 <${expectedCeiling(gen.id)}）：${clause}`,
     );
     assert.ok(!clause.includes('^'), `${gen.id} 的条款不应再用 caret（上界会漏整条 minor）`);
+    // 合并后的 peer 串必须覆盖每一代（合并不许把某一代收窄掉）。
+    assert.ok(
+      peerRangeFor('@deepseek-ai/dsh-session')
+        .split('||')
+        .some((part) => clauseSatisfied(part, gen.id)),
+      `${gen.id} 不在合并后的 peer 串里`,
+    );
   }
 
   // 有序（递增）
@@ -224,8 +251,8 @@ test('verGt / caretCovers 自身行为正确（防护栏本身失效）', () => 
   assert.equal(caretCovers('^0.1.5-rc.3', '0.1.5-rc.1'), false);
 });
 
-test('peerRangeFor：commands 额外并上 0.0.1 线，其余仅内核代次（逐代 + 各带上界）', () => {
-  const kernelRanges = KERNEL_GENERATIONS.map((g) => genPeerRange(g.id)).join(' || ');
+test('peerRangeFor：commands 额外并上 0.0.1 线，其余仅内核代次（逐段一条 + 各带上界）', () => {
+  const kernelRanges = segFoldedPeerRanges(KERNEL_GENERATIONS.map((g) => g.id));
   assert.equal(
     peerRangeFor('@deepseek-ai/dsh-commands'),
     `>=0.0.1-rc.1 <0.0.2-0 || ${kernelRanges}`,
@@ -234,10 +261,16 @@ test('peerRangeFor：commands 额外并上 0.0.1 线，其余仅内核代次（�
   // 整串里不该再有 caret：那会把上界漏到整条 minor（本轮修复的正是这个）。
   for (const { packageName, range } of peerMatrixEntries()) {
     assert.ok(!range.includes('^'), `${packageName} 的 peer 串里仍有 caret`);
+    // 同 tuple 的多代合成一条，所以条款数 = 该包覆盖的版本段数。
+    const segments = new Set(
+      peerRangeFor(packageName)
+        .split('||')
+        .map((clause) => clause.trim().split(' ')[1].replace(/-0$/, '')),
+    );
     assert.equal(
       range.split('||').length,
-      KERNEL_GENERATIONS.length + (packageName === '@deepseek-ai/dsh-commands' ? 1 : 0),
-      `${packageName} 的逐代条款数不对`,
+      segments.size,
+      `${packageName} 的逐段条款数不对（同段应合成一条，段间空洞保留）`,
     );
   }
   // 反例保护：非 commands 的包不得混入 0.0.1

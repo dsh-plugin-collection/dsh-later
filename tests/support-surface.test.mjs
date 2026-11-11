@@ -115,7 +115,7 @@ test('同 tuple 向后放行是**契约**而非漏洞（range 写不出白名单
   assert.equal(admitted('0.1.7', pkg.engines.dsh), true);
 });
 
-test('peer 侧逐代枚举且**每枚都带上界**（peer 是老内核唯一有执行力的声明）', () => {
+test('peer 侧按段收口且**每段都带上界**（peer 是老内核唯一有执行力的声明）', () => {
   for (const [packageName, range] of Object.entries(pkg.peerDependencies ?? {})) {
     if (!packageName.startsWith('@deepseek-ai/dsh-')) continue;
     // 上一轮只收紧了 engines，但 0.1.7-rc.1~0.2.0-rc.2 根本不读 engines：peer 是它们唯一的门。
@@ -125,10 +125,22 @@ test('peer 侧逐代枚举且**每枚都带上界**（peer 是老内核唯一有
     for (const clause of range.split('||')) {
       assert.match(clause.trim(), /^>=\S+ <\S+$/, `${packageName} 有条款缺排他上界：${clause.trim()}`);
     }
+    // 同一版本段只留一条：上下界相同的两条之间不存在空洞，合并后区间不变。
+    const ceilings = range.split('||').map((clause) => clause.trim().split(' ')[1]);
+    assert.equal(
+      new Set(ceilings).size,
+      ceilings.length,
+      `${packageName} 同一版本段写了多条条款（同段应合并成一条，见 src/upstream-compat.ts 的 foldSegmentClauses）`,
+    );
   }
+  // 合并不许把任何已入表代次收窄掉；同段更晚的 rc 由区间一并覆盖，不要求字面出现下界。
   const peer = pkg.peerDependencies['@deepseek-ai/dsh-session'];
   for (const gen of KERNEL_GENERATIONS) {
-    assert.ok(peer.includes(`>=${gen.id} `), `peer 少了逐代下界 >=${gen.id}（逐代留痕）`);
+    assert.ok(admitted(gen.id, peer), `peer 漏了已入表代次 ${gen.id}`);
+    assert.ok(
+      (versionAtLeast(gen.id, clauses(peer)[0].floor) ?? false),
+      `${gen.id} 低于 peer 下界`,
+    );
   }
 });
 

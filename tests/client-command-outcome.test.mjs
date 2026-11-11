@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 test('commands 结果类型只有 matched（业务结果不经返回值）', () => {
-  const src = readFileSync(new URL('../src/command-outcome.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../src/client/command-outcome.ts', import.meta.url), 'utf8');
   const body = src.slice(src.indexOf('export interface CommandOutcome'));
   // 接口体内不得再出现 text / deleted 之类业务字段
   const iface = body.slice(0, body.indexOf('}'));
