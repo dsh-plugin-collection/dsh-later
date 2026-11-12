@@ -117,8 +117,15 @@ export async function captureUi({ port, outDir, version, prompt }) {
     await page.waitForTimeout(4500);
 
     // 「预览版说明」遮罩会盖住整页，不关掉任何点击都点不到（已验证的各代都有，0.1.2 起）。
+    //
+    // 按钮文案**随界面语言变**：英文是 "Continue"、中文是「继续」。原先只认中文那个，
+    // 于是在英文界面下匹配不到 —— 遮罩不关，后面所有点击 composer 的动作都被它拦截超时
+    // （issue #126 取证时实测卡了两轮才定位）。两种都认。
     await page.evaluate(() => {
-      const again = [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '继续');
+      const again = [...document.querySelectorAll('button')].find((b) => {
+        const label = (b.textContent || '').trim();
+        return label === '继续' || label === 'Continue';
+      });
       again?.click();
     });
     await page.waitForTimeout(1200);
