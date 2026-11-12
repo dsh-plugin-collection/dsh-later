@@ -297,12 +297,17 @@ export function validatePrompt(
  * 抛 `ScheduleInputError('subagent_session')`，`update` 返回同名非变更结果。
  *
  * 本插件**不在工具层重复这条深度守卫**，因为两边在官方宿主上构造等价：
- *   - 用户工具只在 `agent/created` 且 `ctx.agents.roots()` 命中时注册
- *     （src/index.ts 的 later.userToolsLifecycle()）。`roots()` 只含「没有
- *     owning agent context」的顶层 agent；而子 agent 无论首建还是冷恢复都经
+ *   - 用户工具只在 `agent/created`、且该 agent 被判定为 root 时注册
+ *     （src/index.ts 的 later.userToolsLifecycle()）。判据所在：
+ *     **0.2.2-rc.1 及更早**由 `ctx.agents.roots()` 回答，它只含「没有 owning
+ *     agent context」的顶层 agent；而子 agent 无论首建还是冷恢复都经
  *     `ownerCtx.agents.create|resume({ parentAgent })` 创建（dsh-subagent 的
- *     child-agent/materialize），必然带 owner，永远进不了 `roots()`，也就
- *     拿不到本工具这条 create 通道。
+ *     child-agent/materialize），必然带 owner，永远进不了 `roots()`。
+ *     **0.2.2-rc.2 起**宿主删掉了 `roots()`（owner 关系不可见），改由
+ *     `upstream-compat.ts` 的 `isRootAgent` 读会话头 `delegationDepth` /
+ *     `origin` 判定——而子 agent 的会话头恰好被 stamp 了
+ *     `origin:'subagent'` 与 `delegationDepth = parent+1`（见下一条），
+ *     两代判据因此指向同一个集合：子 agent 拿不到本工具这条 create 通道。
  *   - 子 agent 的会话头同时被 stamp `origin:'subagent'` 与
  *     `delegationDepth = parent+1`；官方会话控制器对 `origin === 'subagent'`
  *     的普通 resume 直接拒绝（session/agent-busy），因此「深度 > 0 却以 root
