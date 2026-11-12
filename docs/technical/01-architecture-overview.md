@@ -233,7 +233,7 @@ export async function userScheduleCreate(input, ctx) {
 | 两个插槽条目 | `src/client/index.tsx`：`conversation.input.right`（`id: 'later'`, `order: 50`）挂 `SchedButton`；`conversation.input.dock`（`id: 'later-dock'`, `order: 30`）挂 `ScheduleDock`，即排在宿主排队消息条之后 |
 | 读任务列表 | 宿主渲染器绑定的标准 hook：`useProjection('userSchedules')`（`ScheduleDock.tsx` 与 `hooks/useSchedules.ts` 各调一次）。投影单元由 Host 侧 `src/index.ts` 经 `sessionProjections.register(userSchedulesProjectionUnit)` 注册，`src/projection.ts` 负责 fold |
 | 写（创建/删除/改/暂停/恢复/插话） | `callCommand(sessionId, line)` → `sessions.scope(sessionId)` → `sessions.sessionOf(actx)` → `face.command(line)`；创建行由 `hooks/useSchedules.ts` 的 `createLine()` 拼成 `/user-schedule-create {json}`。命令通道**只回 `{matched}`**（受理语义，见 `src/command-outcome.ts`），业务结果一律以投影为准 |
-| 面板浮层 | `SchedPanel.tsx` 用 `createPortal` 挂到 `document.body`；锚定走 `primitives-compat.ts` 的 `hasOfficialAnchoredPosition` 探测 + `usePanelAnchorPosition`（旧宿主回退分支不调 hook，保证 hook 调用序列恒定） |
+| 面板浮层 | `SchedPanel.tsx` 用 `createPortal` 挂到 `document.body`；锚定走 `primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND` 三档分派（`hook` = 老的 `useAnchoredPosition`；`css-anchor` = 0.2.2-rc.2 起用 CSS 锚点定位 + `useAnchoredMaxHeight`；`static` = 静态 `bottom` + 遮罩）。后端在加载期一次算出，三档都无条件调用同一个 hook，序列恒定 |
 | dock 行内容 | 「`HH:MM` · 倒计时 · 正文」一行 + 进度条一行；动作为 编辑 / 暂停·恢复 / 删除 / 插话发送（`kind === 'every'` 不渲染插话） |
 | 倒计时与进度条 | `useCountdown.ts` 的 1s tick；条形的窗口/比例数学在 `src/bar-geometry.ts`（两侧共享），推进交给 CSS 动画，参数以 `--ss-bar-duration` / `--ss-bar-delay` 内联注入 |
 

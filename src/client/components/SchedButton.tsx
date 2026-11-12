@@ -6,7 +6,7 @@
  * @module dsh-later/client/components/SchedButton
  */
 import { useEffect, useRef, useState } from 'react';
-import type { JSX } from 'react';
+import type { CSSProperties, JSX } from 'react';
 import { IconClock } from '../primitives-compat.js';
 import { detectTimeZone } from '../../time-utils.js';
 import { useSchedT, type LocaleFaceLike } from '../useSchedT.js';
@@ -15,7 +15,12 @@ import type { CommandOutcome } from '../command-outcome.js';
 import { SchedPanel } from './SchedPanel.js';
 import { useSchedules } from '../hooks/useSchedules.js';
 import { useSchedulerSettings, type SchedulerSettingsScopeLike } from '../hooks/useSchedulerSettings.js';
-import { useEscapeToClose, hasOfficialOutsideDismiss, usePanelOutsideDismiss } from '../primitives-compat.js';
+import {
+  useEscapeToClose,
+  hasOfficialOutsideDismiss,
+  usePanelAnchorTriggerStyle,
+  usePanelOutsideDismiss,
+} from '../primitives-compat.js';
 
 /** 应用层注入的调用能力。 */
 export interface SchedButtonInjected {
@@ -88,6 +93,12 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
   const panelRef = useRef<HTMLDivElement | null>(null);
   usePanelOutsideDismiss(rowRef, open, setOpen, panelRef);
 
+  /**
+   * `css-anchor` 后端（0.2.2-rc.2 起）：面板要靠触发元素上的 `anchor-name` 才定得了位。
+   * 其余后端返回 `{ anchorName: 'auto' }`，显式清掉可能残留的同名锚点。
+   */
+  const anchorTriggerStyle = usePanelAnchorTriggerStyle();
+
   // 设置「显示定时按钮」关闭时隐藏整个插槽条目（含面板入口）。
   // 提醒触发（宿主调度）与 dock 列表不受影响；所有 hook 均已在此前调用，
   // 提前返回不违反 React hooks 顺序约束。
@@ -103,7 +114,7 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
   };
 
   return (
-    <span ref={rowRef} className="ss-sched-row" data-ss-sched-row="">
+    <span ref={rowRef} className="ss-sched-row" data-ss-sched-row="" style={anchorTriggerStyle as CSSProperties}>
       <button
         type="button"
         className={open ? 'ss-sched-btn ss-active' : 'ss-sched-btn'}

@@ -1,0 +1,5 @@
+# @deepseek-ai/dsh-client-ui-primitives 0.2.2-rc.2
+# lib/types/index.d.ts 的锚定相关导出行（原样摘录）
+export { useAnchoredMaxHeight } from './useAnchoredMaxHeight.ts';
+export { useDismissOnOutsidePointer } from './useDismissOnOutsidePointer.ts';
+export { usePointerGrace } from './pointer-grace.ts';

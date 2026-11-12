@@ -8,7 +8,9 @@
  * 外壳（抬升面 + 锚定 + 外部点击关闭）对齐官方 `PickerPopover`：portal 挂到
  * `document.body`、背景 `--dsw-menu-surface-fill` + `--dsw-elevation-*` 描边阴影
  * + 16px 圆角 + `blur(40px)` 毛玻璃、`z-index: 1100`。定位与关闭优先走 primitives
- * 的官方 hook，旧代次宿主由 `primitives-compat.ts` 本地兜底（见该文件）。
+ * 的官方能力，逐代差异全部收在 `primitives-compat.ts`：老代次用宿主的
+ * `useAnchoredPosition`，0.2.2-rc.2 起换成一模一样的 CSS 锚点定位（见该文件的
+ * `PANEL_ANCHOR_BACKEND`）。
  * @module dsh-later/client/components/SchedPanel
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -22,8 +24,8 @@ import { TaskList } from './TaskList.js';
 import { format, CLIENT_ERR, type SchedStrings } from '../strings.js';
 import { useNow } from '../useCountdown.js';
 import {
+  PANEL_ANCHOR_BACKEND,
   PANEL_MEASURE_STYLE,
-  hasOfficialAnchoredPosition,
   usePanelAnchorPosition,
 } from '../primitives-compat.js';
 import type { ClientAtInput, ClientSchedule, CreateCommandPayload } from '../types.js';
@@ -46,13 +48,13 @@ export interface SchedPanelProps {
   /**
    * 兜底定位：面板相对视口的下边距（相对视口）。
    *
-   * 仅在旧代次宿主（无 primitives `useAnchoredPosition`）生效——那条路径没有
-   * 锚点元素可量，只能沿用 SchedButton 传入的 `bottom`。新代次走官方锚定，
-   * 本 prop 忽略。
+   * 仅在 `static` 后端生效（宿主连 `useAnchoredPosition` 与 `useAnchoredMaxHeight`
+   * 都没有，见 `primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND`）——那一档没有锚点
+   * 能力可借，只能沿用 SchedButton 传入的 `bottom`。另两档忽略本 prop。
    */
   bottom: number;
   /**
-   * 触发元素（输入行上的时钟按钮容器），官方锚定用它定位。
+   * 触发元素（输入行上的时钟按钮容器），`hook` 档的几何测量读数来源。
    */
   anchorRef?: React.RefObject<HTMLElement | null>;
   /**
@@ -112,7 +114,7 @@ export function SchedPanel({
    * 面板 ref：优先用按钮传来的（供其 outside-pointer 判定），否则自持一个。
    *
    * ⚠️ 渲染时必须挂 `panelRef`（合并后的那个），**不能**只挂 `localPanelRef`：
-   * 官方 `useAnchoredPosition` 从 `panelRef.current` 量 `offsetWidth/offsetHeight`
+   * 老代次的官方 `useAnchoredPosition` 从 `panelRef.current` 量 `offsetWidth/offsetHeight`
    * 决定「翻到上方」与视口夹取。挂错 ref 时它读到 null → 高度按 0 算 →
    * `top = anchor.top - gap - 0`，面板直接压在触发按钮上并溢出视口底部
    * （实测 653 − 4 = 649px，底边到 933px > 720px 视口）。这个 bug 只在按钮
@@ -121,11 +123,12 @@ export function SchedPanel({
   const localPanelRef = useRef<HTMLDivElement | null>(null);
   const panelRef = externalPanelRef ?? localPanelRef;
   /**
-   * 锚定位置：官方 hook 可用时按触发元素锚定，旧代次退回 `bottom` 兜底值。
+   * 锚定位置：按宿主能力后端分派（`hook` / `css-anchor` / `static`，见
+   * `primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND`）。
    *
-   * 兜底分支不能调 `usePanelAnchorPosition`（它是 hook）而新代次调了——那会让
-   * 同一组件在不同宿主上的 hook 序列不一致。故**始终**调用，取值时再选分支：
-   * 无官方锚定时返回 null，落到 `bottom` 的静态样式。
+   * 三档都**始终**调用它，取值时再选分支：它是 hook（内部可能调宿主的
+   * `useAnchoredMaxHeight`），按宿主决定调不调会让 hook 序列随宿主跳变。
+   * `static` 档返回 null，落到 `bottom` 的静态样式。
    */
   const anchored = usePanelAnchorPosition({
     open: true,
@@ -136,9 +139,11 @@ export function SchedPanel({
     gap: 4,
     margin: 12,
   });
-  const panelStyle = hasOfficialAnchoredPosition
-    ? (anchored ?? PANEL_MEASURE_STYLE)
-    : { bottom };
+  // `static` 档没有锚点能力，沿用 SchedButton 量好的静态 `bottom`；另两档拿行内几何，
+  // 首帧仍为 null 时（`hook` 档宿主尚未测量）先藏起来，避免从视口原点闪一下。
+  const panelStyle = PANEL_ANCHOR_BACKEND === 'static'
+    ? { bottom }
+    : (anchored ?? PANEL_MEASURE_STYLE);
   const [selected, setSelected] = useState<string>('after-600');
   const [customDate, setCustomDate] = useState<string>(() => {
     const f = localFieldsOf(Date.now(), timeZone);

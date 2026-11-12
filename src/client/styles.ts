@@ -323,8 +323,16 @@ const COMPONENTS = [
 '.ss-backdrop {',
 '  position: fixed; inset: 0; z-index: 1099; background: transparent;',
 '}',
+/*
+ * 定位三档（见 src/client/primitives-compat.ts 的 PANEL_ANCHOR_BACKEND）：
+ *   · hook（0.2.2-rc.2 之前）：宿主把 left/top 写成行内值，这里的 auto 只为兜住首帧；
+ *   · css-anchor（0.2.2-rc.2 起）：anchored 的行内值 top + height 参与布局，**必须**给
+ *     height，否则 `top` 是确定的、高度是 auto，两条都满足时 `bottom` 不产生约束，
+ *     面板会从 top 往下铺满而不是贴着锚点往上长；
+ *   · static（两者皆无）：只有 `bottom` 起作用。
+ */
 '.ss-panel {',
-'  position: fixed; top: auto; left: auto; z-index: 1100;',
+'  position: fixed; top: auto; left: auto; bottom: auto; z-index: 1100;',
 '  box-sizing: border-box; display: flex; flex-direction: column;',
 '  width: min(340px, calc(100vw - 24px));',
 '  padding: 12px;',
@@ -339,8 +347,7 @@ const COMPONENTS = [
 '  color: var(--dsw-alias-label-secondary);',
 '  font-size: 12px; line-height: 20px; font-family: var(--dsw-font-family);',
 '}',
-/* 兜底定位分支（无官方 useAnchoredPosition 的旧代次宿主）才用 bottom，
-   有官方锚定时 left/top 由 hook 注入，这里只兜住首帧测量前的 top:auto。 */
+/* 上面三档共处一条规则：行内值优先，CSS 只负责「没被行内覆盖时」的缺省。 */
 '.ss-panel-header {',
 '  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;',
 '}',
