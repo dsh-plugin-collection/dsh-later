@@ -4,6 +4,27 @@
 
 ## 未发布
 
+- **fix** 定时面板的锚定在 `0.2.2-rc.2` 上退回为静态定位（issue #158）。那一代把
+  `dsh-client-ui-primitives` 的 `useAnchoredPosition` 整个删掉，替代面是
+  `useAnchoredMaxHeight`（只算高度）与 `usePointerGrace`（指针离开的关闭延迟），定位改由
+  **CSS 锚点定位**承担（官方 `Menu` 的 portal 分支同款）。此前面板在新宿主上只能拿到
+  `null`、退到静态 `bottom` 并关掉遮罩——不崩，但贴触发边、翻转、夹取全丢。
+
+  现在按宿主能力分三档（`src/client/primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND`，
+  加载期一次算出、整页恒定）：老代次透传 `useAnchoredPosition`；`0.2.2-rc.2` 起给触发元素
+  写 `anchor-name`，面板用 `position-anchor` + `bottom: max(12px, calc(anchor(top) + 4px))`
+  做上沿锚定与视口夹取，高度交给 `useAnchoredMaxHeight`；两者都没有才退到静态 `bottom` 并告警一次。
+  两枚 API 同时存在时 `useAnchoredPosition` 优先——`0.2.2-rc.1` 的发布包确实两个都导出。
+
+  `.ss-panel` 补 `bottom: auto`：`css-anchor` 档行内的 `top + height` 参与布局后，留着静态
+  `bottom` 会把高度拉成 `auto`，面板从上沿往下铺满而不是贴着锚点往上长。
+
+  真机取证：`0.2.2-rc.2` 上面板落在触发元素正上方（面板 `bottom` 537 = 触发元素 `top` 541 − 4px
+  gap，左缘 955 = 955），`anchor-name` / `position-anchor` 双列一致；`0.2.2-rc.1` 走 hook 档时
+  两者同为 198–536 / 955。守护测试 `tests/panel-anchor-backends.test.mjs` 用两个代次发布包的
+  真实导出面（摘录见 `tests/fixtures/anchor-backends/`）钉住分派结论。
+
+
 ## 1.12.2 — 2026-11-11
 
 - **chore** 产物体积（issue #145 A 面）：三个各一行的构建口径改动。连同下面 A-5 的布局重排，

@@ -808,3 +808,75 @@ sessionId，`gaveUp` 又是进程内状态，所以它既覆盖不到「同会�
 throw 发生在宿主写入路径，插件侧 `followup()` 不抛、也拿不到（实测）。改为能拿到的那一半：
 投递未确认时把**自己的判定依据**（`kind=` + 内核版本 + 出处）记进宿主日志，
 让下一次同类事故不用重跑跨代次实测就能定位。`DELIVERY_CONFIRM_TIMEOUT_MS` 仍是 2000ms，未调。
+
+## 面板锚定：0.2.2-rc.2 删除 `useAnchoredPosition`（issue #158）
+
+### 现象与取证口径
+
+`0.2.2-rc.2` 的 `dsh-client-ui-primitives` 不再导出 `useAnchoredPosition`（`0.2.2-rc.1` 还导出，
+且**同时**导出 `useAnchoredMaxHeight`）。发布包导出面原样摘录在
+`tests/fixtures/anchor-backends/`，复核：
+
+```sh
+cd /tmp && rm -rf p && mkdir p && cd p
+npm pack @deepseek-ai/dsh-client-ui-primitives@0.2.2-rc.1 && tar xzf *.tgz
+grep -E '^export .*(useAnchoredPosition|useAnchoredMaxHeight|usePointerGrace)' package/lib/types/index.d.ts
+```
+
+装配面（`mount`）在这次改动前后都是绿的，所以「矩阵绿」不能证明锚定还在——这正是 #158
+第 3 条建议要进符号台账的原因。本轮的判据因此是**几何**，见下。
+
+### 真机几何（`verify:ui` 之外的一次性探针）
+
+在 `.verify/ui-158/instances/` 同款隔离实例里开面板，读三个矩形：
+
+| 代次 | 后端 | 触发元素 | 面板 | `anchor-name`（触发元素） | `position-anchor`（面板） |
+|---|---|---|---|---|---|
+| 0.2.2-rc.2 | `css-anchor` | top 541 / left 955 | **top 198 · bottom 537 · left 955** | `--dsh-later-sched-anchor` | `--dsh-later-sched-anchor` |
+| 0.2.2-rc.1 | `hook` | top 541 / left 955 | **top 198 · bottom 536 · left 955** | `none`（不写） | `normal` |
+
+两档落在同一点：面板下沿 = 触发元素上沿 − 4px（配置的 `gap`），左缘与触发元素对齐。
+`0.2.2-rc.2` 上控制台 0 告警——改动前那一代会出现一次
+`dsh-later: 宿主 primitives 未导出 useAnchoredPosition…`。
+
+**反向对照（证明起作用的确实是 CSS 锚点定位）**：把触发元素的 `anchor-name` 清成 `none` 后
+面板的 `top/left` 退回 `auto`/`0`（落在视口左下角），再恢复即回到上表的值。也就是说面板位置
+是锚点解析出来的，不是某个巧合的静态定位。
+
+⚠️ 做反向对照时**必须在读到基线几何之后**再改 `anchor-name`，并且用
+`style.removeProperty('anchor-name')` 还原（赋 `''` 不会把 `none` 撤掉）。本轮第一次探针就是
+先改后读，得到一张「`anchor-name` 为 `none` 但面板已锚定」的自相矛盾结果——那是探针顺序的
+问题，不是插件的。改动后连跑 4 次纯净测量均稳定命中上表。
+
+### 回归面
+
+```sh
+PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui -- --versions 0.2.2-rc.2 --out .verify/ui-158
+PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui \
+  --versions 0.2.2-rc.1,0.2.1-rc.4,0.1.2-rc.1 --out .verify/ui-158-legacy
+```
+
+| 面 | 结果 |
+|---|---|
+| `verify:ui` · 0.2.2-rc.2 | 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · **警告=0**，exit 0 |
+| `verify:ui` · 0.2.2-rc.1 / 0.2.1-rc.4 / 0.1.2-rc.1 | 三代同样是 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0，exit 0 |
+| 单测 | 892 / 892 pass，0 fail（87 文件；新增 `tests/panel-anchor-backends.test.mjs` 9 条） |
+| `typecheck` | 两个项目 0 错误 |
+| 跨代 tsc（换线 0.2.2-rc.2） | `tsconfig.client.json` **0 错误**（改动就在这个项目）；`tsconfig.json` 4 条，见下 |
+
+### 本轮**没有**解决、也不在 #158 范围内的
+
+`0.2.2-rc.2` 上还有两处与本条无关的不兼容，都是宿主 API 变更，**不在这次改动里修**：
+
+1. **`AgentRegistry.roots()` 在 0.2.2-rc.2 被移除**（rc.1 的 `dsh-agent` 仍有 `roots(): Agent[]`，
+   rc.2 只有 `get()` / `list()`）。本插件 4 处调用：`src/index.ts:611`、`:851`、`:1073`、
+   `src/runtime.ts:202`。后果是跨代 tsc 的 `tsconfig.json` 4 条错误，以及 `verify:kernels` 在
+   rc.2 上 `投递 spliced=0`（告警「runtime 未能驱动（root 判定未命中）」）。同一份代码在
+   `0.2.2-rc.1` 上同一条判据是 `spliced=1 dispatch=Y` GREEN。
+   **基线对照**：把 `main` 换线到 rc.2 跑 tsc，同样是这 4 条 —— 与本次改动无关。
+2. **`dsh-schedule` / 宿主在 rc.2 对 `at` 字符串的时区校验更严**：`verify:kernels` 的命令失败
+   回执是 `invalid_rule: at 字符串需带显式时区…`，属上游文法收紧，需要单独一条 issue 判。
+
+也就是说：`0.2.2-rc.2` 目前**不应登记进 `KERNEL_GENERATIONS`**——入表标准是「装配功能 + 跨代
+tsc 两面都过」，而那两处让它过不了。`engines.dsh` 的 `>=0.2.2-alpha.2 <0.2.3-0` 本来就放行 rc.2，
+本轮没有改动 peer/engines。
