@@ -96,6 +96,31 @@ const hostUseDismissOnOutsidePointer = pick<UseDismissOnOutsidePointer>('useDism
  * 是两件事：具名 import 在导出缺失时是链接期硬失败，会让插件在那种宿主上整条加载不了；
  * 而属性访问 + 缺失时响亮告警，面板退到调用方已有的静态 `bottom` 样式与遮罩关闭，
  * 功能降级但看得见、日志里有话。删掉的是没人走的算法，不是兜底本身。
+ *
+ * ## 第三次反转：0.2.2-rc.2 删掉了 `useAnchoredPosition`（issue #158）
+ *
+ * 上面那段"8 个代次全都导出"的结论**止于 0.2.2-rc.1**。`0.2.2-rc.2` 把这个 hook 整个删了，
+ * 替代面是一**对语义不同**的导出，且不是"换一个 hook 继续量几何"：
+ *
+ * | 导出 | 做的事 | 能不能替 `useAnchoredPosition` |
+ * |---|---|---|
+ * | `useAnchoredMaxHeight(ref, cap, signal, margin)` | 只算 **max-height**：把下沿贴住锚点的浮层往视口顶部夹 | 只能替"夹取"里的高的一半 |
+ * | `usePointerGrace(close)` | 指针离开弹层时的 **200ms 关闭延迟** | 与定位无关 |
+ *
+ * 官方自己不再用 JS 量位置：rc.2 的 `Menu` portal 分支改用 **CSS 锚点定位**
+ * （`anchor-name` + `position-anchor` + `position-area`/`@position-try` 回退链），
+ * 见发布包 `Menu.module.css` 的 `.portal` 与 `.portal[data-anchor-side='top']`。
+ * 所以降级路径不是"再写一份手写几何"（那正是本文件上文刚论证过不该有的东西），
+ * 而是**改用同一个平台特性**：给触发元素写 `anchor-name`，面板用内联
+ * `positionAnchor`/`top`/`bottom`/`left` 做 `top` 边锚定 + 视口夹取，浏览器不支持
+ * CSS 锚点定位时内联值无效（相当于 `auto`），面板落回调用方给的静态 `bottom`。
+ *
+ * 三档后端在整页生命周期内**恒定**，由模块加载时一次算出（`resolvePanelAnchorBackend`）：
+ * 老代次有 `useAnchoredPosition` → 用它（它的行内 `top/left` 与 rc.2 的 CSS 锚点
+ * 是两套坐标系，只能二选一）；否则看宿主有没有 top 边锚定的替代导出 → 有就用 CSS 锚点
+ * + `useAnchoredMaxHeight`；两者都没有才退到静态 `bottom` 并告警一次。
+ * 面板的 `style` 字段集合在三档之间**相同**（都是同一组 CSSProperties 键），React 不会
+ * 因为字段增减改变 hook 序列，也不会留下上一档的残留行内值。
  */
 
 /** 缺官方实现时只告警一次：扫描/渲染是高频路径，刷屏会淹掉真问题。 */
@@ -116,19 +141,191 @@ function warnMissingHook(name: string): void {
 /** 宿主是否提供了官方的外部点击关闭能力。 */
 export const hasOfficialOutsideDismiss = hostUseDismissOnOutsidePointer !== undefined;
 
-/** 宿主是否提供了官方的锚定 hook。 */
+/** 宿主是否提供了官方的锚定 hook（老代次）。 */
 export const hasOfficialAnchoredPosition = hostUseAnchoredPosition !== undefined;
 
 /**
- * 锚定并夹取面板位置；宿主提供官方 hook 时直接透传，否则本地兜底。
- * @param options 面板开合、两个 ref、放置边与对齐、间距与留白。
+ * rc.2 的「下沿锚定 + 视口夹取」导出（官方签名见发布包 `useAnchoredMaxHeight.d.ts`）。
+ *
+ * 只拿来量 max-height，**不**决定位置——位置在 rc.2 交给 CSS 锚点定位。
+ */
+type UseAnchoredMaxHeight = (
+  ref: RefObject<HTMLElement | null>,
+  cap: number,
+  signal: unknown,
+  margin?: number,
+) => number;
+
+const hostUseAnchoredMaxHeight = pick<UseAnchoredMaxHeight>('useAnchoredMaxHeight');
+
+/**
+ * 面板锚定的三档后端，取值见文件头「第三次反转」一节。
+ *
+ * - `hook`：0.2.2-rc.2 之前，宿主 `useAnchoredPosition` 直接给出行内 `top/left`；
+ * - `css-anchor`：0.2.2-rc.2 起，用 CSS 锚点定位 + 宿主的 `useAnchoredMaxHeight` 夹高度；
+ * - `static`：两样都没有——只有静态 `bottom` 与遮罩关闭，并告警一次。
+ */
+export type PanelAnchorBackend = 'hook' | 'css-anchor' | 'static';
+
+/**
+ * 按宿主导出面决定用哪一档后端。
+ *
+ * **新旧 API 同时探到（老代次 + 未来某个把两边都留下的版本）时 `useAnchoredPosition`
+ * 优先**：它是完整几何（测量、翻转、夹取），而 rc.2 的替代导出只算高度、位置要靠 CSS；
+ * 两者混用会让面板拿到两套坐标系。纯函数，便于在假宿主上逐档断言。
+ *
+ * @param host - 候选导出面：`primitives` 本身，或一个装了它的模块记录（如
+ *   `{ '@deepseek-ai/dsh-client-ui-primitives': primitives }`），便于对**发布包**原样断言。
+ * @returns 该宿主应该走的后端。
+ */
+export function resolvePanelAnchorBackend(host: Record<string, unknown>): PanelAnchorBackend {
+  // ESM 命名空间的具名导出是只读事实，`default` 没有意义，但它带着 `Symbol.toStringTag === 'Module'`；
+  // CJS 互操作装出来的对象没有这个 tag，直接看自己的属性。两种形状都从同一处取。
+  const source = symbolTagOf(host) === 'Module'
+    ? ((host.default as Record<string, unknown> | undefined) ?? host)
+    : host;
+  if (typeof source.useAnchoredPosition === 'function') return 'hook';
+  if (typeof source.useAnchoredMaxHeight === 'function') return 'css-anchor';
+  return 'static';
+}
+
+/** 读 `Symbol.toStringTag`（TS 不允许把 unique symbol 直接当下标用）。 */
+function symbolTagOf(value: Record<string, unknown>): unknown {
+  return (value as { readonly [Symbol.toStringTag]?: unknown })[Symbol.toStringTag];
+}
+
+/** 本代次宿主实际走的锚定后端（模块加载时一次算出，整页生命周期恒定）。 */
+export const PANEL_ANCHOR_BACKEND: PanelAnchorBackend = resolvePanelAnchorBackend(
+  primitives as unknown as Record<string, unknown>,
+);
+
+/**
+ * 测试专用探针：按给定宿主导出面重算后端，并回读该后端的定位样式。
+ *
+ * 为什么需要它：{@link PANEL_ANCHOR_BACKEND} 是**模块加载期**算出的常量，测试想对不同的
+ * 宿主断言分派结论，只能重新加载一份 bundle 再对同一份导出面重算。客户端入口
+ * （`src/client/index.tsx`）只再导出跨插件公共 API，所以这里是那批内部函数的唯一出口，
+ * 且**只有这一个**——别把整组内部函数摊成公共 API。见
+ * `tests/panel-anchor-backends.test.mjs`。
+ *
+ * @param host - 候选导出面，含义同 {@link resolvePanelAnchorBackend}。
+ * @returns 该宿主对应的后端与两份定位样式（面板侧 / 触发元素侧）。
+ */
+export function __panelAnchorProbeForTest(host: Record<string, unknown>): {
+  readonly backend: PanelAnchorBackend;
+  readonly anchorName: string;
+  readonly panel: Record<string, unknown>;
+  readonly trigger: Record<string, unknown>;
+} {
+  return {
+    backend: resolvePanelAnchorBackend(host),
+    anchorName: PANEL_ANCHOR_NAME,
+    panel: cssAnchorPositionStyle({ side: 'top', gap: 4, margin: 12 }, false),
+    trigger: cssAnchorPositionStyle({ side: 'top', gap: 4, margin: 12 }, true),
+  };
+}
+
+/**
+ * CSS 锚点定位用的 CSS `anchor-name`（同时满足两个条件才生效）：
+ *   · 名字以 `--` 开头（锚点名必须是 dashed-ident）；
+ *   · **不加引号**——React 把无引号的 CSS 自定义属性当字符串直写，引号会被写进 DOM，
+ *     浏览器就认不出是 dashed-ident 了。
+ */
+export const PANEL_ANCHOR_NAME = '--dsh-later-sched-anchor';
+
+/** CSS 锚点定位的几何参数；与 `.ss-panel` 的 `position: fixed` 是同一套约定。 */
+export interface CssAnchorGeometry {
+  /** 面板落在锚点上方（`bottom`）还是下方（`top`）。 */
+  readonly side: 'top' | 'bottom';
+  /** 面板与锚点边缘的间距。 */
+  readonly gap: number;
+  /** 面板与视口边缘的最小留白。 */
+  readonly margin: number;
+}
+
+/** rc.2 的 `MARGIN` 默认值（发布包 `useAnchoredMaxHeight.js`），缺省对齐官方。 */
+export const ANCHORED_MAX_HEIGHT_CAP = 560;
+
+/**
+ * CSS 锚点定位的行内样式：`anchor-name`/`position-anchor` 是 core 属性，
+ * `position-anchor` 在 `@types/react` 里还没有声明，故用 `Record<string, unknown>` 递交。
+ *
+ * 坐标写法对齐 rc.2 `Menu.module.css` 的 `.portal[data-anchor-side='top']`：
+ * `bottom: max(margin, calc(anchor(top) + gap))`、`left: max(margin, anchor(left))`。
+ * `max()` 就是视口夹取——锚点贴边时面板不会被推出视口。浏览器不支持 CSS 锚点定位时
+ * 这些值不成立（`anchor()` 使声明失效），面板退回 `.ss-panel` 的静态定位。
+ *
+ * @param geo - 放置边、间距与留白。
+ * @param trigger - 面板自身（它写 `position-anchor`）；`false` 时这份样式给触发元素。
+ * @returns 可直接挂在 `style` 上的对象。
+ */
+export function cssAnchorPositionStyle(
+  geo: CssAnchorGeometry,
+  trigger: boolean,
+): Record<string, unknown> {
+  const name = PANEL_ANCHOR_NAME;
+  const gap = `${geo.gap}px`;
+  const margin = `${geo.margin}px`;
+  if (trigger) return { anchorName: name };
+  const anchored = geo.side === 'top'
+    ? { bottom: `max(${margin}, calc(anchor(top) + ${gap}))`, top: 'auto' }
+    : { top: `max(${margin}, calc(anchor(bottom) + ${gap}))`, bottom: 'auto' };
+  return {
+    positionAnchor: name,
+    left: `max(${margin}, anchor(left))`,
+    right: 'auto',
+    ...anchored,
+  };
+}
+
+/**
+ * 触发元素一侧的样式：`css-anchor` 档给面板一个锚点，其余档返回空对象。
+ *
+ * `auto` 表示显式清掉同名锚点：老代次的触发元素上万一残留（同页其它组件写过同名
+ * dashed-ident，或发生过热更新），面板仍不会去读它。
+ *
+ * @returns 可直接挂在触发元素 `style` 上的对象。
+ */
+export function usePanelAnchorTriggerStyle(): Record<string, unknown> {
+  return PANEL_ANCHOR_BACKEND === 'css-anchor'
+    ? cssAnchorPositionStyle({ side: 'top', gap: 0, margin: 0 }, true)
+    : { anchorName: 'auto' };
+}
+
+/**
+ * 定位并夹取面板；按 {@link PANEL_ANCHOR_BACKEND} 三档分派。
+ *
+ * 三档都必须**无条件**调用同名 hooks（`useAnchoredMaxHeight` 在 `static` 档也调用，
+ * 只是取值时不用）——按宿主分支决定调不调 hook 会让 hook 序列随宿主跳变。
+ *
+ * @param options - 面板开合、两个 ref、放置边与对齐、间距与留白。
+ * @returns 面板 `style` 的定位部分；`hook` 档是宿主给的行内几何，`css-anchor` 档是 CSS
+ *   锚点行内样式，`static` 档是 `null`（调用方退到静态 `bottom`）。
  */
 export function usePanelAnchorPosition(options: PanelAnchorOptions): CSSProperties | null {
-  if (hostUseAnchoredPosition === undefined) {
-    warnMissingHook('useAnchoredPosition');
-    return null;
+  if (PANEL_ANCHOR_BACKEND === 'hook' && hostUseAnchoredPosition !== undefined) {
+    return hostUseAnchoredPosition(options);
   }
-  return hostUseAnchoredPosition(options);
+  // 参数恒为定值：rc.2 的 hook 以 `signal` 决定何时重量，而本面板的锚点在整个张开期间不变。
+  const capped = hostUseAnchoredMaxHeight ?? ((): number => ANCHORED_MAX_HEIGHT_CAP);
+  const maxHeight = capped(
+    options.panelRef,
+    ANCHORED_MAX_HEIGHT_CAP,
+    'dsh-later-panel',
+    options.margin,
+  );
+  if (PANEL_ANCHOR_BACKEND === 'hook') return null;
+  if (PANEL_ANCHOR_BACKEND === 'css-anchor') {
+    return {
+      ...cssAnchorPositionStyle(
+        { side: options.side ?? 'bottom', gap: options.gap, margin: options.margin },
+        false,
+      ),
+      maxHeight,
+    } as CSSProperties;
+  }
+  warnMissingHook('useAnchoredPosition / useAnchoredMaxHeight');
+  return null;
 }
 
 /**

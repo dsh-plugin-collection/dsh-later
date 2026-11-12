@@ -703,6 +703,14 @@ export {
   subscribeScheduleSummaryStore,
 } from './schedule-summary-store.js';
 export { useScheduleSummary } from './useScheduleSummary.js';
+
+// ── issue #158 的测试面 ─────────────────────────────────────────────────────
+//
+// 面板锚定后端（`hook` / `css-anchor` / `static`）是**模块加载期**算出的常量：想对不同的
+// 宿主导出面断言分派结论，只能在加载时换掉 primitives 的桩，再对同一份导出面重算一遍。
+// 纯函数，无副作用、不进任何渲染路径；`tests/panel-anchor-backends.test.mjs` 是唯一消费者。
+export { __panelAnchorProbeForTest } from './primitives-compat.js';
+
 export type {
   GroupScheduleSummary,
   ScheduleSummaryEntry,
