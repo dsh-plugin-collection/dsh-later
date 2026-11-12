@@ -52,6 +52,7 @@ import type { DeliveryMode } from './delivery.js';
 import { detectTimeZone, formatHhmm } from './time-utils.js';
 import { laterUserSource } from './later-message-source.js';
 import { dueTargetOf, isDue } from './due.js';
+import { isRootAgent } from './upstream-compat.js';
 
 /** runtime 关心的设置子集（插话投递策略）。 */
 export interface SteerDeliverySettings {
@@ -199,7 +200,11 @@ export class UserScheduleRuntime {
   /** 是否仍为活动 root agent。 */
   private isLive(): boolean {
     try {
-      return this.ctx.agents.get(this.agent.id) === this.agent && this.ctx.agents.roots().includes(this.agent);
+      // 「还活着」看 get(id) 是不是同一个实例；「是 root」交给跨代判定统一回答
+      // （rc.1 用宿主 roots()，rc.2 起宿主已删，改读会话头 delegationDepth）。
+      return (
+        this.ctx.agents.get(this.agent.id) === this.agent && isRootAgent(this.ctx.agents, this.agent)
+      );
     } catch {
       return false;
     }

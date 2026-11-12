@@ -866,7 +866,7 @@ PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui \
 
 ### 本轮**没有**解决、也不在 #158 范围内的
 
-`0.2.2-rc.2` 上还有两处与本条无关的不兼容，都是宿主 API 变更，**不在这次改动里修**：
+`0.2.2-rc.2` 上还有一处与本条无关的不兼容，是宿主 API 变更，**不在这次改动里修**：
 
 1. **`AgentRegistry.roots()` 在 0.2.2-rc.2 被移除**（rc.1 的 `dsh-agent` 仍有 `roots(): Agent[]`，
    rc.2 只有 `get()` / `list()`）。本插件 4 处调用：`src/index.ts:611`、`:851`、`:1073`、
@@ -874,9 +874,174 @@ PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui \
    rc.2 上 `投递 spliced=0`（告警「runtime 未能驱动（root 判定未命中）」）。同一份代码在
    `0.2.2-rc.1` 上同一条判据是 `spliced=1 dispatch=Y` GREEN。
    **基线对照**：把 `main` 换线到 rc.2 跑 tsc，同样是这 4 条 —— 与本次改动无关。
-2. **`dsh-schedule` / 宿主在 rc.2 对 `at` 字符串的时区校验更严**：`verify:kernels` 的命令失败
-   回执是 `invalid_rule: at 字符串需带显式时区…`，属上游文法收紧，需要单独一条 issue 判。
+
+⚠️ **更正一处此前的误判**：这一节曾把这句回执登记为「第二处 rc.2 不兼容 —— 宿主对 `at` 字符串
+的时区校验更严，属上游文法收紧」。**这是错的。** `at` 的时区校验在 rc.2 上没有问题：
+
+| 判据 | 0.2.2-rc.2 实测 |
+|---|---|
+| 面板原生 `HH:mm` / 个位小时带秒 / 个位无秒 / 严格基线 | 4 条 `built: true`，回执 `{"ok":true,…}` |
+| 无偏移字符串应拒+提示 | `built: false` · `hinted: true` · `pass: true` —— **预期通过** |
+| 合计 | **5/5 PASS** |
+
+那句 `invalid_rule: at 字符串需带显式时区…` 是 `atShapes` 里
+`{ label: '无偏移字符串应拒+提示', mustBuild: false, mustHint: true }`
+（`scripts/verify-across-kernels.mjs:542-556`）的**预期结果**，不是失败：无偏移字符串必须被拒
+并给出可执行提示，猜宿主时区会把用户意图的时刻改掉。而且这句文案出自本插件自己的
+`src/user-tools.ts:451`，请求根本没到宿主。原始记录见
+`.verify/across-kernels-2026-11-12T08-42-46-150Z.json` 的 `at` 数组。
 
 也就是说：`0.2.2-rc.2` 目前**不应登记进 `KERNEL_GENERATIONS`**——入表标准是「装配功能 + 跨代
-tsc 两面都过」，而那两处让它过不了。`engines.dsh` 的 `>=0.2.2-alpha.2 <0.2.3-0` 本来就放行 rc.2，
+tsc 两面都过」，挡路的只有 `roots()` 那一处：它在 rc.2 上让 `tsconfig.json` 4 条 tsc 报错、
+`verify:kernels` 的 `投递 spliced=0`。`engines.dsh` 的 `>=0.2.2-alpha.2 <0.2.3-0` 本来就放行 rc.2，
 本轮没有改动 peer/engines。
+
+## rc.2 的 `AgentRegistry.roots()` 移除（#158 后续）
+
+上一节末尾登记的那处阻塞已修掉，rc.2 也随之入表。本书记录的是**它后来怎么了**。
+
+### 现象与根因
+
+`0.2.2-rc.2` 删掉了 `AgentRegistry.roots()`。rc.1 的实现是
+`[...store.values()].filter(e => e.owner === void 0).map(e => e.agent)`；rc.2 的 store entry
+**已没有 `owner` 字段**，注册表的 owner 关系在这一代不可见，只剩 `get(id)` / `list()`。
+本插件有 4 处调用，全部在 `try/catch` 里：
+
+| 调用点 | 失效后的表现 |
+|---|---|
+| `src/index.ts` 的 `coldWakeRefusal` | 冷唤醒全判 `'not-root'`，根本不去 resume |
+| `src/index.ts` 的 `hasLiveRootAgent` | 恒 `false` |
+| `src/index.ts` 的 runtime 注册表 `roots` 注入 | 拿不到 root 列表，runtime 挂不上 |
+| `src/runtime.ts` 的 `isLive()` | 恒假 |
+
+四处叠加后的症状是**静默失效**，而不是崩溃：`catch` 把 TypeError 吞掉，插件继续跑，只是永远
+看不见任何 root。脚本侧的可观测面是 `verify:kernels` 在 rc.2 上报「runtime 未能驱动（root 判定
+未命中）」与 `投递 spliced=0`。
+
+### 判据链的两档
+
+判定收敛到 `src/upstream-compat.ts` 一处，两代共用：`readDelegationDepth` / `isRootAgentShape` /
+`isRootAgent` / `liveRootAgents`，分别对应 `src/index.ts:608`、`:844`、`:1066` 与 `src/runtime.ts:206`。
+
+| 档 | 条件 | 判据 | 为什么 |
+|---|---|---|---|
+| 1 | `typeof agents.roots === 'function'` | 逐字用 `roots()`，**不叠加**任何本地判据 | 老代的权威面说了算。宿主文档写明 **resume 出来的 fork 子会话可以带着 `delegationDepth > 0` 被重新登记为顶层 root**（*a resumed fork may still be a root*）——先读深度会在 rc.1 上凭空多出一个旧版本没有的拒绝面 |
+| 2 | 没有 `roots()` | `list()` 成员的会话面上：深度 `> 0` **或** `origin === 'subagent'` 任一命中即非 root | `list()` 只含活体 agent，回答「live」那一半；「root」那一半注册表已答不了，只能问会话头 |
+
+⚠️ 第 2 档有两个必须绕开的坑，都钉进了 `tests/roots-compat.test.mjs`：
+
+- **`parentSession` 不能当判据。** 内核文档原文：*Presence alone does not classify a Session as a
+  subagent; use `origin` for that distinction.* 普通 fork 也带这个字段，用它判会误杀 fork 会话。
+- **`delegationDepth` 是 optional，「缺省即 0」。** 所以比较必须是归一化后的「是否 `> 0`」，
+  写成 `delegationDepth === 0` 会让 `undefined !== 0` 成立、把**所有真正的 root 全部判丢**——
+  症状与本次事故一模一样，却是自己造的。这是最容易犯也最隐蔽的一类错。
+
+两个来源都读深度（会话头持久化的那份 + 宿主内部的 `options.subagentDepth`，后者在两代 `.d.ts`
+里都没声明，按可选形状读），取较大者：任一侧说是子代理就算。脏深度（非有限/负数）归一成 0、
+即**判 root**，是刻意的——丢 root 是静默故障，误挂一份 runtime 幂等且可回收，两个方向的代价不对称。
+不调上游的 `delegationDepthOf`：它在非安全整数上会抛 TypeError，一个坏 agent 就能毁掉整次枚举。
+
+`liveRootAgents` 的过滤判据与单点判定同源，不另写一份——两处一旦分叉，就会出现「注册表认为
+它是 root、冷唤醒拒绝它」这种自相矛盾的组合。
+
+### 实测矩阵
+
+判据一律是 `verify-across-kernels` 的事件形状，字符串照抄报告，不转述。
+
+**rc.2 单代，修复前后对照**：
+
+| 面 | 修复前（`.verify/across-kernels-2026-11-12T08-42-46-150Z.json`） | 修复后（`.verify/across-kernels-2026-11-12T10-52-27-230Z.json`） |
+|---|---|---|
+| verdict | **RED** | **GREEN** |
+| 同源 | same | same |
+| 投递 | `spliced=0 dispatch=N` | `spliced=1 dispatch=Y` |
+| 已关闭会话 | `spliced=0` | `spliced=1 dispatch=Y` |
+| `at` 形状 | 5/5 | 5/5 |
+| 跨代 tsc | `tsconfig.json` **4 条** · `tsconfig.client.json` 0 条 | 换线 19 处，两个 tsconfig **0 条** |
+| gate | 本代 pass · 最新 pass | 本代 pass · 最新 pass |
+
+修复前那条插件告警原文：
+
+```
+later: 会话 <id> 已被唤醒，但 runtime 未能驱动（root 判定未命中），本轮按未投递处理；该会话被打开时会立即补投。
+```
+
+⚠️ 这条告警读起来像「会话已唤醒」，实际那一侧也没走通；判断红绿**只看 `spliced` 与 `dispatch`**，
+不要看告警措辞。
+
+**老代次回归（不是上面那次全量跑，是单跑的对照）**：`0.2.2-rc.1` / `0.2.1-rc.4` / `0.2.1-rc.2`
+三代均 `spliced=1 dispatch=Y`，汇总绿 3 / 红 0 / 未判定 0。这三代都有 `roots()`，走的是第 1 档，
+所以它们是「第 1 档逐字行为没有被这次改动扰动」的证据，而不是第 2 档的证据。
+
+**全量矩阵 12 代**：`node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install`
+→ **绿 12 / 红 0 / 未判定 0，退出码 0**（明细
+`.verify/across-kernels-2026-11-12T11-03-10-870Z.json`，gitignore 目录，复跑即得）。
+
+| 代次 | verdict | 投递 | type（两个 tsconfig） | gate 本代 |
+|---|---|---|---|---|
+| 0.1.2-rc.1 | GREEN | `spliced=1` | 0 错 | **结构性未判定** |
+| 0.1.5-rc.3 | GREEN | `spliced=1` | 0 错 | **结构性未判定** |
+| 0.1.7-rc.1 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.1.7-rc.2 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.0-rc.2 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.1-rc.2 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.1-rc.3 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.1-rc.4 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.2-alpha.2 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.2-alpha.3 | GREEN | `spliced=1` | 0 错 | pass |
+| 0.2.2-rc.1 | GREEN | `spliced=1` | 0 错 | pass |
+| **0.2.2-rc.2** | GREEN | `spliced=1` | 0 错 | pass |
+
+⚠️ `0.1.2-rc.1` / `0.1.5-rc.3` 的 gate「本代」是**结构性未判定**（那两代不导出
+`evaluatePluginCompatibility`，见「已知限制」那一节），**不许记成 pass**。它们进「绿 12」是因为
+该面按结构性豁免计入，不是因为测过。
+
+**回归面**：
+
+| 面 | 结果 |
+|---|---|
+| 单测 | **907 / 907 pass，0 fail**（88 文件；基线 892，新增 `tests/roots-compat.test.mjs` 15 条） |
+| `typecheck` | 两个项目 0 错误 |
+| 跨代 tsc（换线 rc.2） | 两 tsconfig 均 0 错误（修复前 `tsconfig.json` 4 条） |
+| `verify:kernels`（12 代） | 绿 12 / 红 0 / 未判定 0，exit 0 |
+
+### dev 固定代次落后一代是允许的
+
+`devDependencies` 的 `@deepseek-ai/dsh-*` 仍固定 `0.2.1-rc.2`，比表内最新的 `0.2.2-rc.2`
+**落后一代**。这不是漏改，是刻意允许的状态，由两条测试钉住：
+
+- `tests/upstream-compat.test.mjs` 的「devDependencies 固定到某个已验证代次」：要求 dev 是
+  **某一代的精确版本**（不能是范围串）、且全部 kernel-scoped 包**同代次**，但**不要求是最新那代**；
+  落后时会打一行 `ℹ️ dev 固定代次 … 落后于最新已验证代次 …`。
+- 同一文件「dev 与运行时代次的对齐说明」把 dev 代次写成**常量断言**
+  （`assert.equal(dev, '0.2.1-rc.2', …)`）：升级依赖必须同步改这个常量，好让代次变更加在 diff 里
+  看得见，而不是被 install 悄悄改掉。
+
+理由：**「表里有几代验过」与「本地开发装的是哪一代」是两回事**，混成一条会让断言互相打脸——
+本轮加 `0.2.1-rc.3/rc.4` 时就同时红过这两类。覆盖面在别处：比 dev 更新的代次由
+`verify-across-kernels --steps type` 逐代换线跑 tsc（rc.2 即如此），不依赖本地装的是哪一代。
+
+### 仍未做的
+
+- **rc.2 上第 2 档判据只在脚本与假宿主里验过**，没有「真 GUI 里挂一个带 `delegationDepth > 0`
+  的 fork 会话」这一面的端到端证据。`resume` 出来重新成为 root 的反例也属此类：出处是宿主文档
+  文本，本轮没有构造真实样本复现。
+- **UI 面只补跑了 rc.2 与 rc.1 两代，不是 12 代全验过**：
+
+  ```sh
+  PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui -- \
+    --versions 0.2.2-rc.2,0.2.2-rc.1 --out .verify/ui-roots-fix
+  ```
+
+  | 代次 | 结果 |
+  |---|---|
+  | `0.2.2-rc.2` | 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0 → 通过 |
+  | `0.2.2-rc.1` | 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0 → 通过 |
+  | 汇总 | 通过 2 / 不通过 0（矩阵 `.verify/ui-roots-fix/matrix.html`） |
+
+  选这两代是因为它们正是判据链的两档：rc.1 走 `roots()`，rc.2 走深度补位。**其余 10 个代次的
+  UI 面本轮没有重跑**，仍是各自那一轮的历史结论——本节的 UI 面证据只覆盖这 2 代。
+  ⚠️ 命令输出里的 `HTTP 401` 是实例端口轮询的「服务已应答」标记（`instance.mjs` 把 200/401
+  都当作活着），**不是失败**，不要记成错误。
+
+  另需分清：上表属 `verify:ui` 面；rc.2 入表依据的是跨内核四面（mount / function / type / gate）。

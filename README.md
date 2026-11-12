@@ -166,7 +166,7 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 - **待发送 dock**：输入框上方的提醒列表，每条可单独**取消**、**行内改内容**、**暂停与恢复**（`after` 类），或直接**插话发送**。
 - **`/later` 延迟发送**：把「你现在打的这句话」稍后以你的身份发出去（和定时提醒的区别见[这里](#定时提醒和延迟发送有什么区别)）。
 - **侧栏状态标识**：有活动提醒的会话，侧栏显示像素时钟（紫=定时中 · 琥珀=5 分钟内 · 红=已到期），悬停可见任务数与下次时间；全部暂停时改为「已暂停」。
-- **跨内核代次可用**：从 `0.1.2-rc.1` 到 `0.2.2-rc.1` 共十一个代次逐代表过，含真 GUI 截图矩阵，见[支持的 DSH 内核](#支持的-dsh-内核)。
+- **跨内核代次可用**：从 `0.1.2-rc.1` 到 `0.2.2-rc.2` 共十二个代次逐代表过，含真 GUI 截图矩阵，见[支持的 DSH 内核](#支持的-dsh-内核)。
 - **关网页也能触发，两档都成立**：
   - **浏览器关掉、服务端在跑**：一直以来如此——提醒存在服务端，关网页、换设备都会准时到达。
   - **服务端重启、那条会话从没被打开过**：现在也成立，但**兑现于 1.12.1**。宿主级的到期扫描器随 1.12.0 发布，那一版带着「唤醒会话却不驱动投递」的缺陷（`registry.mount()` 返回 runtime 而非 `undefined`，`if (mounted === undefined)` 恒假），所以 1.12.0 上冷会话到点仍不会响；1.12.1 起改为无条件驱动，到点自己把会话拉起来投递，不再依赖「恰好有人打开了那条会话」。
@@ -209,10 +209,16 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 | `0.2.2-alpha.2` | 支持 |
 | `0.2.2-alpha.3` | 支持（`dsh-schedule` 旧导出移除，见下方说明） |
 | `0.2.2-rc.1` | 支持 |
+| `0.2.2-rc.2` | 支持（primitives 删 `useAnchoredPosition`、`AgentRegistry.roots()` 移除，均已适配，见下方说明） |
 
 声明在 `package.json` 的 `engines.dsh`：`>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`；Node 需要 `^22.19 || >=24`。
 
 `0.2.2-alpha.3` 起，`@deepseek-ai/dsh-schedule` 移除了 `decodeScheduleChange`、`foldScheduleEvents`、`scheduleView`、`SCHEDULE_CHANGE_VERSION` 四个旧导出（改为 domain / task 模型）。本插件从这一代起不再具名导入它们：存在时用上游，缺失时用本仓等价实现（语义与上游逐条对齐，见 `src/user-tools.ts` 的 `foldScheduleEventsCompat` / `scheduleViewCompat`）。`resolveEveryOccurrence`、`renderReminderFraming` 等仍在，周期任务推进与提醒文案继续用上游。（GitHub issue #12）
+
+`0.2.2-rc.2` 起有两处宿主侧破坏性变更，本插件都已适配：其一，`dsh-client-ui-primitives` 删掉了
+`useAnchoredPosition`（替代面 `useAnchoredMaxHeight` / `usePointerGrace` 语义不同），定时面板改走 **CSS 锚点定位**，
+老代次仍透传原 hook；其二，`AgentRegistry.roots()` 被移除（注册表只剩 `get()` / `list()`，owner 关系不可见），
+「只认 root」的 4 处判定改由会话头的 `delegationDepth` 补位。两处都在真内核上逐面验过（#158）。
 
 这行声明与 `peerDependencies` 都由代次表推导（`node scripts/sync-peer-matrix.mjs`），形状是**按版本段收口的范围**，不是白名单：同一版本段内更晚的 rc 与该段正式版会一并放行（range 语法写不出「只认已验证的那几个」）。**两侧都必须收**，因为执行者不同：0.2.1 起内核只看 `engines.dsh`，而 0.1.7-rc.1～0.2.0-rc.2 只看 `dsh-*` peer，0.1.2-rc.1 与 0.1.5-rc.3 两代根本没有兼容门禁（那两代上这两行是说明，不是拦截）。
 

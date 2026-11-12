@@ -166,7 +166,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 - **Pending dock**: a list above the input box; each item can be **cancelled**, **edited inline**, **paused and resumed** (`after` items), or sent to the agent right away.
 - **`/later` delayed send**: deliver *the text you are typing right now* later, as yourself (see [the difference](#reminders-vs-delayed-sends-whats-the-difference)).
 - **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
-- **Works across eleven kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.1`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
+- **Works across twelve kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.2`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
   - **Browser closed, server running**: always true — reminders live server-side and arrive on time across devices.
   - **Server restarted, that session was never opened**: true now, but it only became real in **1.12.1**. The host-level expiry sweeper shipped in 1.12.0, yet that release carried a "wakes the session but never drives delivery" defect (`registry.mount()` returns the runtime, not `undefined`, so `if (mounted === undefined)` was always false) — on 1.12.0 a cold session still stayed silent at due time. Since 1.12.1 the drive is unconditional, so the sweeper wakes the session itself and delivers through the normal runtime path, without anybody happening to open it.
@@ -209,10 +209,18 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.2.2-alpha.2` | Supported |
 | `0.2.2-alpha.3` | Supported (`dsh-schedule` dropped its legacy exports, see below) |
 | `0.2.2-rc.1` | Supported |
+| `0.2.2-rc.2` | Supported (primitives dropped `useAnchoredPosition`; `AgentRegistry.roots()` removed — both adapted, see below) |
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
 
 From `0.2.2-alpha.3` on, `@deepseek-ai/dsh-schedule` removed `decodeScheduleChange`, `foldScheduleEvents`, `scheduleView` and `SCHEDULE_CHANGE_VERSION` (replaced by a domain / task model). This plugin no longer imports them by name: when present it uses the upstream export, when missing it falls back to an equivalent implementation here (`foldScheduleEventsCompat` / `scheduleViewCompat` in `src/user-tools.ts`). `resolveEveryOccurrence`, `renderReminderFraming` and friends are still there, so recurring advancement and reminder framing keep using upstream. (GitHub issue #12)
+
+Starting with `0.2.2-rc.2` the host ships two breaking changes, both adapted here: first,
+`dsh-client-ui-primitives` dropped `useAnchoredPosition` (its replacements `useAnchoredMaxHeight` / `usePointerGrace`
+mean different things), so the schedule panel now uses **CSS anchor positioning** while older generations still
+pass the original hook through; second, `AgentRegistry.roots()` was removed (the registry keeps only `get()` /
+`list()`, and the owner relation is no longer observable), so the four "root only" checks fall back to the
+session header's `delegationDepth`. Both were verified face by face on real kernels (#158).
 
 Both this line and `peerDependencies` are derived from the generation table (`node scripts/sync-peer-matrix.mjs`) and shaped as **per-segment bounded ranges**, not a whitelist: later rcs within a segment and that segment's final release are admitted together (range syntax cannot express "only these verified versions"). Both sides have to be bounded because the enforcers differ: from 0.2.1 on the kernel reads only `engines.dsh`, while 0.1.7-rc.1 through 0.2.0-rc.2 read only the `dsh-*` peer ranges — and 0.1.2-rc.1 and 0.1.5-rc.3 have no compatibility gate at all, so on those two the lines are documentation, not enforcement.
 
