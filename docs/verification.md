@@ -866,7 +866,7 @@ PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui \
 
 ### 本轮**没有**解决、也不在 #158 范围内的
 
-`0.2.2-rc.2` 上还有两处与本条无关的不兼容，都是宿主 API 变更，**不在这次改动里修**：
+`0.2.2-rc.2` 上还有一处与本条无关的不兼容，是宿主 API 变更，**不在这次改动里修**：
 
 1. **`AgentRegistry.roots()` 在 0.2.2-rc.2 被移除**（rc.1 的 `dsh-agent` 仍有 `roots(): Agent[]`，
    rc.2 只有 `get()` / `list()`）。本插件 4 处调用：`src/index.ts:611`、`:851`、`:1073`、
@@ -874,9 +874,24 @@ PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui \
    rc.2 上 `投递 spliced=0`（告警「runtime 未能驱动（root 判定未命中）」）。同一份代码在
    `0.2.2-rc.1` 上同一条判据是 `spliced=1 dispatch=Y` GREEN。
    **基线对照**：把 `main` 换线到 rc.2 跑 tsc，同样是这 4 条 —— 与本次改动无关。
-2. **`dsh-schedule` / 宿主在 rc.2 对 `at` 字符串的时区校验更严**：`verify:kernels` 的命令失败
-   回执是 `invalid_rule: at 字符串需带显式时区…`，属上游文法收紧，需要单独一条 issue 判。
+
+⚠️ **更正一处此前的误判**：这一节曾把这句回执登记为「第二处 rc.2 不兼容 —— 宿主对 `at` 字符串
+的时区校验更严，属上游文法收紧」。**这是错的。** `at` 的时区校验在 rc.2 上没有问题：
+
+| 判据 | 0.2.2-rc.2 实测 |
+|---|---|
+| 面板原生 `HH:mm` / 个位小时带秒 / 个位无秒 / 严格基线 | 4 条 `built: true`，回执 `{"ok":true,…}` |
+| 无偏移字符串应拒+提示 | `built: false` · `hinted: true` · `pass: true` —— **预期通过** |
+| 合计 | **5/5 PASS** |
+
+那句 `invalid_rule: at 字符串需带显式时区…` 是 `atShapes` 里
+`{ label: '无偏移字符串应拒+提示', mustBuild: false, mustHint: true }`
+（`scripts/verify-across-kernels.mjs:542-556`）的**预期结果**，不是失败：无偏移字符串必须被拒
+并给出可执行提示，猜宿主时区会把用户意图的时刻改掉。而且这句文案出自本插件自己的
+`src/user-tools.ts:451`，请求根本没到宿主。原始记录见
+`.verify/across-kernels-2026-11-12T08-42-46-150Z.json` 的 `at` 数组。
 
 也就是说：`0.2.2-rc.2` 目前**不应登记进 `KERNEL_GENERATIONS`**——入表标准是「装配功能 + 跨代
-tsc 两面都过」，而那两处让它过不了。`engines.dsh` 的 `>=0.2.2-alpha.2 <0.2.3-0` 本来就放行 rc.2，
+tsc 两面都过」，挡路的只有 `roots()` 那一处：它在 rc.2 上让 `tsconfig.json` 4 条 tsc 报错、
+`verify:kernels` 的 `投递 spliced=0`。`engines.dsh` 的 `>=0.2.2-alpha.2 <0.2.3-0` 本来就放行 rc.2，
 本轮没有改动 peer/engines。

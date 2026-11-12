@@ -45,7 +45,7 @@ import { createRuntimeRegistry } from './runtime-registry.js';
 import { createExpirySweeper, resolveScheduledAtFromLog } from './expiry-sweeper.js';
 import { listOwnershipSnapshots } from './ownership-store.js';
 import { isDueIndex } from './due.js';
-import { readOwnEvents } from './upstream-compat.js';
+import { isRootAgent, liveRootAgents, readDelegationDepth, readOwnEvents } from './upstream-compat.js';
 import { hostDictFor } from './strings.js';
 import { registerBundledSkill } from './skill.js';
 import type { SkillHostLike } from './skill.js';
@@ -569,8 +569,10 @@ function watchSessionLifecycle(ctx: Context, watch: UserWatch): () => void {
  *  1. **被委托子会话**（`delegationDepth > 0`）：上游对子会话的 reminder 投递一律拒绝
  *     （`session/agent-busy`，见 schedule 的 `reminderTargetRefusal`）。它的提醒本就不该由
  *     本插件投递；拉起来只会白跑一轮 turn 再失败。
- *  2. **非 root**：`ctx.agents.roots()` 里没有它 ⇒ runtime 挂不上 ⇒ 唤醒等于白拉。冷会话在
+ *  2. **非 root**：宿主不把它当顶层 agent ⇒ runtime 挂不上 ⇒ 唤醒等于白拉。冷会话在
  *     这里看到的是「此刻没有对应 agent」，属于正常现象，不算拒绝。
+ *     （0.2.2-rc.1 及更早由 `ctx.agents.roots()` 回答，rc.2 起宿主删了该方法，改由
+ *     `isRootAgent` 的深度判据回答——见 upstream-compat。）
  *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
  *     注意这是**优先级最低**的一条：前两条（子会话 / 非 root）是「叫醒了也投不出去」，
  *     这一条只是「现在别打开」。被它挡下的到期任务必须留痕（见 `UserWatch.suppressed`）。
@@ -598,20 +600,12 @@ export function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | '
     return 'not-root';
   }
   if (live === undefined) return undefined;
-  // 深度取自会话头（`delegationDepth`）与运行期 `options.subagentDepth` 的较大者，
-  // 与上游 `delegationDepthOf` 同义；后者是宿主内部字段，这里按可选形状读取，两代都安全。
-  const headerDepth = (live.session?.header as { delegationDepth?: number } | undefined)?.delegationDepth;
-  const runtimeDepth = (live as unknown as { options?: { subagentDepth?: number } }).options?.subagentDepth;
-  const depth = Math.max(
-    typeof headerDepth === 'number' && Number.isFinite(headerDepth) ? headerDepth : 0,
-    typeof runtimeDepth === 'number' && Number.isFinite(runtimeDepth) ? runtimeDepth : 0,
-  );
-  if (depth > 0) return 'subagent';
-  try {
-    return ctx.agents.roots().includes(live) ? undefined : 'not-root';
-  } catch {
-    return 'not-root';
-  }
+  // root 判定统一走 `isRootAgent`：0.2.2-rc.1 及更早用宿主 `roots()`（逐字行为），
+  // rc.2 起宿主删掉了 `roots()`，改读会话头的 `delegationDepth`（判据链见 upstream-compat）。
+  // 深度判据本身已经覆盖了 `delegationDepth > 0` 的那些，但仍单列一条 `'subagent'`：
+  // 两个拒绝理由对用户/诊断是不同的事实（子会话 vs 非顶层），不能压成一个。
+  if (readDelegationDepth(live) > 0) return 'subagent';
+  return isRootAgent(ctx.agents, live as Agent) ? undefined : 'not-root';
 }
 
 /**
@@ -847,11 +841,7 @@ function hasLiveRootAgent(ctx: Context, sessionId: string): boolean {
     return false;
   }
   if (live === undefined) return false;
-  try {
-    return ctx.agents.roots().includes(live);
-  } catch {
-    return false;
-  }
+  return isRootAgent(ctx.agents, live as Agent);
 }
 
 /** 插件卸载中的标记（避免继续接受新 agent 挂载）。 */
@@ -1070,7 +1060,10 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
   // 每个 root agent 一个「用户提醒调度器」。挂载规则全部在 runtime-registry.ts
   //（幂等 / 只认 root / 水合 / 自愈 / teardown 守卫，且有行为级测试），这里只做接线。
   const runtimeRegistry = createRuntimeRegistry<Agent, UserScheduleRuntime>({
-    roots: () => ctx.agents.roots(),
+    // 0.2.2-rc.2 删掉了 `AgentRegistry.roots()`，这里不能直连宿主那一个：注入面问的是
+    // 「当前 live root 列表」，`liveRootAgents` 有 `roots()` 就用它（rc.1 逐字行为），
+    // 没有才从 `list()` 按 `delegationDepth` 过滤（rc.2）。
+    roots: () => liveRootAgents(ctx.agents) as readonly Agent[],
     isStopping: () => stopping,
     create: (agent) => new UserScheduleRuntime(ctx, agent, getSettings),
     drive: (runtime) => runtime.requestDrive(),

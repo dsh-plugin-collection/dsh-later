@@ -63,6 +63,14 @@ export declare function readFoldInput(session: SessionLogSurface | Session): {
 };
 export declare function readEventAt(session: SessionLogSurface | Session, seq: number): SessionEvent | undefined;
 export declare function detectSessionApi(session: SessionLogSurface | Session): 'own-events' | 'legacy-events';
+export interface AgentRegistrySurface<A> {
+    readonly roots?: (() => readonly A[]) | undefined;
+    readonly list?: (() => readonly A[]) | undefined;
+}
+export declare function readDelegationDepth(agent: unknown): number;
+export declare function isRootAgentShape(agent: unknown): boolean;
+export declare function isRootAgent<A>(agents: AgentRegistrySurface<A> | undefined, agent: A): boolean;
+export declare function liveRootAgents<A>(agents: AgentRegistrySurface<A> | undefined): readonly A[];
 export declare const PLUGIN_KIND_RETIRED_SINCE = "0.1.7-rc.1";
 export declare const KERNEL_VERSION_SPECIFIERS: readonly ["@deepseek-ai/dsh", "@deepseek-ai/dsh-schedule", "@deepseek-ai/dsh-llm", "@deepseek-ai/dsh-session"];
 export interface KernelVersion {

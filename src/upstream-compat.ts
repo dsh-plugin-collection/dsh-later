@@ -635,6 +635,153 @@ export function detectSessionApi(session: SessionLogSurface | Session): 'own-eve
     : 'legacy-events';
 }
 
+// ── root agent 判定（0.2.2-rc.2 删掉 AgentRegistry.roots() 之后的跨代收敛点）──────────
+
+/**
+ * 宿主 agent 注册表在本插件眼里的最小面（鸭子类型，两代并集）。
+ *
+ * 刻意**不** import `AgentRegistry` 类型：它随代次漂（rc.2 已无 `roots`），而这里要判的
+ * 恰恰是「这一代有没有它」。调用方传进来的 `ctx.agents` 结构上就满足这个接口。
+ */
+export interface AgentRegistrySurface<A> {
+  /** 0.2.2-rc.1 及更早：`[...store.values()].filter(e => e.owner === undefined).map(e => e.agent)`。rc.2 起不存在。 */
+  readonly roots?: (() => readonly A[]) | undefined;
+  /** 全部 live agent（**含子代理**）。两代都在。 */
+  readonly list?: (() => readonly A[]) | undefined;
+}
+
+/** root 判定需要读的 agent 面：会话头里的委托深度，以及宿主内部那个运行期深度字段。 */
+type RootProbeAgent = {
+  readonly session?: { readonly header?: { readonly delegationDepth?: unknown; readonly origin?: unknown } | undefined } | undefined;
+  readonly options?: { readonly subagentDepth?: unknown } | undefined;
+};
+
+/** 非负有限数才算深度；其余（undefined / NaN / 负数 / 非数字）一律当 0。 */
+function finiteDepth(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+/**
+ * 一个 agent 的**委托深度**：会话头 `delegationDepth` 与运行期 `options.subagentDepth` 取较大者。
+ *
+ * 为什么两个来源都要读：会话头那份是**持久化**的（dsh-session 的 SessionHeader 文档：
+ * 「absent (zero) for a top-level session, parent depth + 1 for a subagent child. Persisted
+ * so a recursion budget survives restart and resume」），宿主内部另有一个运行期字段
+ * `options.subagentDepth`——它与上游 `delegationDepthOf` 同义，且在「头部还没落盘 / 假件」
+ * 这两种情况下是唯一可读的那个。取较大者是最保守的读法：任一侧说是子代理就算子代理。
+ */
+export function readDelegationDepth(agent: unknown): number {
+  const surface = (agent ?? {}) as RootProbeAgent;
+  return Math.max(
+    finiteDepth(surface.session?.header?.delegationDepth),
+    finiteDepth(surface.options?.subagentDepth),
+  );
+}
+
+/**
+ * 单个 agent 是否 root（顶层 agent）。**任何异常都不向外抛**：读失败返回 false。
+ *
+ * ## 判据：`origin !== 'subagent' && (delegationDepth ?? 0) === 0`
+ *
+ * 这与生态里的官方写法同形（dsh-plugin-recommendations 用
+ * `header.origin === 'subagent'` 判 not-live-root），这里把两个条件都收进来，
+ * 理由有两层：
+ *
+ *  - `origin` 是文档指定的「是不是子代理」的判据（「Presence alone does not classify a
+ *    Session as a subagent; use `origin` for that distinction」）——所以 `parentSession`
+ *    一律**不看**：普通 fork 也会带它，用它判会误杀 fork 会话。
+ *  - 但 `origin` 缺席不等于顶层（老日志 / 未落头的会话可能只带 `delegationDepth`），
+ *    所以 `delegationDepth` 这一侧必须补上。**它是 optional，"缺省即 0"**，因此比较必须
+ *    是「归一化后是否 > 0」，绝不能写成 `depth === 0`：那样 `undefined !== 0` 会让
+ *    **所有真正的顶层会话被判丢**（症状是 rc.2 上一个 root 都挂不上）。
+ *
+ * ## 为什么不用上游的 `delegationDepthOf`
+ *
+ * 它在非安全整数 `subagentDepth` 上会抛 TypeError——枚举里一个坏 agent 就能毁掉整次
+ * 判定。这里只直接读 header 原始字段（外加宿主内部那个运行期字段，见
+ * {@link readDelegationDepth}），并把它归一化成非负有限数，单条脏数据最多让它自己
+ * 判错，不会让整轮枚举抛出去。
+ *
+ * ## 与 {@link isRootAgent} 的分工
+ *
+ * 这个函数**只读会话面**，不碰注册表——它回答的是「这个 agent 本身是不是顶层」。
+ * 而「它此刻还在不在注册表里、且仍被登记为顶层」要连注册表一起看，那是 {@link isRootAgent}。
+ */
+export function isRootAgentShape(agent: unknown): boolean {
+  try {
+    if (readDelegationDepth(agent) > 0) return false;
+    const origin = ((agent ?? {}) as RootProbeAgent).session?.header?.origin;
+    return origin !== 'subagent';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `agent` 此刻是否是一个**活着的 root agent**（本插件所有「只认 root」判定的唯一实现）。
+ *
+ * 两代共用的判据链：
+ *
+ *  1. **宿主有 `roots()`**（≤ 0.2.2-rc.1）→ **直接用它的结果**，逐字保持旧行为。
+ *     这一侧不叠加任何本地判据：那一代的 `roots()` 是「注册表里的实时关系」
+ *     （创建时有没有 owner context），权威度高于会话头里的 `delegationDepth`，
+ *     叠加只会让 rc.1 上出现旧版本没有的拒绝面。
+ *     —— 顺带解释了为什么不能反过来「先读深度、深度为 0 再问 roots()」：`resume` 出来的
+ *     fork 子会话可以带着 `delegationDepth > 0` 被重新登记为顶层 root（宿主文档
+ *     「a resumed fork may still be a root」），先读深度会把它误判成子代理。
+ *  2. **没有 `roots()`**（0.2.2-rc.2 起，注册表只剩 `get(id)` / `list()`，store entry
+ *     已无 `owner` 字段）→ 用 {@link isRootAgentShape} 的深度判据补位。注册表的
+ *     owner 关系在这一代不可见，会话头里的 `delegationDepth` 是上游为这件事留下的
+ *     持久化字段，于是它成为唯一可用的判据。
+ *
+ * 两代都**不向外抛**：`roots()` 或 `list()` 抛错一律按「不是 root」处理——现有调用点都在
+ * try/catch 里，这一层把同样的性质收进来，免得每个调用点各写一份。
+ *
+ * @param agents - 宿主 agent 注册表（`ctx.agents`；可能尚未就绪 —— undefined 时返回 false）。
+ * @param agent - 待判定的 agent。
+ * @returns 是活着且为顶层 agent 时 true。
+ */
+export function isRootAgent<A>(agents: AgentRegistrySurface<A> | undefined, agent: A): boolean {
+  if (agents === undefined || agents === null || agent === undefined || agent === null) return false;
+  try {
+    const roots = agents.roots;
+    if (typeof roots === 'function') {
+      // 逐字行为：老代的权威面说了算。
+      return roots.call(agents).includes(agent);
+    }
+    const list = agents.list;
+    if (typeof list !== 'function') return false;
+    // 「live」这一半由 list() 回答（它只含活体 agent），「root」那一半由会话头回答。
+    return list.call(agents).includes(agent) && isRootAgentShape(agent);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 当前全部 live root agent（{@link isRootAgent} 的列表版，供 runtime 注册表的
+ * `roots(): readonly A[]` 注入面使用）。
+ *
+ * rc.2 上没有 `roots()` 时只能自己从 `list()` 过滤；过滤判据与单点判定同源，
+ * 不另写一份——两处一旦分叉，就会出现「注册表认为它是 root、冷唤醒拒绝它」这种
+ * 自相矛盾的组合。
+ *
+ * @param agents - 宿主 agent 注册表（可能尚未就绪）。
+ * @returns 新的数组（调用方可以随便改）；`agents` 缺席或抛错时为空数组。
+ */
+export function liveRootAgents<A>(agents: AgentRegistrySurface<A> | undefined): readonly A[] {
+  if (agents === undefined || agents === null) return [];
+  try {
+    const roots = agents.roots;
+    if (typeof roots === 'function') return [...roots.call(agents)];
+    const list = agents.list;
+    if (typeof list !== 'function') return [];
+    return list.call(agents).filter((candidate) => isRootAgentShape(candidate));
+  } catch {
+    return [];
+  }
+}
+
 // ── 内核版本判定（issue #75）───────────────────────────────────────────────────────
 
 /**
