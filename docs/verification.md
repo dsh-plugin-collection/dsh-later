@@ -1005,10 +1005,13 @@ later: 会话 <id> 已被唤醒，但 runtime 未能驱动（root 判定未命�
 | 跨代 tsc（换线 rc.2） | 两 tsconfig 均 0 错误（修复前 `tsconfig.json` 4 条） |
 | `verify:kernels`（12 代） | 绿 12 / 红 0 / 未判定 0，exit 0 |
 
-### dev 固定代次落后一代是允许的
+### dev 固定代次落后于表内最新一代是允许的（当前已不落后）
 
-`devDependencies` 的 `@deepseek-ai/dsh-*` 仍固定 `0.2.1-rc.2`，比表内最新的 `0.2.2-rc.2`
-**落后一代**。这不是漏改，是刻意允许的状态，由两条测试钉住：
+⚠️ 这一段写于 dev 还固定 `0.2.1-rc.2` 的时候。**现状已变**：devDependencies 的 11 个
+`@deepseek-ai/dsh-*` 现已跟到 `0.2.2-rc.2`（见本节末尾「升级到 0.2.2-rc.2」）。下面讲的机制
+仍然成立——它约束的是**将来**再出现落后时的行为，不是当下的状态。
+
+由两条测试钉住：
 
 - `tests/upstream-compat.test.mjs` 的「devDependencies 固定到某个已验证代次」：要求 dev 是
   **某一代的精确版本**（不能是范围串）、且全部 kernel-scoped 包**同代次**，但**不要求是最新那代**；
@@ -1019,7 +1022,51 @@ later: 会话 <id> 已被唤醒，但 runtime 未能驱动（root 判定未命�
 
 理由：**「表里有几代验过」与「本地开发装的是哪一代」是两回事**，混成一条会让断言互相打脸——
 本轮加 `0.2.1-rc.3/rc.4` 时就同时红过这两类。覆盖面在别处：比 dev 更新的代次由
-`verify-across-kernels --steps type` 逐代换线跑 tsc（rc.2 即如此），不依赖本地装的是哪一代。
+`verify-across-kernels --steps type` 逐代换线跑 tsc，不依赖本地装的是哪一代。
+
+### 升级到 0.2.2-rc.2：一个一直存在、升级才照出来的产品缺陷
+
+`devDependencies` 从 `0.2.1-rc.2` 升到 `0.2.2-rc.2` 后，`npm test` 是 **809 pass / 37 fail**。
+追下去发现红的不全是"测试数据过时"：
+
+**`title` 从 `0.1.7-rc.2` 起就是存量记录的必填项**（不是 rc.2 才收紧）。本机 11 棵代次树实测：
+`0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` 三代的 `dsh-schedule` 里**没有**这句校验，
+`0.1.7-rc.2` 起才有。而那三代写进会话日志的 `schedule/change` 记录**没有** `title` 字段。
+
+本仓两处 `decodeScheduleChangeCompat` 的失败分支是 `catch { continue; }`，于是：
+
+> 升级内核后，用户打开一个旧会话，**旧的提醒从 dock 与定时面板上一起消失**。
+> 提醒能建、能投递、sidecar 里也有，只是不进投影。
+
+之前没暴露，是因为 dev 一直钉在 `0.2.1-rc.2` 而那代的 `foldScheduleEvents` 还在；升到 rc.2 后
+该导出也没了，5 个测试文件在 **import 期**就挂，整个文件的用例一起变 0——这才把它照出来。
+
+**修法不是 `try { } catch { }` 全兜住**，三层判据（`src/schedule-compat.ts` 的 `decodeRecordTolerant`）：
+
+1. 只在「拒绝**结构上只关于 title**、且该值确实不合法」时才补；
+2. 补完再问一次上游，**那一抛原样外传**——所以「缺 title + 缺 `scheduledAt`」这类记录
+   补了 title 仍在键集上报错，照旧被拒；
+3. 不替不校验 title 的旧代补（补了会让 `hasExactKeys` 多一个键，把合法旧记录判非法）。
+
+护栏：`tests/schedule-title-backfill.test.mjs` 21 条，含 17 条「补了 title 也不该过」的坏数据
+样本与「投影/投递两处同口径」。**变异验证**：把兜底改成「catch 全兜 + 无条件补」时，
+21 条掉到 6 条（15 条变红）——护栏有牙，不是永真。
+
+`tests/` 里缺 `title` 的 fixture **故意保留**：它们现在就是「0.1.5 旧记录」的活样本，
+补上等于把这次回归的样本删掉。
+
+升级后实测：
+
+| 面 | 结果 |
+|---|---|
+| `npm test` | **928 pass / 0 fail**（89 文件；基线 907 + 新增 21） |
+| `npm run typecheck` | 两个项目 0 错误 |
+| `verify:kernels`（12 代全量） | 绿 12 / 红 0 / 未判定 0 |
+| `verify:ui`（rc.2 + rc.1） | 两代 按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0 |
+
+另两条同一轮修掉的独立失败：`tests/upstream-compat.test.mjs` 的 dev 代次常量；
+`tests/error-code-superset.test.mjs` 的解析器（rc.2 把 `ScheduleInputError.code` 从内联联合改成
+别名链 `→ Exclude → 分散在 8 个接口`，改为按形状递归解析并兼容两代，认不出时 `assert.fail`）。
 
 ### 仍未做的
 
