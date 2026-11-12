@@ -78,6 +78,12 @@
  *    后两面由 `tests/due-index-consumption.test.mjs` 的验收①②③钉住（那里 sidecar 有、
  *    `published` 里没有，才是"从没被打开过"的形状）。改名字是为了不让下一个看矩阵的人
  *    把这一维当成 #128 那一面已经验过。
+ *
+ *    **「从没被打开过」在真内核上的那一面见 `npm run verify:cold`**（`scripts/verify-cold-attribution.mjs`，
+ *    issue #144）。它做的是 `create → 只留宿主进程 → 等到期 → **在连浏览器之前**读持久化日志`，
+ *    并把「先读日志、再连浏览器」做成断言闸门，而不是写在注释里靠人自觉。本矩阵**不**假装覆盖
+ *    这一面：本文件里的会话都由 `ctx.agents.create()` 造出来，也就是都被打开过。
+ *
  * 2. 会话日志是**多帧 zstd 拼接**（每次 flush 追加一帧），`zstdDecompressSync` 只解第一帧；
  *    这里按帧 magic 切分逐帧解。
  * 3. 内核模块必须解析到**被测那一代**：插件目录直接挂载会让它用自己 `node_modules` 里

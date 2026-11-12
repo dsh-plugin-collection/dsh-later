@@ -358,3 +358,56 @@ exit 0
 `agent/inbox/spliced` 带本次 nonce 且 `schedule/change operation: dispatch` 已存在 → **再**开 GUI，断言
 dock 出现这条已投递的行、侧栏 badge 由红回落；并且**钉住 post 提交点**（跑的是哪个 commit 的 `lib/`），
 逐代次跑。不该塞进现有三张截图里冒充它们覆盖过。
+
+### 11.4 补上可归因的那一份（2026-11-12，issue #144）
+
+11.2 的两条硬伤已由 `npm run verify:cold`（`scripts/verify-cold-attribution.mjs`）补掉，证据落仓：
+`docs/media/cold-attribution-2026-11-12/`。**11.1 / 11.2 的历史材料不改不删**，本节是另一份。
+
+**跑的是什么**：内核 `0.2.1-rc.4`，插件 `1.12.2`（本仓 `lib/` 的实体副本，不是软链）。
+同源判据 `auditPluginSources` 实测 **`ok: true, checked: 8, offenders: []`**——八个内核包全部解析在
+被测树内。这条现在是硬前提：不同源时脚本直接不作数。
+
+**顺序是闸门，不是注释**（11.2(a) 的正解）：分三个**独立进程**，每阶段只认磁盘上的持久化日志。
+
+| 阶段 | 做了什么 | 结论 |
+|---|---|---|
+| phase1 | 起内核 → 用真命令建 `+8s` 提醒 → **不关进程**，宿主常驻 | `dispatchAtCreate = 0`（起点干净） |
+| phase2 | 等到期点 + 一个兜底 tick 周期（90s）。**全程没有浏览器、没有 `agents.create`**，只读日志 | ⭐ `spliced = 1`、`dispatch = 1` → **OK** |
+| phase3 | **仅在 phase2 判绿后**才连浏览器，只产出人眼材料 | 不参与判定 |
+
+闸门实现见 `main()`：`phase2.dispatchBeforeBrowser.ok !== true` 时直接退出码 2 并写明「未连浏览器」。
+phase3 第一版**没有产出可用画面**，两轮踩坑都记在这里（都已修）：
+
+1. `browserOpened = false`：宿主 CLI 要求 profile 有 `dsh.profile.bundles` 清单，而起实例时只写了
+   `cordis.yml`，`dsh` 直接报 `profile "x" does not exist`（`web.log` 留了原文）。补上清单。
+2. 端口通了之后截到的却是一张 **`dsh web authentication required` 认证失败页**：隔离 home 没有
+   `~/.dsh/.credentials.yaml`，`mintCookie` 签出的 cookie 验不过。把真实凭据软链进来（只读，
+   与 `scripts/ui-matrix/instance.mjs` 同一做法）。
+
+修完本次实测 `guiRendered = true`、`authWallSeen = false`，截图已入库
+（`phase3-browser.png`，侧栏可见那条 `Untitled · 1min` 的会话，就是本次从未被打开过的那条）。
+
+**判据也跟着补了**：`phase3.json` 现在记 `guiRendered`，它要求页面**不是**认证墙；
+只看 `browserOpened`（端口有 HTTP 响应）会把那张失败页算成"拿到了画面"——这是典型的技术上算通过、
+实际什么都没看到。
+
+**这不影响本节的结论**：判定只认 phase2，而 phase2 全程没有浏览器。但 phase3 拿到的画面只是
+人眼材料，**不许读成「冷投递的 UI 面已经判过了」**。
+
+**post 提交点**（11.2(b) 的正解）：被测产物是同源审计的同一份 `lib/`；脚本在 `phase1.json` 里记
+`sameSource` 与 `version`，不再靠事后猜。
+
+**这一档的诚实边界**：
+- 只跑了**一代**（`0.2.1-rc.4`），不是逐代次。§11.3 表里「跨代次未判定」对**本脚本**仍然成立。
+- phase3 拿到了真 GUI 画面，但**没有**对「dock 出现已投递行、badge 由红回落」做结构化断言——
+  画面是"事后复核"材料，不是判据。那两条仍记为**未验证**。
+- 与 11.1 那次的历史材料**不是同一次运行**，两者不能互相引用。
+
+### 11.5 与 `verify:kernels` 的分工（issue #144 第 3 条）
+
+`verify:kernels` 的判据 3 是 `create → dispose → 等`，会话**被打开过**；`verify:cold` 的
+phase1 起的是「宿主在跑、但没有任何 agent 挂在该会话上」，到点只靠宿主级扫描器把它拉起来。
+两维并列、不替换，已在 `scripts/verify-across-kernels.mjs` 的文件头纪律 4 里写明。
+**没有**把 `verify:cold` 塞进 `verify:kernels` 的矩阵：那需要改矩阵的判据面，而矩阵这一轮已经
+在「判据 3 覆盖不到」这件事上给过一次假绿，不该再叠一层。
