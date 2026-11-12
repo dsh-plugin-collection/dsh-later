@@ -113,7 +113,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { zstdDecompressSync } from 'node:zlib';
-import { KERNEL_GENERATIONS, KERNEL_SCOPED_PACKAGES } from '../lib/upstream-compat.js';
+import { compareVersions, KERNEL_GENERATIONS, KERNEL_SCOPED_PACKAGES } from '../lib/upstream-compat.js';
 import { runTypecheck } from './typecheck-all.mjs';
 import {
   APP_BOOT_PACKAGE, auditPluginSources, findScopedDir, indexScopedDirs, planPeerBackfill,
@@ -695,6 +695,57 @@ async function runOne(version) {
     if (coldCreate?.result?.kind !== 'success') record.notes.push(`已关闭会话的投递用例没建起来：${String(coldCreate?.result?.text ?? '').slice(0, 140)}`);
     try { await coldHandle?.dispose?.(); } catch { /* 关不掉也继续：下面的判定会如实报出来 */ }
 
+    /**
+     * 判据 4：**0.2.2-rc.2 上带 delegationDepth 的会话不该被武装**（补 issue #158 之后缺的那一面）。
+     *
+     * 这条判据只对 **rc.2 及以后**成立，而且方向与上面两个用例**相反**。原因写在下面，
+     * 因为第一版没想清楚、在 11 个代次上一齐报了红：
+     *
+     * ⚠️ **"roots() 怎么认 root"与"会话头里的 delegationDepth 是几"是两件不同的事。**
+     * rc.1 的 `roots()` 是 `store.values().filter(e => e.owner === undefined)` ——判的是
+     * **运行期所有权**（创建时有没有 owner context），不是会话谱系。而本脚本用
+     * `ctx.agents.create({...})` 建出来的 agent 走的是 `enter(agent, undefined)`，**没有 owner**，
+     * 所以在 ≤0.2.2-rc.1 上它**本来就是 root**，插件投它完全正确。
+     * （rc.1 的 d.ts 自己就写着 "durable session lineage does not affect this runtime relation,
+     *  so a resumed fork may still be a root"。）
+     *
+     * 只有 rc.2 把 `roots()` 删掉、改读 `delegationDepth` 之后，"depth=1 ⇒ 非 root ⇒ 不武装"
+     * 才成立。这也正是 issue #158 那条判据链第 2 档要证的东西：真内核上读到的 header 形状
+     * 与假件一致，且它真的拦住了投递。
+     *
+     * 所以这一维**按代次取方向**：rc.2 及以后断言"不该投"，更早的代次断言"会被投"
+     * （那是该代正确行为）。方向记在 `expectChildSpliced` 里，判红与否只看它与实测是否一致。
+     */
+    /**
+     * 这一维的期望方向：rc.2 起「不该投」，更早「该投」。
+     *
+     * 判据来自**声明**（该代有没有 roots()）而不是今天跑出来的结果（skill §2：期望值来自声明）。
+     * 这里用版本号判，因为「roots() 存不存在」在 rc.1→rc.2 之间换代，符号探测只能回答
+     * "现在有没有"，回答不了"这一代本来应该怎样"。
+     */
+    const childShouldNotDeliver = compareVersions(runtime, '0.2.2-rc.2') >= 0;
+    const childNonce = `XK-CHILD-${Date.now().toString(36)}`;
+    const childSessionId = `xk-child-${Date.now().toString(36)}`;
+    let childCreated = false;
+    try {
+      const childHandle = await ctx.agents.create({ sessionId: childSessionId, meta: { cwd: home, delegationDepth: 1 } });
+      const childAgent = childHandle?.agent ?? childHandle;
+      const childDepth = childAgent?.session?.header?.delegationDepth;
+      const childCreate = await ctx.commands.execute(childAgent, `/user-schedule-create ${JSON.stringify({ prompt: childNonce, after_seconds: 2 })}`, [], new AbortController().signal);
+      childCreated = true;
+      record.child = {
+        depth: childDepth ?? null,
+        built: childCreate?.result?.kind === 'success',
+        receipt: String(childCreate?.result?.text ?? '').slice(0, 120),
+      };
+      if (childDepth !== 1) record.notes.push(`子会话判据：会话头 delegationDepth 读回 ${String(childDepth)}（期望 1）——该代次可能不落这个字段`);
+      if (!record.child.built) record.notes.push(`子会话判据：提醒没建起来（${record.child.receipt}），该用例作废而不判绿`);
+    } catch (error) {
+      // 建不出来就如实记成"未判定"，不许静默算过（skill §2：未判定 ≠ 绿）。
+      record.child = { error: String(error?.message ?? error).slice(0, 160) };
+      record.notes.push(`子会话判据：建会话失败 —— ${record.child.error}`);
+    }
+
     const exec = await ctx.commands.execute(agent, `/user-schedule-create ${JSON.stringify({ prompt: nonce, after_seconds: 2 })}`, [], new AbortController().signal);
     record.notes.push(`投递用例回执：${JSON.stringify(exec?.result ?? exec).slice(0, 220)}`);
     if (exec?.result?.kind !== 'success') record.notes.push(`投递用例没建起来：${String(exec?.result?.text ?? '').slice(0, 140)}`);
@@ -722,6 +773,26 @@ async function runOne(version) {
     };
     const dispatched = dispatchInSession(agent.id, nonce);
     const coldDispatched = dispatchInSession(coldSessionId, coldNonce);
+    /**
+     * 子会话判据的结论：方向由 `childShouldNotDeliver` 决定，`pass` 只表示"实测与声明一致"。
+     *
+     * 只认"该会话自己的日志里带着本用例 nonce 的 spliced"，不看全局计数——别处投成功
+     * 不该替它洗白。建会话就失败时这一维记 `null`（未判定），与"投过/没投"区分开。
+     */
+    const childSpliced = childCreated
+      ? (bySession.get(childSessionId) ?? []).filter((e) => e.type === 'agent/inbox/spliced' && e.raw.includes(childNonce)).length
+      : null;
+    if (record.child !== undefined && childSpliced !== null) {
+      const delivered = childSpliced > 0;
+      record.child.spliced = childSpliced;
+      record.child.expectNoDeliver = childShouldNotDeliver;
+      record.child.pass = delivered !== childShouldNotDeliver;
+      if (!record.child.pass) {
+        record.notes.push(childShouldNotDeliver
+          ? '子会话判据：rc.2 起带 delegationDepth=1 的会话**被投递了**——"只认 root"的 depth 判据在该代次失效'
+          : `子会话判据：${runtime} 上带 delegationDepth=1 的会话**没被投递**——该代 roots() 判的是运行期所有权，这个会话本该是 root`);
+      }
+    }
     // 诊断：投递为 0 时，把失败的命令回执原文带进 notes。此前只能看到「spliced=0」，
     // 分不清是「没建起来」「建起来但没到点」还是「到点投递被拒」——这三种修法完全不同。
     if (spliced === 0) {
@@ -777,6 +848,9 @@ async function runOne(version) {
     || record.delivery?.coldDispatched === false
     || !!record.delivery?.admissionError
     || record.at.some((a) => !a.pass)
+    // 子会话判据：只有"实测与声明方向不符"才判红（`pass === false`）。建不出会话时
+    // `pass` 是 undefined，走未判定，不在这里——未判定 ≠ 绿，也不等于红。
+    || record.child?.pass === false
     || record.notes.some((n) => n.startsWith('装配失败') || n.startsWith('未投递'));
   if (!record.verdict) record.verdict = red ? 'RED' : 'GREEN';
   return record;
@@ -1012,6 +1086,17 @@ function report(record) {
     // dispatch 两个字段**各自归因**（按会话日志目录）：热用例看热会话自己的日志，冷用例看
     // 已关闭会话自己的日志。早期版本两者恒等，等于那一维没有证据，别退回那种写法。
     bits.push(`投递 spliced=${d.spliced} dispatch=${d.dispatched ? 'Y' : 'N'} 已关闭会话 spliced=${d.coldSpliced ?? '?'} dispatch=${d.coldDispatched === undefined ? 'n/a' : d.coldDispatched ? 'Y' : 'N'}`);
+  }
+  // 子会话是唯一「**不该**投递」的维：spliced=0 才是对的，所以单独用「不该投=Y/N(数)」表达，
+  // 不与上面那些「应该投」混读。未建出来时记 n/a（未判定），不能当 0 看。
+  if (record.child !== undefined) {
+    const c = record.child;
+    const spliced = c.spliced;
+    // 方向随代次变：rc.2 起「不该投」，更早「该投」（见该用例上方的 ⚠️ 说明）。
+    const want = c.expectNoDeliver === true ? '不该投' : '该投';
+    const verdict = spliced === undefined || spliced === null ? 'n/a（未建出/未判定）'
+      : c.pass === true ? 'Y' : `N（实测 ${spliced === 0 ? '未投' : `投了 ${spliced} 次`}）`;
+    bits.push(`子会话(depth=${c.depth ?? '?'}) ${want}=${verdict}`);
   }
   if (record.at?.length) bits.push(`at 形状 ${record.at.filter((a) => a.pass).length}/${record.at.length}`);
   if (record.type) bits.push(`type ${record.type.ok ? '绿' : record.type.projects.map((p) => `${p.project}:${p.errors}`).join(',')}`);

@@ -1070,10 +1070,12 @@ later: 会话 <id> 已被唤醒，但 runtime 未能驱动（root 判定未命�
 
 ### 仍未做的
 
-- **rc.2 上第 2 档判据只在脚本与假宿主里验过**，没有「真 GUI 里挂一个带 `delegationDepth > 0`
+> ⚠️ **下面两条已在后续一轮补齐**，原文保留以便追溯，结论以本节末尾「补齐的两个缺口」为准。
+
+- ~~**rc.2 上第 2 档判据只在脚本与假宿主里验过**~~，没有「真 GUI 里挂一个带 `delegationDepth > 0`
   的 fork 会话」这一面的端到端证据。`resume` 出来重新成为 root 的反例也属此类：出处是宿主文档
   文本，本轮没有构造真实样本复现。
-- **UI 面只补跑了 rc.2 与 rc.1 两代，不是 12 代全验过**：
+- ~~**UI 面只补跑了 rc.2 与 rc.1 两代，不是 12 代全验过**~~：
 
   ```sh
   PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui -- \
@@ -1092,3 +1094,55 @@ later: 会话 <id> 已被唤醒，但 runtime 未能驱动（root 判定未命�
   都当作活着），**不是失败**，不要记成错误。
 
   另需分清：上表属 `verify:ui` 面；rc.2 入表依据的是跨内核四面（mount / function / type / gate）。
+
+### 补齐的两个缺口（2026-11-12 后续一轮）
+
+#### 12 代 UI 面全量
+
+```sh
+PLAYWRIGHT_MODULE=<playwright 目录> npm run verify:ui -- \
+  --versions 0.1.2-rc.1,0.1.5-rc.3,0.1.7-rc.1,0.1.7-rc.2,0.2.0-rc.2,0.2.1-rc.2,\
+0.2.1-rc.3,0.2.1-rc.4,0.2.2-alpha.2,0.2.2-alpha.3,0.2.2-rc.1,0.2.2-rc.2 \
+  --out .verify/ui-all12
+```
+
+**12/12 通过**（每代 按钮=Y · dock=1 · 面板=Y · badge=1 · 错误=0 · 警告=0），48 张截图落
+`.verify/ui-all12/`。
+
+⚠️ **但逐张看图时发现了一个判据没覆盖到的真缺陷**——这正好印证「`panelOpened === true` 是绿
+不等于面板长得对」：
+
+| 代次 | 修复前 | 根因 |
+|---|---|---|
+| `0.1.2-rc.1` / `0.1.5-rc.3` / `0.1.7-rc.1` | 面板**全透明**，底下 dock 文字透上来与面板内容重叠 | `--dsw-menu-surface-fill` 这三种代次的宿主 css 里**没有**（逐代扫 `dist/assets/*.css` 实测，从 `0.1.7-rc.2` 起才有）；`background: var(未定义)` 是**整条声明失效**，不是取到透明 |
+
+修法是三级兜底 `var(新 token, var(--dsw-alias-bg-layer-2, #fff))`。`backdrop-filter` 的分界
+不同（从 `0.1.7-rc.1` 起才有），兜 `none`。
+真 GUI 复拍这三代，面板已不透明（`.verify/ui-token-fix/`）。
+
+#### 子会话判据与它的方向
+
+`scripts/verify-across-kernels.mjs` 新增「子会话」一维：用
+`ctx.agents.create({ meta: { delegationDepth: 1 } })` 建会话（已核实 rc.2 的 `dsh-session`
+会把 `meta.delegationDepth` 落进 header，且校验必须是非负安全整数），给它建一条 2 秒提醒，
+按**该会话自己的日志**数 `inbox/spliced`——不合并全局计数，否则别的会话投成功会替它打掩护。
+
+⚠️ **这一维的方向随代次变，第一版写死「不该投」时在 11 个代次上一齐报了红**：rc.1 的
+`roots()` 是 `store.values().filter(e => e.owner === undefined)`——判的是**运行期所有权**，
+不是会话谱系；而脚本用 `ctx.agents.create()` 建的 agent 走 `enter(agent, undefined)`，
+**没有 owner**，所以在 ≤`0.2.2-rc.1` 上它**本来就是 root**，插件投它完全正确。
+（rc.1 的 d.ts 自己也写着 *"durable session lineage does not affect this runtime relation,
+so a resumed fork may still be a root"*。）
+
+所以判据按代次取方向：**rc.2 及以后断言「不该投」，更早断言「该投」**。方向来自声明
+（该代有没有 `roots()`），不是今天的实测结果。
+
+| 面 | 结果 |
+|---|---|
+| 12 代全量 | 绿 12 / 红 0 / 未判定 0；11 代 `该投=Y`、rc.2 `不该投=Y` |
+| 变异 1：把 `isRootAgentShape` 的深度判据关掉 | rc.2 立刻 `不该投=N（投了 1 次）` 判红 |
+| 变异 2：把方向阈值写成 `0.2.2-rc.1` | rc.1 立刻判红 |
+
+两条变异都还原后复跑全绿。这说明这一维钉在「代次边界」这个事实上，不是永真。
+
+**仍未做的**：`resume` 出来重新成为 root 的反例，出处仍是宿主文档文本，本轮没有构造真实样本。
