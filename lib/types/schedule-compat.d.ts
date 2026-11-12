@@ -27,5 +27,7 @@ export declare function asLegacySchedules(folded: unknown): {
     readonly active: readonly ScheduleRecord[];
     readonly seenIds: ReadonlySet<string>;
 };
+export declare function withScheduleTitle<T extends object>(record: T): T;
+export declare function decodeRecordTolerant(value: unknown): unknown;
 export declare function toChangePayload(record: ScheduleRecord): never;
 export {};

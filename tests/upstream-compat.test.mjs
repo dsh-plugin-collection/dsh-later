@@ -357,7 +357,7 @@ test('dev 与运行时代次的对齐说明（防止再次悄悄脱节）', () =
   const dev = pkg.devDependencies['@deepseek-ai/dsh-agent'].replace(/^[\^~]/, '');
   // 这条断言记录「本地开发用的代次」；升级依赖时同步更新此常量，
   // 使代次变更在 diff 中显式可见，而不是被 install 悄悄改掉。
-  assert.equal(dev, '0.2.1-rc.2', 'devDependency 代次变更需同时更新本断言');
+  assert.equal(dev, '0.2.2-rc.2', 'devDependency 代次变更需同时更新本断言');
 });
 
 /**

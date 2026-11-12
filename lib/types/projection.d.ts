@@ -56,6 +56,7 @@ export declare const userSchedulesStateSchema: z.ZodObject<{
         id: z.ZodString;
         kind: z.ZodUnion<readonly [z.ZodLiteral<"after">, z.ZodLiteral<"at">, z.ZodLiteral<"every">]>;
         prompt: z.ZodString;
+        title: z.ZodOptional<z.ZodString>;
         afterSeconds: z.ZodOptional<z.ZodNumber>;
         everySeconds: z.ZodOptional<z.ZodNumber>;
         scheduledAt: z.ZodString;
@@ -74,13 +75,11 @@ export declare const userSchedulesStateSchema: z.ZodObject<{
         pausedAt: z.ZodNumber;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
-export type StoredScheduleRecord = (AfterScheduleRecord & {
+type StoredFields = {
+    readonly title?: string;
     readonly createdAt?: number;
-}) | (AtScheduleRecord & {
-    readonly createdAt?: number;
-}) | (EveryScheduleRecord & {
-    readonly createdAt?: number;
-});
+};
+export type StoredScheduleRecord = (AfterScheduleRecord & StoredFields) | (AtScheduleRecord & StoredFields) | (EveryScheduleRecord & StoredFields);
 export interface UserScheduleProjectionState {
     readonly sessionId: string;
     readonly owned: readonly string[];
@@ -102,6 +101,7 @@ export declare const userSchedulesProjectionUnit: {
             id: z.ZodString;
             kind: z.ZodUnion<readonly [z.ZodLiteral<"after">, z.ZodLiteral<"at">, z.ZodLiteral<"every">]>;
             prompt: z.ZodString;
+            title: z.ZodOptional<z.ZodString>;
             afterSeconds: z.ZodOptional<z.ZodNumber>;
             everySeconds: z.ZodOptional<z.ZodNumber>;
             scheduledAt: z.ZodString;

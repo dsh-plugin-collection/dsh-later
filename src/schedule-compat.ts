@@ -281,6 +281,132 @@ export function asLegacySchedules(folded: unknown): {
   };
 }
 
+/**
+ * 把一条**读出来**的记录补到本仓的读视图形状（`title` 保证是合法字符串）。
+ *
+ * 为什么读路径需要这一步：`title` 是 **0.1.7-rc.2** 起才成为存量记录必填项的
+ * （0.1.2 / 0.1.5 / 0.1.7-rc.1 写进日志的记录没有该字段），而上游
+ * `decodeStoredTitle` / `decodeRecordTitle` 在 0.1.7-rc.2 之后对
+ * 「缺失 / trim 后为空 / 未 trim / >120」一律抛 `ScheduleLogError`，
+ * 并且**不**从 prompt 派生名字。本仓的读路径（两处 `decodeScheduleChangeCompat`）
+ * 因此会把 0.1.2 / 0.1.5 时代的历史提醒整条判非法、`catch { continue }` 静默跳过：
+ * 升级内核后用户打开旧会话，自己的提醒全从 dock 与面板上消失。
+ *
+ * 只在**上游已经接受**这条记录之后调用（见两处 decode 的注释——拒绝的判据仍是上游
+ * 的完整字段校验，这里只补一个展示用字段），所以派生不出合法 title 时只能说明
+ * 上游那代既不校验 title 也不要求它，此时原样返回（字段缺省）。
+ *
+ * 不能改写记录里已有的 title（哪怕上游那代没校验它）：那是用户录入的名字，
+ * 读路径只做补齐，不做规范化。
+ */
+export function withScheduleTitle<T extends object>(record: T): T {
+  const raw = (record as { title?: unknown }).title;
+  if (typeof raw === 'string' && raw.trim().length > 0) return record;
+  const prompt = (record as { prompt?: unknown }).prompt;
+  return { ...record, title: deriveScheduleTitle(typeof prompt === 'string' ? prompt : '') };
+}
+
+/**
+ * 上游 title 的三条诊断文案（`dsh-schedule/lib/index.js` 的 `decodeStoredTitle`）。
+ *
+ * 第一条同时是上游的导出常量 `REQUIRED_TITLE_MESSAGE`，另两条在函数体里是内联字符串，
+ * 这里照抄一份。判据要回答的是「这条错误是不是 title 的」，只知道「上游有没有 title
+ * 这个概念」不够。三条与 title 校验在同一次发布里引入，且是稳定诊断（上游在自己的
+ * 测试里逐字断言），照抄的漂移风险低于把判据放宽成「任何错误都试一次」。
+ * 运行时仍优先用上游导出的那份，这里的副本只给「声明了 newer 却没导出常量」的内核兜底。
+ */
+const REQUIRED_TITLE_MESSAGE = 'title is required and must be non-empty after trimming.';
+const TITLE_TOO_LONG = /^title must be at most \d+ characters/;
+const TITLE_NOT_TRIMMED = 'title must be a trimmed string';
+
+/**
+ * 这次拒读是不是**只**因为 title 这一项。
+ *
+ * 三个条件缺一不可，前两个是**结构性**的，第三个才是文案：
+ *
+ *  1. `title` 必须已经是记录的一个键，或者**本来就不该有**（这一代不校验 title）。
+ *     另一种可能是键集不精确，那时补 title 要么多出一个键、要么补不上缺的
+ *     `id` / `prompt` / `scheduledAt`，重试照样被拒——所以这里放行不等于放行坏记录。
+ *  2. `title` 现在的值必须**确实不合法**（缺失 / 非字符串 / trim 后空 / 未 trim /
+ *     超长）。它合法却还被拒，说明拒的理由在别处，不补。
+ *  3. 上游这次的诊断必须正好是 title 那三条之一。
+ *
+ * 为什么第 1、2 条不够、还得看文案：上游 `decodeRecordTitle` 是**先**校 title
+ * **再**校键集。一条记录同时缺 title 与别的字段时，补完 title 重试会在别处抛——
+ * 那一抛必须原样传出去（用户的记录真的坏了），不能被当成「补齐也没用，那就返回
+ * 补齐后的脏记录」。所以补齐后**只在**第 3 条仍成立时才接受。
+ *
+ * 不反过来「只要补齐后不抛就接受」：那正是「try 全部兜住」的写法，等于把所有键
+ * 都变成可选。上游每加一个必填键，本仓就会静默接受缺它的记录。
+ */
+function isTitleRejection(record: Record<string, unknown>, error: unknown): boolean {
+  const raw = record['title'];
+  const hasTitleKey = 'title' in record;
+  const invalid = !hasTitleKey && !upstreamRequiresTitle()
+    ? false
+    : raw === undefined ||
+      typeof raw !== 'string' ||
+      raw.trim().length === 0 ||
+      raw.length > SCHEDULE_TITLE_MAX ||
+      raw.trim() !== raw;
+  if (!invalid) return false;
+  const message = error instanceof Error ? error.message : '';
+  if (message === TITLE_NOT_TRIMMED || TITLE_TOO_LONG.test(message)) return true;
+  return message === (pick<string>('REQUIRED_TITLE_MESSAGE') ?? REQUIRED_TITLE_MESSAGE);
+}
+
+/**
+ * 上游**这一代**是否校验存量记录的 `title`（0.1.7-rc.2 起为真）。
+ *
+ * 判据走 `pick()`（见本文件顶部的理由）：`REQUIRED_TITLE_MESSAGE` 与
+ * `decodeStoredTitle` 在 0.1.7-rc.2 同时引入，而 0.1.2 / 0.1.5 / 0.1.7-rc.1
+ * 三个代次都没有它（实测本机 11 代安装树）。这一代不校验时，缺失 title 的记录
+ * 本来就能被上游接受，此处无需、也不该替它补——补了反而会让上游的
+ * `hasExactKeys` 多出一个不该有的键。
+ */
+function upstreamRequiresTitle(): boolean {
+  return pick<string>('REQUIRED_TITLE_MESSAGE') !== undefined;
+}
+
+/**
+ * 一次 `decodeScheduleRecord` 的兜底调用：上游因 **title 这一项**拒读时，
+ * 补一个合法 title 重试一次；其它任何原因仍然抛。
+ *
+ * 为什么必须重试而不是「先补后调」：先补后调等于在**写入方向**瞒过上游——创建路径
+ * 的 `scheduleTitle` 明确写着「不从 prompt 派生名字」，读路径替创建路径补名字就绕过
+ * 了这条规矩。而读路径的诉求恰好相反：记录**已经在日志里**，拒读的代价是用户丢提醒
+ * （0.1.2 / 0.1.5 写的历史记录没有 title 字段，升级到 rc.2 后整条被判非法），
+ * 不是某个操作被拒。所以兜底只发生在「记录除了名字没别的毛病」这一种情形。
+ *
+ * 本函数不吞任何异常：唯一的 catch 是「先按原样问一次」，退回的判据见
+ * {@link isTitleRejection}；重试那次抛什么就传什么。
+ *
+ * 三处细节，对应三个「这里能不能偷懒」的自问：
+ *  - **非对象不试**：`decodeScheduleRecord` 的第一件事就是 `isRecord`，那种输入连
+ *    「键集」都谈不上，重试只会把同一条错误再抛一遍，不如原样抛；
+ *  - **不替旧代补**：`upstreamRequiresTitle()` 为假的时代，上游压根不校验 title，
+ *    缺 title 的记录本来就能过。此时还补，反而让 `hasExactKeys` 多出一个不该有的键，
+ *    把一条合法旧记录判成非法——兜底成了退步；
+ *  - **重试后只认「还怪 title」**：补齐后若仍在 title 上报错，说明派生出的名字也不
+ *    合法（prompt 为空串等），记录确实不可读；若改为抱怨键集，说明毛病在别处。
+ *    两种都原样传出去。
+ */
+export function decodeRecordTolerant(value: unknown): unknown {
+  const decode = pick<(v: unknown) => unknown>('decodeScheduleRecord');
+  if (typeof decode !== 'function') return value;
+  try {
+    return decode(value);
+  } catch (error) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) throw error;
+    const record = value as Record<string, unknown>;
+    if (!isTitleRejection(record, error)) throw error;
+    const patched = withScheduleTitle(record);
+    // 补完再问一次上游，**不**看它这次抛什么就接受：补齐后若改为抱怨键集，说明这条
+    // 记录除了 title 还有别的毛病，那一抛必须原样传出去（下面的 catch 就是为此而写）。
+    return decode(patched);
+  }
+}
+
 /** 本插件在 0.1.5 时代的 source 标签（0.1.7 已无 plugin kind，仅作回退标识）。 */
 const PLUGIN_LABEL = '定时提醒';
 
