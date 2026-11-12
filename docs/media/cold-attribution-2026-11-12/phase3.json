@@ -1,0 +1,16 @@
+{
+  "phase": "browser",
+  "at": "2026-11-12T06:04:42.008Z",
+  "browserOpened": true,
+  "httpStatus": 401,
+  "guiRendered": true,
+  "authWallSeen": false,
+  "shots": {
+    "browser": "/home/wujue/workspace/dsh-plugins/dsh-later/docs/media/cold-attribution-2026-11-12/phase3-browser.png"
+  },
+  "countsAfterBrowser": {
+    "spliced": 1,
+    "dispatch": 1
+  },
+  "note": "本阶段不参与判定（issue #144：判定只认 phase2 的 dispatchBeforeBrowser）"
+}

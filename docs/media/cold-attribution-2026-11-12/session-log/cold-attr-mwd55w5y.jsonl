@@ -1,0 +1,14 @@
+{"type":"session","version":4,"id":"cold-attr-mwd55w5y","createdAt":1794463379457,"cwd":"/home/wujue/workspace/dsh-plugins/dsh-later/docs/media/cold-attribution-2026-11-12/home","isSeeded":false,"delegationDepth":0}
+{"type":"permission/preset","seq":0,"time":1794463379463,"data":{"preset":"workspace-write"}}
+{"type":"sandbox/mode","seq":1,"time":1794463379465,"data":{"mode":"workspace-write"}}
+{"type":"approval/policy","seq":2,"time":1794463379465,"data":{"policy":"ask"}}
+{"type":"command/run","seq":3,"time":1794463379469,"data":{"commandId":"cmd-f368a646-1","name":"user-schedule-create","source":{"kind":"user"}}}
+{"type":"schedule/change","seq":4,"time":1794463379481,"data":{"version":1,"operation":"create","schedule":{"id":"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e","kind":"after","title":"COLD-ATTR-mwd55w5y","prompt":"COLD-ATTR-mwd55w5y","afterSeconds":8,"scheduledAt":"2026-11-12T06:03:07.480Z"}}}
+{"type":"command/done","seq":5,"time":1794463379501,"data":{"commandId":"cmd-f368a646-1","kind":"success","text":"{\"ok\":true,\"id\":\"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e\",\"kind\":\"after\",\"prompt\":\"COLD-ATTR-mwd55w5y\",\"after_seconds\":8,\"scheduled_at\":\"2026-11-12T06:03:07.480Z\",\"state\":\"scheduled\",\"delivery_mode\":\"session-local\",\"source\":\"user-tool\"}"}}
+{"type":"agent/inbox/spliced","seq":6,"time":1794463387484,"data":{"target":"next-turn","start":0,"inserted":[{"content":[{"type":"text","text":"[SCHEDULE REMINDER]\nThis is a scheduled message from the user\nschedule_id_json: \"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e\"\noccurrence_at: 2026-11-12T06:03:07.480Z\nreminder_prompt_json: \"COLD-ATTR-mwd55w5y\""}],"source":{"kind":"schedule","form":"notice","summary":"14:03 · COLD-ATTR-mwd55w5y"},"role":"user","id":"36bcb2c1-f7b8-4b3d-968d-52eda8f95688"}]}}
+{"type":"schedule/change","seq":7,"time":1794463387485,"data":{"version":1,"operation":"dispatch","id":"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e"}}
+{"type":"turn/start","seq":8,"time":1794463387486,"data":{"turn":1}}
+{"type":"agent/inbox/spliced","seq":9,"time":1794463387487,"data":{"target":"next-turn","start":0,"removedCount":1,"inserted":[]}}
+{"type":"step/start","seq":10,"time":1794463387527,"data":{"turn":1,"step":1}}
+{"type":"step/end","seq":11,"time":1794463387528,"data":{"turn":1,"step":1}}
+{"type":"turn/end","seq":12,"time":1794463387529,"data":{"turn":1,"reason":{"kind":"error","error":{"message":"agent \"cold-attr-mwd55w5y\" has no provider/model: set AgentOptions.provider and AgentOptions.model or supply both via the agent/request waterfall","code":"UNKNOWN"}}}}

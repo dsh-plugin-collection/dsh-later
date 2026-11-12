@@ -1,0 +1,4 @@
+{"type":"session","version":4,"id":"session-62c0fcd0-caa1-45c8-bd91-df781bff7162","createdAt":1794463475665,"cwd":"/home/wujue/workspace/dsh-plugins/dsh-later/docs/media/cold-attribution-2026-11-12/home","isSeeded":false,"delegationDepth":0,"agentPreset":"standard"}
+{"type":"permission/preset","seq":0,"time":1794463475671,"data":{"preset":"workspace-write"}}
+{"type":"sandbox/mode","seq":1,"time":1794463475674,"data":{"mode":"workspace-write"}}
+{"type":"approval/policy","seq":2,"time":1794463475674,"data":{"policy":"ask"}}

@@ -1,0 +1,17 @@
+{
+  "phase": "create",
+  "version": "0.2.1-rc.4",
+  "at": "2026-11-12T06:02:59.501Z",
+  "sessionId": "cold-attr-mwd55w5y",
+  "nonce": "COLD-ATTR-mwd55w5y",
+  "scheduleId": "schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e",
+  "commandKind": "success",
+  "commandText": "{\"ok\":true,\"id\":\"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e\",\"kind\":\"after\",\"prompt\":\"COLD-ATTR-mwd55w5y\",\"after_seconds\":8,\"scheduled_at\":\"2026-11-12T06:03:07.480Z\",\"state\":\"scheduled\",\"delivery_mode\":\"session-local\",\"source\":\"user-tool\"}",
+  "afterSeconds": 8,
+  "sameSource": {
+    "ok": true,
+    "checked": 8,
+    "offenders": []
+  },
+  "dispatchAtCreate": 0
+}

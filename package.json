@@ -57,7 +57,8 @@
     "verify:kernels:all": "node scripts/verify-across-kernels.mjs --steps mount,function,type,gate",
     "verify:ui": "node scripts/ui-matrix/run.mjs",
     "check:lib-reach": "node scripts/lib-reachability.mjs",
-    "check:release": "node scripts/release-selfcheck.mjs"
+    "check:release": "node scripts/release-selfcheck.mjs",
+    "verify:cold": "node scripts/verify-cold-attribution.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

@@ -797,8 +797,13 @@ async function wakeColdSession(
   // **返回**的是 runtime 而不是 undefined（`runtime-registry.ts` 的 `mount` 结尾
   // `return runtime`），于是条件恒假，冷唤醒之后从来没有真正驱动过投递。表现是：
   // 会话被拉起来了（日志里有 `session` 事件），但 `agent/inbox/spliced` 与 `dispatch`
-  // 永远不出现，扫描器随后报「唤醒后提醒仍然到期」。0.2.2-alpha.3 上首次暴露
-  // （issue #12 的回归矩阵），0.1.2…0.2.2-alpha.2 九代为什么是绿的，另行核对。
+  // 永远不出现，扫描器随后报「唤醒后提醒仍然到期」。
+  //
+  // 「0.1.2…0.2.2-alpha.2 九代为什么是绿的」已经查清，不需要再猜（issue #144 第 4 条）：
+  // 恒假 guard 是 `8a74442`（2026-11-05 13:21）写测试时带进来的，比 #11b 的落地
+  // `9c586e5`（同日 12:50）还晚半小时；而它在 `9867852`（2026-11-06 10:41）就被改掉了，
+  // 从未进入任何发布版本。所以那九代矩阵跑的是**修复后**的代码，绿是真绿——
+  // 这条缺陷只在开发树里活了一天，随后以 1.12.1 之前的形态被修掉。
   registry.mount(agent);
   const driven = registry.drive(agent);
   if (!driven) {

@@ -1,0 +1,47 @@
+{
+  "issue": 144,
+  "version": "0.2.1-rc.4",
+  "at": "2026-11-12T06:04:42.016Z",
+  "verdict": "ATTRIBUTED",
+  "dispatchBeforeBrowser": {
+    "sessionId": "cold-attr-mwd55w5y",
+    "nonce": "COLD-ATTR-mwd55w5y",
+    "scheduleId": "schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e",
+    "eventsInSession": 14,
+    "splicedCount": 1,
+    "dispatchCount": 1,
+    "ok": true,
+    "evidence": {
+      "spliced": [
+        {
+          "seq": 6,
+          "type": "agent/inbox/spliced",
+          "inserted": 1,
+          "raw": "{\"type\":\"agent/inbox/spliced\",\"seq\":6,\"time\":1794463387484,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"content\":[{\"type\":\"text\",\"text\":\"[SCHEDULE REMINDER]\\nThis is a scheduled message from the user\\nschedule_id_json: \\\"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e\\\"\\noccurrence_at: 2026-11-12T06:03:07.480Z\\nreminder_prompt_json: \\\"COLD-ATTR-mwd55w5y\\\"\"}],\"source\":{\"kind\":\"schedule\",\"form"
+        }
+      ],
+      "dispatch": [
+        {
+          "seq": 7,
+          "type": "schedule/change",
+          "data": {
+            "version": 1,
+            "operation": "dispatch",
+            "id": "schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e"
+          },
+          "raw": "{\"type\":\"schedule/change\",\"seq\":7,\"time\":1794463387485,\"data\":{\"version\":1,\"operation\":\"dispatch\",\"id\":\"schedule-be1fa658-1fdb-4cd6-a315-f85c5c30674e\"}}"
+        }
+      ]
+    }
+  },
+  "browser": {
+    "opened": true,
+    "shots": {
+      "browser": "/home/wujue/workspace/dsh-plugins/dsh-later/docs/media/cold-attribution-2026-11-12/phase3-browser.png"
+    },
+    "countsAfterBrowser": {
+      "spliced": 1,
+      "dispatch": 1
+    }
+  }
+}
