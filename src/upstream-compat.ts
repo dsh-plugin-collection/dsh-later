@@ -342,6 +342,24 @@ export const KERNEL_GENERATIONS = [
     id: '0.2.2-rc.1',
     sessionApi: 'own-events' as const,
   },
+  {
+    /**
+     * `0.2.2-rc.2` 代次（issue #158 / 后续 roots() 兼容）：四面实测全绿。
+     *
+     * 这一代对本插件有两处破坏性变更，都已收敛：
+     *  - **primitives 删掉 `useAnchoredPosition`**（面板锚定）→ 客户端改走 CSS 锚点定位，
+     *    见 `src/client/primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND`；
+     *  - **`AgentRegistry.roots()` 被删**（store entry 无 owner，只剩 get/list）→ 本文件的
+     *    `isRootAgent` / `liveRootAgents` 按会话头 `delegationDepth` 补位。
+     *
+     * 实证（`node scripts/verify-across-kernels.mjs --versions 0.2.2-rc.2 --steps
+     * mount,function,type,gate`）：`同源=same`、投递 `spliced=1 dispatch=Y`、
+     * 已关闭会话 `spliced=1 dispatch=Y`、`at 形状 5/5`、type 换线 19 处两个 tsconfig 通过、
+     * gate 本代与最新都 pass。修复前这一代是 RED（投递 spliced=0、tsc 4 条 `roots` 报错）。
+     */
+    id: '0.2.2-rc.2',
+    sessionApi: 'own-events' as const,
+  },
 ] as const;
 
 /**
@@ -656,7 +674,27 @@ type RootProbeAgent = {
   readonly options?: { readonly subagentDepth?: unknown } | undefined;
 };
 
-/** 非负有限数才算深度；其余（undefined / NaN / 负数 / 非数字）一律当 0。 */
+/**
+ * 非负有限数才算深度；其余（`undefined` / NaN / 负数 / 非数字）一律归一成 **0**。
+ *
+ * ## 为什么脏数据归一成 0（判 root），而不是判非 root
+ *
+ * 这条取舍是**刻意**的，别按「类型不对就该拒绝」的直觉改回去——两个方向的代价严重不对称：
+ *
+ *  - 把**真 root 判丢** ⇒ 该会话的调度器挂不上 ⇒ 提醒到点不响、dock 里有行但永远无声。
+ *    这是**静默故障**：用户看不到任何错误，只会发现"提醒又没响"，而本仓历史上最贵的
+ *    事故全都是这一类（见本文件头「错得很安静」那段）。
+ *  - 把**脏数据的子代理误判成 root** ⇒ 至多多挂一份 runtime（幂等、可回收），而且工具层
+ *    还有自己的深度守卫兜底，并且会留下可见痕迹。
+ *
+ * 另有一层背景：`delegationDepth` 是宿主的**持久化**字段，正常路径不可能写出字符串；
+ * 真出现脏值就说明会话头已经损坏。会话头一旦损坏，本插件能做的只是选一个失败方向——
+ * 「宁可多挂」比「静默不响」更符合本仓一贯的取舍。
+ *
+ * 正因如此，判据一侧的比较必须写成「归一化后 > 0」（等价于 `(x ?? 0) === 0` 那侧为 root），
+ * 绝不能写成 `depth === 0`：那样 `undefined !== 0` 会让**所有真正的顶层会话被判丢**，
+ * 正好落进上面那个静默故障分支。见 `tests/roots-compat.test.mjs` 的两条对应用例。
+ */
 function finiteDepth(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
@@ -669,6 +707,9 @@ function finiteDepth(value: unknown): number {
  * so a recursion budget survives restart and resume」），宿主内部另有一个运行期字段
  * `options.subagentDepth`——它与上游 `delegationDepthOf` 同义，且在「头部还没落盘 / 假件」
  * 这两种情况下是唯一可读的那个。取较大者是最保守的读法：任一侧说是子代理就算子代理。
+ *
+ * 两侧各自的「脏值」都经 {@link finiteDepth} 归一成 0（判 root），理由见那里的注释——
+ * 一句话：丢 root 是静默故障，误挂一份 runtime 不是。
  */
 export function readDelegationDepth(agent: unknown): number {
   const surface = (agent ?? {}) as RootProbeAgent;

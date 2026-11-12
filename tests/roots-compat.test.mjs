@@ -175,6 +175,11 @@ test('形状B（rc.2）：header.origin === "subagent" 时即使 depth 缺席也
 });
 
 test('形状B（rc.2）：非法 depth 一律当 0，不因脏数据把 root 判丢或判错', () => {
+  // 取向是**刻意的**：脏值判 root，不判非 root。两个方向代价不对称——把真 root 判丢会让
+  // 该会话的调度器挂不上、提醒到点不响（静默故障），把脏数据的子代理误判成 root 只是多挂
+  // 一份 runtime（幂等可回收，工具层还有深度守卫兜底，且留下可见痕迹）。
+  // 别被 TypeScript 类型"纠正"成 `(x ?? 0) === 0` 的字面写法去把它们判成非 root：
+  // 那会顺手把 `depth === 0` 这种真正致命的写法合理化，而那个才是丢光所有 root 的坑（下一条用例）。
   const nan = makeAgent('nan', { depth: Number.NaN });
   const negative = makeAgent('negative', { depth: -1 });
   const stringy = makeAgent('stringy', { depth: '1' });

@@ -32,6 +32,9 @@ export declare const KERNEL_GENERATIONS: readonly [{
 }, {
     readonly id: "0.2.2-rc.1";
     readonly sessionApi: "own-events";
+}, {
+    readonly id: "0.2.2-rc.2";
+    readonly sessionApi: "own-events";
 }];
 export declare const KERNEL_SCOPED_PACKAGES: readonly ["@deepseek-ai/dsh-agent", "@deepseek-ai/dsh-commands", "@deepseek-ai/dsh-llm", "@deepseek-ai/dsh-schedule", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-projection", "@deepseek-ai/dsh-settings", "@deepseek-ai/dsh-tools"];
 export declare function genPeerRange(id: string): string;
