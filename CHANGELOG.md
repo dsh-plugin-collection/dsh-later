@@ -24,6 +24,43 @@
   两者同为 198–536 / 955。守护测试 `tests/panel-anchor-backends.test.mjs` 用两个代次发布包的
   真实导出面（摘录见 `tests/fixtures/anchor-backends/`）钉住分派结论。
 
+- **fix** root 判定在 `0.2.2-rc.2` 上全线失效，提醒到点不投（#158 后续）。那一代把
+  `AgentRegistry.roots()` 整个删掉（rc.1 的实现是
+  `[...store.values()].filter(e => e.owner === void 0).map(e => e.agent)`），rc.2 的 store entry
+  **已没有 `owner` 字段**，只剩 `get(id)` / `list()`——注册表的 owner 关系在这一代不可见。
+  本插件有 4 处依赖它：`src/index.ts` 的 `coldWakeRefusal`、`hasLiveRootAgent`、
+  runtime 注册表的 `roots` 注入，以及 `src/runtime.ts` 的 `isLive()`。
+
+  后果不是崩溃而是**静默失效**：4 处都在 try/catch 里，于是冷唤醒全判 `'not-root'`、
+  `hasLiveRootAgent` 恒 false、runtime 拿不到 root 列表、`isLive()` 恒假——表现为
+  `verify:kernels` 在 rc.2 上告警「runtime 未能驱动（root 判定未命中）」、投递 `spliced=0`。
+
+  现在收成一条判据链（`src/upstream-compat.ts` 的 `isRootAgent` / `liveRootAgents`，两代共用一份）。
+  **宿主有 `roots()` 就直接用**，逐字保持旧行为、不叠加任何本地判据：宿主文档写明 resume 出来的
+  fork 子会话可以带着 `delegationDepth > 0` 被重新登记为顶层 root（*a resumed fork may still be a
+  root*），先读深度会在 rc.1 上凭空多出一个旧版本没有的拒绝面。**没有 `roots()` 才**用会话头
+  `delegationDepth` 补位，判据取「深度 > 0 或 `origin === 'subagent'`」任一命中即非 root。
+  两个坑写在代码注释里：`parentSession` 不能当判据（普通 fork 也带它，用来判会误杀 fork 会话）；
+  `delegationDepth` 是 optional 且**缺省即 0**，所以比较必须归一化，写成 `=== 0` 会把**所有**真
+  root 判丢。浮点/脏深度归一成 0（判 root）是刻意的——丢 root 是静默故障，误挂一份 runtime 幂等可回收。
+  任何异常一律不外抛。新增 `tests/roots-compat.test.mjs` 15 条用例，覆盖 rc.1 有 `roots` 与
+  rc.2 无 `roots` 两种形状、深度缺省判 root、`list` 混有子代理时的过滤，以及
+  `agents` 为 `undefined` / 方法抛错时不抛。
+
+  实测（`node scripts/verify-across-kernels.mjs --steps mount,function,type,gate --no-install`）：
+  rc.2 由 RED 转 GREEN——投递 `spliced=1 dispatch=Y`、已关闭会话 `spliced=1 dispatch=Y`、
+  `at` 形状 5/5、type 换线 19 处两个 tsconfig 0 错、gate 本代与最新都 pass（修复前是
+  `spliced=0 dispatch=N`、`tsconfig.json` 4 条）。老代次 `0.2.2-rc.1` / `0.2.1-rc.4` / `0.2.1-rc.2`
+  仍 `spliced=1 dispatch=Y`，全量 12 代绿 12 / 红 0 / 未判定 0，**没有在 rc.1 上回退**。
+  逐代明细与复跑方法见 `docs/verification.md` 的「rc.2 的 `AgentRegistry.roots()` 移除」一节。
+
+- **feat** `0.2.2-rc.2` 入 `KERNEL_GENERATIONS`（现十二个代次）。入表标准仍是「装配功能 + 跨代 tsc
+  两面都过」，rc.2 四面实测全绿后才登记。`peerDependencies` **无需改动**：rc.2 落在既有的
+  `>=0.2.2-alpha.2 <0.2.3-0` 段内，`sync-peer-matrix` 报 already in sync。`devDependencies`
+  仍固定 `0.2.1-rc.2`——落后表内最新一代是被允许的（见 `tests/upstream-compat.test.mjs` 的常量断言
+  与它上方的说明），更新的代次由 `verify-across-kernels --steps type` 换线覆盖，不依赖本地装哪一代。
+  README 两语的代次表同步。
+
 
 ## 1.12.2 — 2026-11-11
 
