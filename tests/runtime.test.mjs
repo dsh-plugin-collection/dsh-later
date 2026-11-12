@@ -4,7 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dueUserDecision, renderOneShotBatchFraming, UserScheduleRuntime } from '../lib/runtime.js';
-import { foldScheduleEvents, renderReminderFraming } from '@deepseek-ai/dsh-schedule';
+// `foldScheduleEvents` 自 dsh-schedule@0.2.2-alpha.3 起被移除，从上游具名 import 是
+// 链接期硬失败（整个文件一条用例都跑不起来）。这里取本仓的同义实现：有上游走上游，
+// 没有走 `foldScheduleEventsCompat`——正是要在跨代上都核对本插件写入的事件能被折出来。
+import { renderReminderFraming } from '@deepseek-ai/dsh-schedule';
+import { foldScheduleEventsLikeUpstream as foldScheduleEvents } from '../lib/user-tools.js';
 import { getPaused, recordPaused, recordOwnership } from '../lib/ownership-store.js';
 import { freshOwnershipDir } from './helpers/ownership-state.mjs';
 

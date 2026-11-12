@@ -29,6 +29,7 @@ import { z } from 'zod';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import * as schedNs from '@deepseek-ai/dsh-schedule';
 import { resolveEveryOccurrence } from '@deepseek-ai/dsh-schedule';
+import { decodeRecordTolerant } from './schedule-compat.js';
 
 /**
  * `decodeScheduleChange` 在 `dsh-schedule@0.2.2-alpha.3` 起被移除（改为
@@ -57,7 +58,6 @@ function pickExport<T>(name: string): T | undefined {
  * （0.2.2-alpha.3 上真实发生过：提醒能建、能投递，GUI 上什么都看不见）。
  */
 const upstreamDecodeChange = pickExport<(data: unknown) => ScheduleChange>('decodeScheduleChange');
-const upstreamDecodeRecord = pickExport<(value: unknown) => unknown>('decodeScheduleRecord');
 
 function decodeScheduleChangeCompat(data: unknown): ScheduleChange {
   const upstream = upstreamDecodeChange;
@@ -69,7 +69,11 @@ function decodeScheduleChangeCompat(data: unknown): ScheduleChange {
   const operation = payload['operation'];
   if (operation === 'create') {
     const raw = payload['schedule'];
-    const record = upstreamDecodeRecord !== undefined ? upstreamDecodeRecord(raw) : raw;
+    // 记录解码走 `decodeRecordTolerant`：上游拒读**只因 title** 时补一个派生名字
+    // 重试，其它拒读理由照旧抛给下面的「跳过该事件」分支。历史记录（0.1.2 /
+    // 0.1.5 写的）没有 title，而上游 0.1.7-rc.2 起把它变成必填——不补齐就会在
+    // 升级内核后把用户的旧提醒整条丢出投影。与 `user-tools.ts` 同一实现。
+    const record = decodeRecordTolerant(raw);
     if (typeof (record as { id?: unknown })?.id !== 'string') {
       throw new TypeError('schedule change create requires a record with a string id');
     }
@@ -283,6 +287,13 @@ const scheduleRecordStateSchema = z
     id: z.string(),
     kind: z.union([z.literal('after'), z.literal('at'), z.literal('every')]),
     prompt: z.string(),
+    /**
+     * 提醒名字（0.1.7-rc.2 起上游必填）。
+     *
+     * 可选：`init` 会从持久化的投影缓存恢复状态，而旧缓存里没有这个字段；
+     * 读路径的 `decodeRecordTolerant` 只补齐**当期**折出来的记录。
+     */
+    title: z.string().optional(),
     afterSeconds: z.number().optional(),
     everySeconds: z.number().optional(),
     scheduledAt: z.string(),
@@ -330,11 +341,19 @@ export const userSchedulesStateSchema = z.object({
  * 逐个具名引用而非 `Extract`：`Extract<ScheduleRecord, {kind:'after'|…}>`
  * 在本仓库的 tsc 配置下不触发收窄（判别式联合的 `Extract` 需 kind 为
  * 单字面量，逐个列举后交集才正确）。
+ *
+ * `title` 单独声明成**可选**而不是靠 `AfterScheduleRecord` 等变体带出来：那几个
+ * 变体是**写入方向**的类型（0.1.7-rc.2 起 title 必填），而这里的记录是**读出来**的，
+ * 0.1.2 / 0.1.5 写的历史记录根本没有该字段，读视图必须承认 optional。
+ * 补齐发生在 `decodeScheduleChangeCompat` → `decodeRecordTolerant`（缺 title 时
+ * 由 prompt 派生），客户端不必为此分支。
  */
+type StoredFields = { readonly title?: string; readonly createdAt?: number };
+
 export type StoredScheduleRecord =
-  | (AfterScheduleRecord & { readonly createdAt?: number })
-  | (AtScheduleRecord & { readonly createdAt?: number })
-  | (EveryScheduleRecord & { readonly createdAt?: number });
+  | (AfterScheduleRecord & StoredFields)
+  | (AtScheduleRecord & StoredFields)
+  | (EveryScheduleRecord & StoredFields);
 
 /** 投影内部状态（plain JSON：owned/active 用数组承载）。 */
 export interface UserScheduleProjectionState {

@@ -78,8 +78,6 @@ const upstreamFold = pickExport<FoldScheduleEvents>('foldScheduleEvents');
 const upstreamView = pickExport<ScheduleViewFn>('scheduleView');
 /** 上游 `decodeScheduleChange`；`0.2.2-alpha.3` 起不存在（本仓 fold 的等价实现需要它）。 */
 const decodeChange = pickExport<(data: unknown) => ScheduleChange>('decodeScheduleChange');
-/** 上游 `decodeScheduleRecord`；`0.2.2-alpha.3` 起取代了变更解码器的**记录**那一半。 */
-const decodeRecord = pickExport<(value: unknown) => ScheduleRecord>('decodeScheduleRecord');
 
 /**
  * 变更解码的本仓等价实现。
@@ -104,7 +102,12 @@ function decodeChangeCompat(data: unknown): ScheduleChange {
   const operation = payload['operation'];
   if (operation === 'create') {
     const raw = payload['schedule'];
-    const record = decodeRecord !== undefined ? decodeRecord(raw) : (raw as ScheduleRecord);
+    // 记录解码走 `decodeRecordTolerant`：上游拒读**只因 title** 时补一个派生名字重试，
+    // 其它拒读理由照旧抛给调用方的 `catch { continue; }`。原因是历史记录（0.1.2 /
+    // 0.1.5 写的）没有 title 字段，而上游 0.1.7-rc.2 起把它变成必填——不补齐的话，
+    // 升级内核后用户自己的旧提醒会被静默跳过，连列表都看不见。与 `projection.ts`
+    // 同一实现（两处必须一起改，只改一处就是「fold 通了、投影还是空」）。
+    const record = decodeRecordTolerant(raw) as ScheduleRecord;
     if (typeof (record as { id?: unknown })?.id !== 'string') {
       throw new TypeError('schedule change create requires a record with a string id');
     }
@@ -201,8 +204,37 @@ function foldScheduleEventsCompat(
   return { active: [...active.values()], seenIds: [...seen] };
 }
 
+/**
+ * 只读的 `foldScheduleEvents` 同义函数：**按上游契约**折 schedule/change。
+ *
+ * 名字里的 `LikeUpstream` 是刻意的：它不是「测试专用桩」——语义就是上游那个函数，
+ * 只是上游从 `dsh-schedule@0.2.2-alpha.3` 起不再导出它，而本仓需要在任一内核代次上
+ * 都能拿到同一份契约。叫 `…ForTest` 会让人以为它只是个假件，于是要么被悄悄改成
+ * 「和本仓实现一样」而丢掉上游对照，要么被当成可以随便改的测试辅助。
+ *
+ * 签名与上游那个函数一致：有上游就用上游（与内核
+ * `foldScheduleEvents(session.ownEvents())` 逐字同源），没有就用本仓等价实现
+ * （{@link foldScheduleEventsCompat}）。
+ *
+ * 为什么不能直接在测试里 `import { foldScheduleEvents } from '@deepseek-ai/dsh-schedule'`：
+ * 那个导出从 0.2.2-alpha.3 起就不存在了，在缺它的代次上是**链接期**硬失败，
+ * 整个测试文件一条用例都跑不起来（不是某条断言红）。而 import 期的分支没人写得了，
+ * 所以这个「有就用、没有就退回等价实现」的选择必须留在模块内部。
+ *
+ * 它**不**在产品路径上：`src/` 内部不使用它，产品代码一律走
+ * `foldScheduleEventsCompat`。当前唯一消费者是 `tests/`——那些用例要「用上游折一遍」
+ * 来对照本插件写入的事件（AC-20「与内核同时安装互不干扰」靠的就是这层对照）。
+ */
+export function foldScheduleEventsLikeUpstream(
+  events: readonly SessionEvent[],
+  inheritedEventCount?: number,
+): { readonly active: readonly ScheduleRecord[]; readonly seenIds: readonly string[] } {
+  return foldScheduleEventsCompat(events, inheritedEventCount ?? 0);
+}
+
 import {
   allocateScheduleIdCompat as allocateScheduleId,
+  decodeRecordTolerant,
   createAfterRecord as createAfterScheduleRecord,
   createAtRecord as createAtScheduleRecord,
   createEveryRecord as createEveryScheduleRecord,

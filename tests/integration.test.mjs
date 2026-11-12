@@ -5,8 +5,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { foldScheduleEvents, renderReminderFraming } from '@deepseek-ai/dsh-schedule';
-import { userScheduleCreate } from '../lib/user-tools.js';
+import { renderReminderFraming } from '@deepseek-ai/dsh-schedule';
+// `foldScheduleEvents` 在 dsh-schedule@0.2.2-alpha.3 起被移除，**不能**再从上游具名
+// import：ESM 缺符号是链接期硬失败，整个文件一条用例都跑不起来。本仓的
+// `foldScheduleEventsCompat` 在缺符号的代次上给出等价实现，这里正是要拿它核对
+// 「本插件写入的事件，覆盖各代的内核都能折出来」。
+import { foldScheduleEventsLikeUpstream as foldScheduleEvents, userScheduleCreate } from '../lib/user-tools.js';
 import { freshOwnershipDir } from './helpers/ownership-state.mjs';
 import {
   applyUserScheduleProjection,

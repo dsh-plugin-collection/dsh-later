@@ -56,10 +56,9 @@
 
 - **feat** `0.2.2-rc.2` 入 `KERNEL_GENERATIONS`（现十二个代次）。入表标准仍是「装配功能 + 跨代 tsc
   两面都过」，rc.2 四面实测全绿后才登记。`peerDependencies` **无需改动**：rc.2 落在既有的
-  `>=0.2.2-alpha.2 <0.2.3-0` 段内，`sync-peer-matrix` 报 already in sync。`devDependencies`
-  仍固定 `0.2.1-rc.2`——落后表内最新一代是被允许的（见 `tests/upstream-compat.test.mjs` 的常量断言
-  与它上方的说明），更新的代次由 `verify-across-kernels --steps type` 换线覆盖，不依赖本地装哪一代。
-  README 两语的代次表同步。
+  `>=0.2.2-alpha.2 <0.2.3-0` 段内，`sync-peer-matrix` 报 already in sync。
+  `devDependencies` 的固定代次在随后一次升级里也跟到了 rc.2（见下一节），本地编译与回归基准
+  不再落后。README 两语的代次表同步。
 
 
 ## 1.12.2 — 2026-11-11

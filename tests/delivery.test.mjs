@@ -15,9 +15,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { UserScheduleRuntime } from '../lib/runtime.js';
 import { hasMessageInLog, messageIdOf, DELIVERY_CONFIRM_TIMEOUT_MS } from '../lib/delivery.js';
-import { foldScheduleEvents } from '@deepseek-ai/dsh-schedule';
+// `foldScheduleEvents` 自 dsh-schedule@0.2.2-alpha.3 起被移除，从上游具名 import 是
+// 链接期硬失败（整个文件一条用例都跑不起来）。这里取本仓的同义实现：有上游走上游，
+// 没有走 `foldScheduleEventsCompat`——正是要在跨代上都核对本插件写入的事件能被折出来。
 import { allOwnership, recordOwnership } from '../lib/ownership-store.js';
-import { foldUserState } from '../lib/user-tools.js';
+import { foldScheduleEventsLikeUpstream as foldScheduleEvents, foldUserState } from '../lib/user-tools.js';
 import { freshOwnershipDir } from './helpers/ownership-state.mjs';
 
 freshOwnershipDir();

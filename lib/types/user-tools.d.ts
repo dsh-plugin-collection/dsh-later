@@ -19,6 +19,10 @@ export type ScheduleChange = {
     readonly id: string;
     readonly acceptedAt?: string;
 };
+export declare function foldScheduleEventsLikeUpstream(events: readonly SessionEvent[], inheritedEventCount?: number): {
+    readonly active: readonly ScheduleRecord[];
+    readonly seenIds: readonly string[];
+};
 import type { UserScheduleDelivery } from './domain.js';
 import type { ScheduledAttachment } from './ownership-store.js';
 export declare const DEFAULT_MAX_SCHEDULES = 100;
