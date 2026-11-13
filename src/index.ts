@@ -416,7 +416,7 @@ export function registerUserScheduleTools(
             render: renderText,
           },
           async execute(args: UserScheduleCreateInput, exec) {
-            if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: '操作失败。' });
+            if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: hostDictFor(getLocale()).errToolAgentMismatch });
             const settings = getSettings();
             const result = await userScheduleCreate(
               args,
@@ -448,7 +448,7 @@ export function registerUserScheduleTools(
             render: renderText,
           },
           async execute(_args, exec) {
-            if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: '操作失败。' });
+            if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: hostDictFor(getLocale()).errToolAgentMismatch });
             const result = await userScheduleList(agent);
             return JSON.stringify(result);
           },
@@ -467,7 +467,7 @@ export function registerUserScheduleTools(
             render: renderText,
           },
           async execute(args: { id: string }, exec) {
-            if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: '操作失败。' });
+            if (exec.agent !== agent) return JSON.stringify({ ok: false, code: 'internal_error', message: hostDictFor(getLocale()).errToolAgentMismatch });
             const result = await userScheduleDelete(args.id, agent, rootCtx);
             if (result.ok && result.deleted) {
               try {
@@ -1131,7 +1131,19 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
     // ensure 会先自愈；自愈不了（非 root / teardown / attach 失败）才如实报错。
     const runtime = runtimeRegistry.ensure(agent);
     if (runtime === undefined) {
-      return { ok: false, code: 'no_runtime', message: '该会话尚未挂载用户调度器。' };
+      return {
+        ok: false,
+        code: 'no_runtime',
+        // 这里没有 getLocale 形参（不在 registerUserScheduleTools 内），现取一次：
+        // 宿主侧读 locale 走 ctx.get 的可选链（不能列进 inject，见上文那段说明）。
+        message: hostDictFor((() => {
+          try {
+            return ctx.get('locale')?.getSnapshot().active;
+          } catch {
+            return undefined;
+          }
+        })()).errToolNoRuntime,
+      };
     }
     try {
       // 插话成功 = 这条提醒出列（sidecar 不再有它），扫描器的最早到期点可能因此变晚。

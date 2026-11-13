@@ -39,6 +39,7 @@ export declare class UserScheduleRuntime {
     private idleWait;
     private disposal;
     constructor(ctx: Context, agent: Agent, getSettings: () => SteerDeliverySettings);
+    private dict;
     private isLive;
     requestDrive(): void;
     private clearTimer;

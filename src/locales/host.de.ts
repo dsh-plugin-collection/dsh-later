@@ -149,6 +149,15 @@ const dict: { [K in keyof typeof zh]: string } = {
   relHours: 'in ~{h} Std.',
   relHoursMinutes: 'in ~{h} Std. {m} Min.',
   relDays: 'in ~{d} Tagen',
+  errRtStopping: 'Der Scheduler wurde angehalten.',
+  errRtScheduleNotFound: 'Diese Erinnerung existiert nicht oder wurde bereits gesendet.',
+  errRtSteerUnsupportedKind: 'Das Einfügen in wiederkehrende (every) Erinnerungen wird noch nicht unterstützt.',
+  errRtLogUnreadable: 'Das Planungsprotokoll der Sitzung konnte nicht gelesen werden.',
+  errRtSteerFailed: 'Das Einfügen konnte nicht ausgeführt werden.',
+  errRtDeliveryLost: 'Die Zustellung wurde nicht bestätigt und das erneute Einplanen ist ebenfalls fehlgeschlagen — prüfen Sie im Panel, ob diese Erinnerung noch existiert.',
+  errRtDeliveryRetryable: 'Die Zustellung wurde nicht bestätigt; die Erinnerung wurde behalten und kann erneut versucht werden.',
+  errToolAgentMismatch: 'Der Vorgang ist fehlgeschlagen.',
+  errToolNoRuntime: 'In dieser Sitzung ist noch kein Benutzer-Scheduler eingebunden.',
 };
 
 export default dict;

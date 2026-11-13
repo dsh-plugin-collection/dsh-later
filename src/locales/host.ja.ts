@@ -148,6 +148,15 @@ const dict: { [K in keyof typeof zh]: string } = {
   relHours: '約 {h} 時間後',
   relHoursMinutes: '約 {h} 時間 {m} 分後',
   relDays: '約 {d} 日後',
+  errRtStopping: 'スケジューラは停止しています。',
+  errRtScheduleNotFound: 'そのリマインダーは存在しないか、すでに送信済みです。',
+  errRtSteerUnsupportedKind: '繰り返し（every）リマインダーへの割り込みはまだ未対応です。',
+  errRtLogUnreadable: 'セッションのスケジュールログを読み取れませんでした。',
+  errRtSteerFailed: '割り込みの実行に失敗しました。',
+  errRtDeliveryLost: '配信が確認できず、再登録にも失敗しました。パネルでこのリマインダーが残っているか確認してください。',
+  errRtDeliveryRetryable: '配信は未確認ですが、リマインダーは保持されています。再試行できます。',
+  errToolAgentMismatch: '操作に失敗しました。',
+  errToolNoRuntime: 'このセッションにはユーザースケジューラがまだ取り付けられていません。',
 };
 
 export default dict;

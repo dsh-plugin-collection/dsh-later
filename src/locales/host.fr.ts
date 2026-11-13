@@ -149,6 +149,15 @@ const dict: { [K in keyof typeof zh]: string } = {
   relHours: 'dans ~{h} h',
   relHoursMinutes: 'dans ~{h} h {m} min',
   relDays: 'dans ~{d} jours',
+  errRtStopping: 'Le planificateur est arrêté.',
+  errRtScheduleNotFound: 'Ce rappel n’existe pas ou a déjà été envoyé.',
+  errRtSteerUnsupportedKind: 'L’insertion dans les rappels récurrents (every) n’est pas encore prise en charge.',
+  errRtLogUnreadable: 'Impossible de lire le journal des planifications de la session.',
+  errRtSteerFailed: 'L’exécution de l’insertion a échoué.',
+  errRtDeliveryLost: 'La remise n’a pas été confirmée et le réarmement a aussi échoué — vérifiez dans le panneau si ce rappel existe toujours.',
+  errRtDeliveryRetryable: 'La remise n’a pas été confirmée ; le rappel a été conservé et peut être réessayé.',
+  errToolAgentMismatch: 'L’opération a échoué.',
+  errToolNoRuntime: 'Cette session n’a pas encore de planificateur utilisateur monté.',
 };
 
 export default dict;
