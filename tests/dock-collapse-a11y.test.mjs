@@ -25,7 +25,9 @@ import { readFileSync } from 'node:fs';
 const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8');
 
 const component = read('client/components/ScheduleDock.tsx');
-const strings = read('client/strings.ts');
+// dock UI 词条搬家：`client/strings.ts` 现在只放 CLIENT_ERR 令牌，字典在
+// `client/locales/ui.ts`（8 门各一份）。读数路径变了，下面「zh/en 各一条」的判据不变。
+const strings = read('client/locales/ui.ts');
 const styles = read('client/styles.ts');
 
 /** 数一下 `needle` 出现的次数。 */
@@ -113,10 +115,18 @@ test('折叠态播报未确认，优先级高于处理中（#31）', () => {
   // 未确认优先于在途：两者同时存在时只播未确认。
   assert.match(root, /steerUnconfirmed\.size === 0 && busy &&/, '未确认与处理中互斥，未确认优先');
   assert.equal(count(root, 'role="status"'), 2, '两条摘要共用播报位，各一条');
-  // 词条双语齐全（注册源是 strings.ts，见 issue #28 的双出口）。
-  assert.equal(count(strings, 'statusUnconfirmed:'), 2, 'zh/en 各一条新词条');
-  assert.match(strings, /statusUnconfirmed: '\{n\} 条未确认'/);
-  assert.match(strings, /statusUnconfirmed: '\{n\} unconfirmed'/);
+  // 词条双语齐全（注册源是 client/locales/ui.ts，见 issue #28 的双出口）。
+  //
+  // 字典扩到 DSH 的 8 门后，同一个 key 在文件里共出现 8 次（原先只有 zh/en 两门）。
+  // 计数精确到「zh 一条 + en 一条」，而不是继续要求整文件恰好 2 次——那样加语言就会被
+  // 误判成回归，而真正要锁的是「中英都有、各一份、措辞逐字」。另 6 门的齐全性由
+  // `src/client/locales/ui.ts` 的映射类型在编译期保证，这里不重复数。
+  const zhBlock = strings.slice(strings.indexOf('export const zh = {'), strings.indexOf('} as const;'));
+  const enBlock = strings.slice(strings.indexOf('const en: { [K in keyof typeof zh]: string } = {'));
+  assert.equal(count(zhBlock, 'statusUnconfirmed:'), 1, 'zh 字典里 statusUnconfirmed 恰好一条');
+  assert.equal(count(enBlock, 'statusUnconfirmed:'), 1, 'en 字典里 statusUnconfirmed 恰好一条');
+  assert.match(zhBlock, /statusUnconfirmed: '\{n\} 条未确认'/);
+  assert.match(enBlock, /statusUnconfirmed: '\{n\} unconfirmed'/);
 });
 
 test('折叠复位口径与宿主一致，旧的 length<=1 effect 不得复活（#31/#32）', () => {

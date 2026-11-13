@@ -19,7 +19,8 @@
     "src/client/**/*.tsx",
     "src/smart-window.ts",
     "src/time-utils.ts",
-    "src/domain.ts"
+    "src/domain.ts",
+    "src/locales/locale-id.ts"
   ],
   "exclude": ["node_modules", "lib", "tests"]
 }

@@ -15,19 +15,32 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const card = () => readFileSync(new URL('../src/client/components/SchedulerSettingsCard.tsx', import.meta.url), 'utf8');
-const client = () => readFileSync(new URL('../src/client/index.tsx', import.meta.url), 'utf8');
+// 设置卡词条的落点：从 `src/client/index.tsx`（内联）搬到 `src/client/locales/settings.ts`。
+const dictFile = () => readFileSync(new URL('../src/client/locales/settings.ts', import.meta.url), 'utf8');
 
 /**
  * 取 `zh: {` / `en: {` 那**一个**字典对象的源码。
  *
- * 结尾按 6 空格缩进的 `},` 截断，不能直接取到 locale 注册调用的结尾：那样 zh 的窗口
- * 会把 en 整块也包进来，后面同名 key 的英文值盖掉中文值，本测试就退化成「en 查两遍」——
- * 只在 zh 重复的标题会漏网。
+ * 读数位置随结构迁移改过一次，断言的判据没变：
+ *  - 原先设置卡词条内联在 `src/client/index.tsx` 的 `locale.register(NS, {zh, en})` 里，
+ *    缩进是 6 空格、字典体在 8 空格；
+ *  - 现在内联的是 `src/client/locales/settings.ts` 的 `const zh = {…}` / `const en = {…}`，
+ *    缩进 0 空格、字典体在 2 空格。`src/client/index.tsx` 现在只剩 `mergedFor()` 调用，
+ *    那里没有任何文案可抓（在本文件读它只会得到"找不到字典"的假红）。
+ *
+ * 结尾仍然按**该字典自己的收尾**截断，而不是取到文件尾：那样 zh 的窗口会把 en 整块也包
+ * 进来，后面同名 key 的英文值盖掉中文值，本测试就退化成「en 查两遍」——只在 zh 重复的
+ * 标题会漏网。
  */
 function dictSource(src, lang) {
-  const start = src.indexOf(`\n      ${lang}: {`);
-  assert.notEqual(start, -1, `client 源码里找不到 ${lang} 字典`);
-  const close = src.slice(start + 1).search(/^      \},$/m);
+  // zh 是键的定义来源（`export const zh = {`，`as const`）；en 与 6 门机器初翻都带映射类型
+  // 标注（`const en: { [K in keyof typeof zh]: string } = {`），所以不能只认 ` = {` 这一种形状。
+  const re = new RegExp(`\\n(?:export )?const ${lang}\\b[^=\\n]*=\\s*\\{`);
+  const m = re.exec(src);
+  assert.notEqual(m, null, `settings.ts 源码里找不到 ${lang} 字典`);
+  const start = m.index;
+  assert.notEqual(start, -1, `settings.ts 源码里找不到 ${lang} 字典`);
+  const close = src.slice(start + 1).search(/^\};$/m);
   assert.notEqual(close, -1, `${lang} 字典找不到收尾`);
   return src.slice(start, start + 1 + close);
 }
@@ -35,7 +48,7 @@ function dictSource(src, lang) {
 /** 字典里字面量取值（`key: 'value'`，含 `\'` 转义）的映射。 */
 function dictValues(src, lang) {
   const out = new Map();
-  const re = /^\s{8}(\w+):\s*'((?:[^'\\]|\\.)*)',$/gm;
+  const re = /^\s{2}(\w+):\s*'((?:[^'\\]|\\.)*)',$/gm;
   for (const m of dictSource(src, lang).matchAll(re)) {
     out.set(m[1], m[2].replace(/\\'/g, "'"));
   }
@@ -52,7 +65,7 @@ function renderedHeadingKeys() {
 }
 
 test('详情页渲染的 section 标题在 zh / en 下都互不重复', () => {
-  const src = client();
+  const src = dictFile();
   const keys = renderedHeadingKeys();
   assert.ok(keys.length >= 2, '应至少解析到开关段与一个字段段');
 
@@ -74,7 +87,7 @@ test('详情页渲染的 section 标题在 zh / en 下都互不重复', () => {
 });
 
 test('开关段与显示字段段仍是两个不同的 key（改名而非删段）', () => {
-  const dict = dictValues(client(), 'zh');
+  const dict = dictValues(dictFile(), 'zh');
   assert.notEqual(dict.get('sectionDisplayToggle'), undefined);
   assert.notEqual(dict.get('sectionDisplay'), undefined);
   assert.notEqual(dict.get('sectionDisplayToggle'), dict.get('sectionDisplay'));

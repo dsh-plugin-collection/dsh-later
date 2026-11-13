@@ -2,6 +2,9 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands';
 import type { PromptLimits } from './user-tools.js';
+export declare function currentCommandLocale(): string | undefined;
+export declare function enterCommandLocale(locale: string | undefined): () => void;
+export declare function resetCommandLocaleForTest(): void;
 export type UserChangeNotifier = (agent: Agent) => boolean;
 export type UserSteerHandler = (agent: Agent, id: string) => Promise<{
     readonly ok: true;

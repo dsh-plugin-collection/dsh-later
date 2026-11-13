@@ -25,7 +25,9 @@ const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), 'u
 const component = read('client/components/ScheduleDock.tsx');
 const styles = read('client/styles.ts');
 const entry = read('client/index.tsx');
-const strings = read('client/strings.ts');
+// dock UI 词条搬家：`client/strings.ts` 现在只放 CLIENT_ERR 令牌，字典在
+// `client/locales/ui.ts`（8 门各一份）。
+const strings = read('client/locales/ui.ts');
 const types = read('client/types.ts');
 
 /** 数一下 needle 出现的次数。 */
@@ -216,9 +218,14 @@ test('超出上限给 +N，且 a11y 有独立标签', () => {
   assert.match(band, /\+\$\{extra\}/);
 });
 
-test('四个新词条 zh/en 双语齐全（注册源是 strings.ts，见 #28 双出口）', () => {
+test('四个新词条 zh/en 双语齐全（注册源是 client/locales/ui.ts，见 #28 双出口）', () => {
+  // 字典扩到 8 门后同一 key 共出现 8 次；这里按 zh / en 两块各数一次，
+  // 判据仍是「中英各一条」，不是「整文件两次」。
+  const zhBlock = strings.slice(strings.indexOf('export const zh = {'), strings.indexOf('} as const;'));
+  const enBlock = strings.slice(strings.indexOf('const en: { [K in keyof typeof zh]: string } = {'));
   for (const key of ['attachmentImage', 'attachmentFile', 'attachmentPendingSend', 'attachmentUnavailable', 'attachmentMore']) {
-    assert.equal(count(strings, `${key}:`), 2, `${key} 必须 zh/en 各一条`);
+    assert.equal(count(zhBlock, `${key}:`), 1, `${key} 在 zh 字典里应恰好一条`);
+    assert.equal(count(enBlock, `${key}:`), 1, `${key} 在 en 字典里应恰好一条`);
   }
 });
 

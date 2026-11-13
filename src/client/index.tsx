@@ -35,7 +35,8 @@ import type { Context } from '@deepseek-ai/cordis';
 import { fileMediaUrlCompat } from './workspace-path-compat.js';
 import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from './runtime-augment.js';
 import { name } from '../domain.js';
-import { dictFor, schedDicts } from './strings.js';
+import { dictFor, LOCALE_IDS } from './locales/ui.js';
+import { mergedFor } from './locales/settings.js';
 import { injectStyles } from './styles.js';
 import { isGroupBadgeVisible } from './schedule-facet.js';
 import { mountLaterScheduleFacet } from './group-status-facet.js';
@@ -157,11 +158,16 @@ function apply(ctx: Context): void {
   /**
    * 注册 locale 字典（issue #28：dock 改用插槽 `t` seat 的前提）。
    *
-   * 三条不可破坏的约定：
+   * 四条不可破坏的约定：
    *  1. **必须单次合并注册**。宿主对同一 NS 的同一 locale 二次 `register` 直接抛
    *     `locale namespace "…" already has locale "zh"`（dsh-client-locale
-   *     client.js:1395），所以 UI 词条（`schedDicts`，61 个）与下面的设置卡词条
-   *     必须在一个对象里给完，不能拆成两次注册。
+   *     client.js:1395），所以 dock/面板词条（`src/locales/ui.ts`）与设置卡词条
+   *     （`src/locales/settings.ts`）必须在一个对象里给完，不能拆成两次注册——
+   *     合并点就是 `mergedFor()`，本文件不再自己抄一遍词条。
+   *
+   *     8 门语言**一次给全**：宿主对缺失语言回退 `en`、再退到 key 本身，漏一门不报错，
+   *     只静默降级。`LOCALE_IDS.map` 保证「宿主支持哪几种语言」与「注册了哪几种语言」
+   *     这两个集合同源，加语言时不必回来找这个地方。
    *  2. **字典要先于任何使用 `t` 的插槽条目落位**。`ctx.effect` 的 execute 是同步跑的
    *     （cordis lib/index.js:1249 `task = this._execute(runner)` → :1141
    *     `runner.execute.call(this)`），本段又排在下方 dock 注册之前，故顺序成立。
@@ -172,166 +178,15 @@ function apply(ctx: Context): void {
    *     `translate` 的链尾是 `?? key`：漏注册不报错，只把 key 名渲染到界面上。
    */
   if (locale !== undefined) {
-    ctx.effect(() => locale.register(NS, {
-      zh: {
-        ...schedDicts.zh,
-        title: '定时提醒',
-        description: '配置会话内定时提醒的参数。',
-        pendingBadge: '未保存',
-        expand: '展开设置',
-        collapse: '收起设置',
-        readOnly: '本部署的设置为只读。',
-        sectionDisplay: '显示设置',
-        sectionTime: '时间设置',
-        sectionDelivery: '投递设置',
-        sectionAdvanced: '高级语法',
-        betaBadge: '实验性',
-        betaBadgeAria: '实验性功能，行为可能随版本调整',
-        advancedSyntaxLabel: '启用多次写法（+1h*3 / 15:32+16:32）',
-        advancedSyntaxHint:
-            '让 /later 与 /schedule 支持一次写多条：+1h*3（等间隔 3 次）、+1h+1h+0.5h（相对序列）、'
-            + '15:32+16:32 与 9:00+1d（锚点序列，按墙钟推进，跨夏令时不漂）。每条都是独立任务，'
-            + '可单独取消或编辑；单次最多 10 条。标记为实验性：展开后的观感与条数上限仍需观察。',
-        showButtonLabel: '显示定时按钮',
-        showButtonHint: '关闭后输入框右侧不再显示时钟按钮；已创建的提醒仍会照常触发，并在输入框下方的待发送列表中显示。',
-        showInGroupBadgeLabel: '在分组徽标中显示定时任务',
-        showInGroupBadgeHint:
-            '关闭后不再向 dsh-group-status 的折叠分组徽标登记「定时任务」这一格，徽标上不再出现定时任务计数。'
-            + '提醒本身照常触发，输入框下方的待发送列表与侧栏状态不受影响；未安装 dsh-group-status 时这一项没有可见效果。',
-        maxSchedulesLabel: '单会话任务上限',
-        maxSchedulesHint: '单个会话内允许创建的最大定时任务数量。',
-        allowLongPromptsLabel: '允许长文本提醒',
-        allowLongPromptsHint:
-          '解除默认 1000 字符的上限。开启后可用「提示字符上限」自定义最大长度；关闭时该上限不生效，恒为 1000。',
-        maxPromptCharsLabel: '提示字符上限',
-        maxPromptCharsHint: '提醒内容最大字符数（仅在「允许长文本提醒」开启时生效）。',
-        maxPromptCharsLockedHint: '开启「允许长文本提醒」后可调。',
-        smartWindowHint: '用于「工作时间」芯片与智能模式自动排期。',
-        /**
-         * 五个时段的跨字段序关系被写反时，段尾挂这一句（同时锁住保存）。
-         * 规则本身只有一份，在 `src/smart-window.ts` 的 `SMART_WINDOW_ORDER`；
-         * 这里的顺序措辞必须与那张表同序——改了表要连着改这句。
-         */
-        smartWindowOrderHint: '五个时段需依次递增：工作时间开始 < 午休开始 < 午休结束 < 工作时间结束 < 夜间静默起点。',
-        workStartLabel: '工作时间开始',
-        workEndLabel: '工作时间结束（晚间开始）',
-        lunchStartLabel: '午休开始',
-        lunchEndLabel: '午休结束',
-        eveningEndLabel: '夜间静默起点',
-        steerDeliveryLabel: '插话投递方式',
-        steerDeliveryHint: '「插话发送」把提醒内容推给会话时进入的队列。',
-        steerDeliveryOption_followup: '独立成一轮（推荐）',
-        steerDeliveryOption_steer: '插入当前回合（更快）',
-        confirmDeliveryLabel: '投递确认',
-        confirmDeliveryHint: '投递后核对会话日志，确认消息真正进入请求。关闭则不再核对，也不保证送达。',
-        onUnconfirmedLabel: '未确认时',
-        onUnconfirmedHint: '投递未能确认时的处理方式。',
-        onUnconfirmedOption_keep: '保留条目可重试（推荐）',
-        onUnconfirmedOption_discard: '丢弃',
-        clockIconStyleLabel: '时钟图标风格',
-        clockIconStyleHint: '侧栏会话行定时状态图标的显示风格。',
-        clockIconStyleOption_auto: '自动（推荐）',
-        clockIconStyleOption_modern: '新版描边风格',
-        clockIconStyleOption_classic: '旧版点阵风格',
-        steerRiskGuarded: '⚠ 撞上回合启动时可能被吞掉；已开启投递确认，未送达会保留条目并可重试。',
-        steerRiskUnguarded: '⚠ 撞上回合启动时可能被吞掉，且不会保留条目（投递确认已关闭）。',
-        discardRisk: '⚠ 未确认的提醒会被移出列表 —— 静默丢失将重新变得可能。',
-        overriddenLabel: '已覆盖',
-        resetLabel: '重置',
-        invalidLabel: '请输入有效的数字。',
-        invalidTimeLabel: '请使用 HH:mm 24 小时制时间。',
-        save: '保存',
-        saving: '保存中…',
-        discard: '放弃修改',
-        saveFailed: '保存失败，请重试。',
-        loading: '加载中…',
-        unavailable: '设置暂不可用。',
-        /**
-         * 详情页「在设置中显示」开关的 section 标题。
-         * 取值必须与 `sectionDisplay` 不同：详情页把这两段连着渲染，同名时页面上会
-         * 出现两个「显示设置」。护栏见 tests/settings-section-headings.test.mjs。
-         */
-        sectionDisplayToggle: '设置入口',
-        showInSettings: '在设置中显示',
-        showInSettingsHint: '在设置对话框中显示本插件的设置页（刷新页面后生效）',
-      },
-      en: {
-        ...schedDicts.en,
-        title: 'Session Scheduler',
-        description: 'Configure in-session scheduled reminders.',
-        pendingBadge: 'Unsaved',
-        expand: 'Show settings',
-        collapse: 'Hide settings',
-        readOnly: 'Settings for this deployment are read-only.',
-        sectionDisplay: 'Display',
-        sectionTime: 'Time windows',
-        sectionDelivery: 'Delivery',
-        sectionAdvanced: 'Advanced syntax',
-        betaBadge: 'Beta',
-        betaBadgeAria: 'Beta feature; behaviour may change between versions',
-        advancedSyntaxLabel: 'Multi-shot syntax (+1h*3 / 15:32+16:32)',
-        advancedSyntaxHint:
-            'Let /later and /schedule create several tasks at once: +1h*3 (same interval N times), '
-            + '+1h+1h+0.5h (relative chain), 15:32+16:32 and 9:00+1d (anchored on a wall clock — '
-            + 'it keeps the clock time across DST). Each occurrence is an independent task you can '
-            + 'cancel or edit on its own; up to 10 per command. Marked Beta: the expanded result and '
-            + 'the 10-task cap still need real-world observation.',
-        showButtonLabel: 'Show schedule button',
-        showButtonHint: 'Hide the clock button on the input bar. Existing reminders keep firing and stay visible in the dock below the composer.',
-        showInGroupBadgeLabel: 'Show scheduled in group badge',
-        showInGroupBadgeHint:
-            'Stop registering the "Scheduled" cell on dsh-group-status\'s folded-group badge, so its count disappears. '
-            + 'Reminders keep firing and stay visible in the dock below the composer and in the sidebar; '
-            + 'this row has no visible effect when dsh-group-status is not installed.',
-        maxSchedulesLabel: 'Max schedules per session',
-        maxSchedulesHint: 'Maximum number of scheduled reminders allowed per session.',
-        allowLongPromptsLabel: 'Allow long reminder prompts',
-        allowLongPromptsHint:
-          'Lift the default 1000-character cap. Once enabled, "Max prompt characters" lets you set a custom ceiling; while disabled that ceiling has no effect and stays at 1000.',
-        maxPromptCharsLabel: 'Max prompt characters',
-        maxPromptCharsHint: 'Maximum characters per reminder (takes effect only when "Allow long reminder prompts" is on).',
-        maxPromptCharsLockedHint: 'Adjustable after enabling "Allow long reminder prompts".',
-        smartWindowHint: 'Used by the Work-hours chip and smart auto-scheduling.',
-        // 与 zh 那条同序：措辞就是 `SMART_WINDOW_ORDER` 那张表的读法。
-        smartWindowOrderHint: 'The five windows must increase in order: work start < lunch start < lunch end < work end < night quiet.',
-        workStartLabel: 'Work day start',
-        workEndLabel: 'Work day end (evening start)',
-        lunchStartLabel: 'Lunch break start',
-        lunchEndLabel: 'Lunch break end',
-        eveningEndLabel: 'Night quiet starts at',
-        steerDeliveryLabel: 'Interject delivery',
-        steerDeliveryHint: 'Which queue the reminder content enters when you press "Send interjection".',
-        steerDeliveryOption_followup: 'Own turn (recommended)',
-        steerDeliveryOption_steer: 'Current turn (faster)',
-        confirmDeliveryLabel: 'Confirm delivery',
-        confirmDeliveryHint: 'After sending, check the session log to confirm the message actually entered a request. Turning this off skips the check and no longer guarantees delivery.',
-        onUnconfirmedLabel: 'When unconfirmed',
-        onUnconfirmedHint: 'What to do when delivery cannot be confirmed.',
-        onUnconfirmedOption_keep: 'Keep for retry (recommended)',
-        onUnconfirmedOption_discard: 'Discard',
-        clockIconStyleLabel: 'Clock icon style',
-        clockIconStyleHint: 'Display style of the schedule status icon in the sidebar.',
-        clockIconStyleOption_auto: 'Auto (recommended)',
-        clockIconStyleOption_modern: 'Modern stroke style',
-        clockIconStyleOption_classic: 'Classic dot-matrix style',
-        steerRiskGuarded: '⚠ May be swallowed when it collides with turn start; delivery confirmation is on, so an undelivered reminder is kept and can be retried.',
-        steerRiskUnguarded: '⚠ May be swallowed when it collides with turn start, and the reminder will NOT be kept (delivery confirmation is off).',
-        discardRisk: '⚠ Unconfirmed reminders are removed from the list — silent loss becomes possible again.',
-        overriddenLabel: 'Overridden',
-        resetLabel: 'Reset',
-        invalidLabel: 'Please enter a valid number.',
-        invalidTimeLabel: 'Use 24-hour HH:mm format.',
-        save: 'Save',
-        saving: 'Saving…',
-        discard: 'Discard',
-        saveFailed: 'Save failed, please try again.',
-        loading: 'Loading…',
-        unavailable: 'Settings unavailable.',
-        sectionDisplayToggle: 'Settings entry',
-        showInSettings: 'Show in settings',
-        showInSettingsHint: 'Show this plugin\'s settings page in the settings dialog (refresh to take effect)',
-      },
-    }), 'dsh-later: locale');
+    /**
+     * 逐门展开成 `{zh: {...}, en: {...}, …}`。
+     *
+     * 不从 `LOCALE_IDS` 逐个展开、而是写成字面量 `{zh, en, ja, …}` 的话，日后往
+     * `LOCALE_IDS` 加一门而忘了这里，宿主只会静默回退英文，没有任何报错——遍历让
+     * 「支持的语言」与「注册的语言」两个集合没有分叉的机会。
+     */
+    const dicts = Object.fromEntries(LOCALE_IDS.map((id) => [id, mergedFor(id)]));
+    ctx.effect(() => locale.register(NS, dicts), 'dsh-later: locale');
   }
 
   /**

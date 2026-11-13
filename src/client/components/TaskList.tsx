@@ -6,8 +6,9 @@
 import type { JSX } from 'react';
 import { IconClose } from '../primitives-compat.js';
 import { formatAbsolute, formatRelative, type TextLocale } from '../../time-utils.js';
+import { relPhrases } from '../rel-phrases.js';
 import type { ClientSchedule } from '../types.js';
-import type { SchedStrings } from '../strings.js';
+import type { SchedStrings } from '../locales/ui.js';
 
 export interface TaskListProps {
   items: readonly ClientSchedule[];
@@ -50,7 +51,7 @@ export function TaskList({ items, now, deliveredIds, cancellingIds, onDelete, ti
             <span className={`ss-dot ${dotState}`} aria-hidden="true" />
             <span className="ss-task-main">
               <span className="ss-task-time">
-                {formatAbsolute(Date.parse(item.scheduled_at), timeZone, lang)} · {formatRelative(Date.parse(item.scheduled_at), now, lang)}
+                {formatAbsolute(Date.parse(item.scheduled_at), timeZone, lang)} · {formatRelative(Date.parse(item.scheduled_at), now, relPhrases(t))}
               </span>
               <br />
               <span className="ss-task-prompt">{item.prompt}</span>

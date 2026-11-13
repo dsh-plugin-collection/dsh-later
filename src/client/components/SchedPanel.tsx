@@ -20,8 +20,10 @@ import { IconClose } from '../primitives-compat.js';
 import { epochFromLocal, localFieldsOf, nextSmartAt, DEFAULT_SMART_WINDOW, type SmartWindowConfig } from '../../smart-window.js';
 import type { TextLocale } from '../../time-utils.js';
 import { canonicalLocalClock, formatAbsolute, formatRelative } from '../../time-utils.js';
+import { relPhrases } from '../rel-phrases.js';
 import { TaskList } from './TaskList.js';
-import { format, CLIENT_ERR, type SchedStrings } from '../strings.js';
+import { format, type SchedStrings } from '../locales/ui.js';
+import { CLIENT_ERR } from '../strings.js';
 import { useNow } from '../useCountdown.js';
 import {
   PANEL_ANCHOR_BACKEND,
@@ -231,8 +233,8 @@ export function SchedPanel({
 
   const targetLabel = useMemo(() => {
     if (target === undefined || target === null) return null;
-    return `${formatAbsolute(target.epoch, timeZone, lang)} · ${formatRelative(target.epoch, now, lang)}`;
-  }, [target, timeZone, now]);
+    return `${formatAbsolute(target.epoch, timeZone, lang)} · ${formatRelative(target.epoch, now, relPhrases(t))}`;
+  }, [target, timeZone, now, lang, t]);
 
   const handleConfirm = async (): Promise<void> => {
     const text = defaultPrompt.trim();

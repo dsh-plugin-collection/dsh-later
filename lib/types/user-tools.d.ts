@@ -27,6 +27,9 @@ import type { UserScheduleDelivery } from './domain.js';
 import type { ScheduledAttachment } from './ownership-store.js';
 export declare const DEFAULT_MAX_SCHEDULES = 100;
 export declare const DEFAULT_MAX_PROMPT_CHARS = 1000;
+export declare function currentHostLocale(): string | undefined;
+export declare function enterHostLocale(locale: string | undefined): () => void;
+export declare function resetHostLocaleForTest(): void;
 export interface PromptLimits {
     readonly allowLong: boolean;
     readonly maxChars: number;
@@ -123,10 +126,11 @@ export declare function runUserScheduleTransaction<T>(agent: Agent, operation: (
 export interface UserScheduleCreateOptions {
     readonly trustedDelivery?: UserScheduleDelivery;
     readonly attachments?: readonly ScheduledAttachment[];
+    readonly locale?: string;
 }
 export declare function userScheduleCreate(input: unknown, agent: Agent, ctx: Context, maxSchedules?: number, options?: UserScheduleCreateOptions, limits?: PromptLimits): Promise<UserScheduleCreateResult>;
-export declare function userScheduleList(agent: Agent): Promise<UserScheduleListResult>;
-export declare function userScheduleDelete(id: unknown, agent: Agent, ctx: Context): Promise<UserScheduleDeleteResult>;
-export declare function userScheduleEditPrompt(id: unknown, newPrompt: unknown, agent: Agent, ctx: Context, limits?: PromptLimits): Promise<UserScheduleCreateResult | UserScheduleError>;
-export declare function userSchedulePause(id: unknown, agent: Agent, ctx: Context): Promise<UserSchedulePauseResult>;
-export declare function userScheduleResume(uid: unknown, agent: Agent, ctx: Context, maxSchedules?: number): Promise<UserScheduleResumeResult>;
+export declare function userScheduleList(agent: Agent, locale?: string): Promise<UserScheduleListResult>;
+export declare function userScheduleDelete(id: unknown, agent: Agent, ctx: Context, locale?: string): Promise<UserScheduleDeleteResult>;
+export declare function userScheduleEditPrompt(id: unknown, newPrompt: unknown, agent: Agent, ctx: Context, limits?: PromptLimits, locale?: string): Promise<UserScheduleCreateResult | UserScheduleError>;
+export declare function userSchedulePause(id: unknown, agent: Agent, ctx: Context, locale?: string): Promise<UserSchedulePauseResult>;
+export declare function userScheduleResume(uid: unknown, agent: Agent, ctx: Context, maxSchedules?: number, locale?: string): Promise<UserScheduleResumeResult>;

@@ -573,12 +573,18 @@ test('Config 的每个可编辑字段都在设置卡 SECTIONS 中有对应行', 
     assert.ok(configKeys.includes(key), `Config 不再声明 ${key}，请同步清理豁免列表`);
   }
 
-  // 双语字典也必须覆盖每个渲染字段的 label/hint key，否则界面上直接显示 key 名
+  // 双语字典也必须覆盖每个渲染字段的 label/hint key，否则界面上直接显示 key 名。
+  //
+  // 读数位置随结构迁移改过一次，判据没变（每个 key 至少出现两次 = zh + en 各一次）：
+  //  - 原先文案有两个来源：入口 `index.tsx` 里内联的 zh/en 两段（历史写法），与
+  //    `client/strings.ts` 里的 `schedDicts`；
+  //  - 现在两个来源都搬进了独立字典文件：设置卡词条在 `client/locales/settings.ts`，
+  //    dock 词条在 `client/locales/ui.ts`，而 `index.tsx` 只剩 `mergedFor()` 调用、
+  //    `strings.ts` 只剩 CLIENT_ERR 令牌——在这两处 grep 只会拿到 0 条，是"找不到"不是
+  //    "文案没了"。所以两处都要认新的落点。
   const client = readFileSync(join(root, 'src', 'client', 'index.tsx'), 'utf8');
-  // 文案有两个合法来源：入口里内联的 zh/en 两段（历史写法），或共享字典
-  // `src/client/strings.ts`（`schedDicts` 的 zh/en 映射，键集由类型强制一致）。
-  // 新 UI 词条走后者，所以两处都要认，否则「换了存放位置」会被误判成缺翻译。
-  const dict = readFileSync(join(root, 'src', 'client', 'strings.ts'), 'utf8');
+  const dict = readFileSync(join(root, 'src', 'client', 'locales', 'settings.ts'), 'utf8')
+    + readFileSync(join(root, 'src', 'client', 'locales', 'ui.ts'), 'utf8');
   const labelKeys = [...card.matchAll(/(?:labelKey|hintKey|titleKey|ariaKey):\s*'([A-Za-z]+)'/g)].map((m) => m[1]);
   const absent = [...new Set(labelKeys)].filter((key) => {
     const re = new RegExp(`\\b${key}:`, 'g');

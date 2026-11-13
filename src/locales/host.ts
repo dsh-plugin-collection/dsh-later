@@ -1,0 +1,345 @@
+/**
+ * 宿主侧微文案字典（8 语言）。
+ *
+ * 与客户端 `./ui.ts` / `./settings.ts` 分开两个作用域：宿主侧文案在**工具注册时**一次性
+ * 确定（模型 system-prompt 的工具清单、GUI 工具调用行标题、slash 命令描述、运行期回执），
+ * 客户端那两门从不 import 本模块，反之亦然。合并只发生在 `./index.ts`。
+ *
+ * 语言解析：`hostDictFor(id)` 按宿主 locale 的 active id 取字典，未收录（含拿不到 locale
+ * 服务）回退中文——v1 默认语言，也是本仓所有 host 侧测试断言的基准。
+ *
+ * ⚠️ `zh` 定义键集；`en` 是长期使用的历史措辞；`ja` / `es` / `fr` / `de` / `ru` / `pt`
+ * 是**机器初翻、未经母语审校**。
+ * @module dsh-later/locales/host
+ */
+import { isLocaleId, type LocaleId } from './locale-id.js';
+import jaDict from './host.ja.js';
+import esDict from './host.es.js';
+import frDict from './host.fr.js';
+import deDict from './host.de.js';
+import ruDict from './host.ru.js';
+import ptDict from './host.pt.js';
+
+/**
+ * 中文 —— 键的**定义来源**。
+ *
+ * 导出它，只为让 6 个机器初翻文件能写 `import type { zh }` 并用
+ * `{ [K in keyof typeof zh]: string }` 在**编译期**锁住键集（漏键 / 多键都是 tsc 报错）。
+ * 运行期没人 import 这个值：各语言文件的 `import type` 会被完全擦除。
+ */
+export const zh = {
+  toolCreateDesc: '为用户创建一条当前会话内的定时提醒。必须提供非空提示与恰好一个选择器：after_seconds（正整数延时秒）、at（显式偏移时间或 {date,time,time_zone} 本地时间）、every_seconds（≥300 的固定间隔秒）。time_zone 可选，缺省用会话检测时区。创建来源被标记为用户工具，GUI 面板会展示。every_seconds 是**无结束条件**的固定间隔（会一直发下去，直到用户删除）；用户说了次数上限（如「每小时提醒我一次，持续 3 次」）时不要用 every_seconds，改为**逐条调用本工具 N 次**、每次用 at 给出对应的绝对时刻（t+1h、t+2h、t+3h）。',
+  toolListDesc: '列出当前会话内用户创建的活动定时提醒（含 id、UTC 目标、scheduled/overdue 状态、投递模式）。',
+  toolDeleteDesc: '按 user_schedule_create / user_schedule_list 返回的精确 id 删除一条活动提醒；未知或已结束返回 deleted:false。',
+  paramPromptDesc: '提醒内容（trim 后非空）。长度上限由插件设置的「允许长文本」决定：默认 1000 字符，可在设置里放开；超长会返回 invalid_prompt，错误文案里给出当前实际允许的字符数。',
+  paramAfterSecondsDesc: '正整数延时秒数。',
+  paramEverySecondsDesc: '固定间隔秒数，至少 300；无结束条件（有次数上限请改为逐条创建 at）。',
+  paramAtDesc: '绝对目标：带显式时区的 RFC 3339 字符串（以 Z 或 ±HH:mm 结尾），或 {date, time, time_zone} 本地日历对象。本地 time 接受 HH:mm 与 HH:mm:ss（可带 1–3 位毫秒），本插件会补齐成上游要求的 HH:mm:ss；不带任何时区信息的字符串会被拒绝——不替用户猜时区。',
+  paramTimeZoneDesc: 'IANA 时区（如 Asia/Shanghai）；可选，缺省用会话检测时区。',
+  paramIdDesc: '精确会话内 schedule id。',
+  presentCreate: '创建定时提醒',
+  presentList: '列出定时提醒',
+  presentDelete: '删除定时提醒',
+  cmdLaterDesc: '创建一条会话内定时提醒（GUI 内部通道）。',
+  cmdScheduleDesc: '创建一条会话内定时提醒（GUI 内部通道）。',
+  cmdListDesc: '列出当前会话用户创建的定时提醒（GUI 内部通道）。',
+  cmdDeleteDesc: '删除一条会话内定时提醒（GUI 内部通道）。',
+  cmdEditDesc: '修改一条会话内定时提醒的内容（保留原时刻；GUI 内部通道）。',
+  cmdPauseDesc: '暂停一条 after 类定时提醒（仅 GUI 内部通道；已到点不可暂停）。',
+  cmdResumeDesc: '恢复一条已暂停的 after 提醒（仅 GUI 内部通道）。',
+  cmdSteerDesc: '插话发送：把指定 id 的提醒立即推给 agent（仅 one-shot；GUI 内部通道）。',
+  errEmptyPrompt: '提醒内容不能为空。',
+  errInvalidSelector: '必须提供 after_seconds、at 或 every_seconds 之一。',
+  errMultipleSelectors: 'after_seconds、at、every_seconds 只能提供一个。',
+  errNotFuture: '时间必须是未来。',
+  errTimeOutOfRange: '时间超出允许范围。',
+  errFrequencyTooHigh: '频率过高。',
+  errInvalidRule: '规则无效。',
+  errSubagentSession: '该会话属于子 agent 委派，永远不会收到提醒投递。',
+  errScheduleNotFound: '提醒不存在。',
+  errAlreadyOverdue: '提醒已到期。',
+  errQuotaExceeded: '已达任务上限（{max} 条）。',
+  errPersistenceUncertain: '持久化不确定。',
+  errUnsupportedKind: '不支持的操作类型。',
+  errNotPaused: '提醒未暂停。',
+  errInternalError: '操作失败。',
+  warnSchedulerNotArmed: '注意：本会话的调度器未挂载，这条提醒到点不会触发。请重启宿主进程或新开一个会话后重建（插件热重载后，重载前就已存在的会话可能挂不回来）。',
+
+
+  // ─── 工具错误回执（task-7，src/user-tools.ts 返回给用户的 message）────────
+  // 本块由 task-7 追加，**只追加、不改既有行**。键名统一 `errTool*` 前缀，与上方「运行时
+  // 错误消息」那批 `err*` 区分开：那批是运行期（投递 / 暂停）的短文案，本批是
+  // user_schedule_* 工具在参数校验、读写失败时**直接返回给模型与用户**的 message ——
+  // 模型把它转述进回答、GUI 也把它显示在工具调用行上，所以必须跟随 locale。
+  // 带占位符的走 hostFormat 的 `{name}` 语法，名字逐字保留，语序由各语言自己决定。
+  errToolPromptEmpty: '提醒内容不能为空。',
+  errToolPromptTooLong: '提醒内容不能超过 {maxChars} 字符。',
+  errToolCreateNotObject: 'create 参数必须是一个对象。',
+  errToolSelectorExactlyOne: 'after_seconds / at / every_seconds 必须且只能提供一项。',
+  errToolTimeZoneInvalid: 'time_zone 必须是合法的 IANA 时区。',
+  errToolAtNeedsZone: 'at 字符串需带显式时区：以 Z 或 ±HH:mm 结尾的 RFC 3339（如 2026-10-26T09:00:00+08:00）。不确定时区时请改传 {date, time, time_zone} 三元组。',
+  errToolAtObjectMissing: 'at 对象必须包含 date / time / time_zone。',
+  errToolAtBadDate: 'at.date 需为 YYYY-MM-DD（月、日各两位），且是真实存在的一天。',
+  errToolAtBadTime: 'at.time 需为 HH:mm 或 HH:mm:ss（可带 1–3 位毫秒），例如 09:00、9:30:15.5。',
+  errToolAtTimeZoneInvalid: 'at.time_zone 必须是合法的 IANA 时区。',
+  errToolAtLocalGap: '{date} {time} 在 {timeZone} 里不是有效时间（该时区当天可能因夏令时跳过这段钟面）。',
+  errToolAtShape: 'at 必须是字符串或 {date, time, time_zone} 对象。',
+  errToolInternalFailed: '定时任务操作失败，请重试。',
+  errToolPersistenceUnconfirmed: '任务持久化未确认，请用 user_schedule_list 复核后再依赖该结果。',
+  errToolLogUnreadable: '会话定时日志读取失败。',
+  errToolQuotaFull: '当前会话最多 {maxSchedules} 个定时任务，请先删除部分任务。',
+  errToolScheduleIdInvalid: 'schedule id 必须是去空白非空字符串。',
+  errToolUidInvalid: 'uid 必须是去空白非空字符串。',
+  errToolScheduleNotFoundById: '未找到定时任务 {id}。',
+  errToolEditOverdue: '定时任务 {id} 的目标时刻已过，不能修改内容；请删除后重新创建。',
+  errToolPauseNotFoundById: '未找到可暂停的定时任务 {id}。',
+  errToolPauseUnsupportedKind: '仅支持暂停「再等 N 分钟」类（after）提醒。',
+  errToolPauseOverdue: '任务已到点，无法暂停；请删除或等待发送。',
+  errToolResumeNotFound: '未找到暂停中的任务 {uid}。',
+  // ── 命令面（slash 命令描述 / 输入框占位提示 / 命令回执）──────────────────
+  //
+  // 命名分三组：`cmd*Hint` 是输入框占位提示，`quick*Desc/Hint` 是给**人手打**的
+  // `/schedule`、`/later` 两条快捷命令（与上面给 GUI 内部通道用的 `cmd*Desc` 不是一回事，
+  // 那两条的内部通道描述讲的是 JSON 载荷，这两条讲的是「时间 + 正文」的宽松写法），
+  // `reply*` 是 handler 回执，`parse*` 是解析器的拒绝回执。
+  //
+  // ⚠️ 里头的 `+1h*3`、`15:32`、`1532`、`30分钟后`、`明天9点` 全是**输入示例**：用户要把它们
+  // 照抄进输入框，8 门一律不译。翻成 "in 30 minutes" 用户抄进去解析器不认，等于教错。
+  cmdCreateHint: 'JSON 载荷，例如 {"prompt":"检查构建结果","after_seconds":300}；也可用 {"prompt":"…","at":{"date":"2026-08-21","time":"15:32","time_zone":"Asia/Shanghai"}}',
+  cmdListHint: '无需载荷。回车一次认领命令、再回车一次执行（内核的 input 命令都这样）',
+  cmdIdHint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+  cmdEditHint: 'JSON 载荷，例如 {"id":"schedule-…","prompt":"新的提醒内容"}',
+  cmdResumeHint: 'JSON 载荷，例如 {"id":"schedule-…"}（也可用 {"uid":"…"}）；或直接给裸 id：schedule-…',
+  quickScheduleDesc: '定时提醒快捷命令：/schedule <时间> <内容>。时间宽容识别：+30m、+1h30m、30分钟后、1532、15:32、9点半、明天9点、后天 10:00、8月21日 15:32、0821-1532、2026-08-21 15:32。多次写法：+1h*3（等间隔 3 次）与 +1h+1h+0.5h（链式序列，累计时刻），各自展开成独立任务，最多 10 条、多次时间隔 ≥60 秒。',
+  quickScheduleHint: '<时间> <内容>，如 1532 检查构建结果；也支持 +30m、明天9点、+1h*3、+1h+30m',
+  quickLaterDesc: '延迟发送：/later <时间> <内容>，到点以你的身份发出该内容（不是提醒，是代发）；可附带图片/文件，到点随内容一起发出。时间格式同 /schedule，含多次写法：+1h*3（等间隔 N 次）、+1h+1h+0.5h（相对序列）、15:32+16:32 / 9:00+1d（锚点序列）会展开成多条代发任务（同一内容与附件逐条带上）。多次写法为实验性功能，可在插件设置「高级语法」中关闭。',
+  quickLaterHint: '<时间> <内容>，如 1532 检查构建结果；可附带图片/文件；多条用 +1h*3 或 +1h+30m；到点会以你的身份发出',
+  replyMissingPayload: '缺少 JSON 载荷。',
+  replyPayloadNotObject: 'JSON 载荷必须是一个对象。',
+  replyPayloadInvalid: 'JSON 载荷解析失败。',
+  replyCreateFailed: '创建失败。',
+  replySteerNotInjected: '插话处理器未注入。',
+  replySteerIdRequired: 'invalid_rule: schedule id 必填。',
+  replyEditMissingPrompt: '缺少要改成的新内容：/user-schedule-edit 的载荷必须同时给出 id 与 prompt，例如 {"id":"schedule-…","prompt":"新的提醒内容"}。',
+  replyVerbWill: '将于',
+  replyVerbSet: '已设定提醒：',
+  replyHintLaterOneShot: '（到点会以你的身份发出）',
+  replyHintReminderOneShot: '（输入框上方蓝色待发条可随时取消）',
+  replyHintLaterMulti: '（到点逐条以你的身份发出，待发条里可单独取消）',
+  replyHintReminderMulti: '（每条可在输入框上方待发条单独取消）',
+  replyExpanded: '已展开为 {count} 条任务：{times}',
+  replyWithAttachments: '（含 {count} 个附件）',
+  replyPartial: '｜注意：只建成 {created}/{total} 条，{failure}',
+  replyPartsJoined: '｜',
+  replyQuoted: '「{content}」',
+  parseUsage: '用法：/schedule <时间> <内容>，如 /schedule 1532 检查构建结果',
+  parseUnrecognized: '无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点、2026-08-21 15:32；重复 +1h*3；序列 +1h+1h+0.5h。',
+  parseUnrecognizedSpec: '无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点 等。',
+  parseDanglingSuffix: '时间写法后面还跟着一段时长/次数，没有生效。多时刻请写成 +1h*3（等间隔 3 次）或 15:32+16:32、9:00+1d（序列，用 + 分隔）；次数后面要留一个空格。若那部分是正文，请换个说法。',
+  parseSpecMultiOnly: '多次/序列写法会展开成多条任务，仅 /schedule 与 /later 支持；单条写法请用 +1h 这类单一时间。',
+  parseSpecChainOnly: '锚点序列会展开成多条任务，仅 /schedule 与 /later 支持；单条写法请只写一个时刻。',
+  parseAdvancedDisabled: '多次写法（+1h*3、+1h+1h+0.5h、15:32+16:32）属于实验性功能「高级语法」，当前已在设置中关闭。开启路径：设置 → 插件 → 定时提醒 → 高级语法。',
+  parseInternalUnhandled: '内部错误：多次写法未经展开处理。',
+  parseInvalidField: '日期或时间数值无效。',
+  parseDateNotExist: '日期不存在。',
+  parseTimePassed: '目标时间已过去。',
+  parseTimePassedToday: '该时刻今天已过去，可改用「明天」或具体日期。',
+  parseTimeUnresolvable: '无法解析目标时间。',
+  parseAnchorNotAbsolute: '锚点必须是绝对时刻。',
+  parseDstSkipped: '{date} 的 {hhmm} 在 {timeZone} 不存在（夏令时切换跳过了这个时刻），请换一个时刻或时区。',
+  parseChainStepInvalid: '序列里的时刻写法无效。',
+  parseOccurrencesTooMany: '一次最多 {max} 条（多次写法会展开成同等数量的一次性任务，并受会话总额度约束）。',
+  parseOccurrencesTooTight: '多次写法的间隔至少 {minSeconds} 秒；只想发一条可以不带次数。',
+  parseRepeatNotPositive: '重复次数必须是正整数，如 +1h*3、+30m×2。',
+  parseRepeatTooMany: '重复次数过多（{count} 次）。{detail}',
+  parseSegmentsTooMany: '时间序列过长（{count} 段）。{detail}',
+  parseChainTooMany: '时间序列过长（{count} 个时刻）。{max} 个为上限。',
+  parseGapTooTight: '相邻两个时刻相差 {gapSeconds} 秒，多次写法至少要隔 {minSeconds} 秒。',
+  parseContentEmpty: '提醒内容不能为空。',
+  parseContentTooLong: '提醒内容不能超过 {chars} 字符。',
+  relOverdue: '已到期',
+  relSoon: '即将发送',
+  relMinutes: '约 {m} 分钟后',
+  relHours: '约 {h} 小时后',
+  relHoursMinutes: '约 {h} 小时 {m} 分后',
+  relDays: '约 {d} 天后',
+} as const;
+
+/**
+ * 英文。逐字保留历史措辞：`tests/upstream-compat.test.mjs` 等按字面量读这一段；
+ * `toolCreateDesc` 两段之间**没有空格**（历史上就是 `。' + 'every_seconds` 拼出来的），
+ * 一并保留，不要在「顺手修排版」时改它——那会连带改掉模型看到的提示词。
+ *
+ */
+const en: { [K in keyof typeof zh]: string } = {
+  toolCreateDesc: 'Create a scheduled reminder for the current session. Must provide a non-empty prompt and exactly one selector: after_seconds (positive integer delay), at (explicit offset time or {date,time,time_zone} local time), or every_seconds (≥300 fixed interval). time_zone is optional; defaults to session-detected timezone. Source is marked as user tool; GUI panel will display it.every_seconds is a **non-terminating** fixed interval (runs forever until deleted); when the user specifies a count limit (e.g., "remind me every hour for 3 times"), do NOT use every_seconds — instead **call this tool N times separately**, each with at giving the corresponding absolute time (t+1h, t+2h, t+3h).',
+  toolListDesc: 'List active scheduled reminders created by the user in the current session (includes id, UTC target, scheduled/overdue status, delivery mode).',
+  toolDeleteDesc: 'Delete an active reminder by the exact id returned from user_schedule_create / user_schedule_list; unknown or expired ids return deleted:false.',
+  paramPromptDesc: 'Reminder content (non-empty after trim). The limit follows the plugin setting "allow long prompts": 1000 characters by default, raisable in settings; an over-limit call returns invalid_prompt whose message states the currently allowed length.',
+  paramAfterSecondsDesc: 'Positive integer delay in seconds.',
+  paramEverySecondsDesc: 'Fixed interval in seconds, at least 300; non-terminating (for count limits, create multiple items with at instead).',
+  paramAtDesc: 'Absolute target: an RFC 3339 string with an explicit zone (ending in Z or ±HH:mm), or a {date, time, time_zone} local calendar object. Local time accepts HH:mm and HH:mm:ss (1-3 digit ms allowed); the plugin pads it to the HH:mm:ss the upstream requires. A string without any zone is rejected rather than guessed at.',
+  paramTimeZoneDesc: 'IANA timezone (e.g., Asia/Shanghai); optional, defaults to session-detected timezone.',
+  paramIdDesc: 'Exact session-internal schedule id.',
+  presentCreate: 'Create scheduled reminder',
+  presentList: 'List scheduled reminders',
+  presentDelete: 'Delete scheduled reminder',
+  cmdLaterDesc: 'Create a session-internal scheduled reminder (GUI internal channel).',
+  cmdScheduleDesc: 'Create a session-internal scheduled reminder (GUI internal channel).',
+  cmdListDesc: 'List scheduled reminders created by the user in the current session (GUI internal channel).',
+  cmdDeleteDesc: 'Delete a session-internal scheduled reminder (GUI internal channel).',
+  cmdEditDesc: 'Edit the content of a session-internal scheduled reminder (keeps original time; GUI internal channel).',
+  cmdPauseDesc: 'Pause an after-type scheduled reminder (GUI internal channel only; cannot pause if already due).',
+  cmdResumeDesc: 'Resume a paused after-type reminder (GUI internal channel only).',
+  cmdSteerDesc: 'Steer now: immediately push the specified reminder to the agent (one-shot only; GUI internal channel).',
+  errEmptyPrompt: 'Reminder content cannot be empty.',
+  errInvalidSelector: 'Must provide one of after_seconds, at, or every_seconds.',
+  errMultipleSelectors: 'Can only provide one of after_seconds, at, or every_seconds.',
+  errNotFuture: 'Time must be in the future.',
+  errTimeOutOfRange: 'Time is out of allowed range.',
+  errFrequencyTooHigh: 'Frequency is too high.',
+  errInvalidRule: 'Rule is invalid.',
+  errSubagentSession: 'This session belongs to subagent routing, which never receives reminder delivery.',
+  errScheduleNotFound: 'Reminder does not exist.',
+  errAlreadyOverdue: 'Reminder is already due.',
+  errQuotaExceeded: 'Reached task limit ({max} items).',
+  errPersistenceUncertain: 'Persistence uncertain.',
+  errUnsupportedKind: 'Unsupported operation type.',
+  errNotPaused: 'Reminder is not paused.',
+  errInternalError: 'Operation failed.',
+  warnSchedulerNotArmed: 'Warning: this session has no scheduler mounted, so this reminder will NOT fire. Restart the host process or open a new session and recreate it (sessions that existed before a plugin hot-reload may fail to remount).',
+
+
+  // ─── Tool error replies (task-7, src/user-tools.ts) ─────────────────────
+  // Appended by task-7; nothing above this line is modified. `errTool*` is kept distinct
+  // from the runtime `err*` keys above (those are short delivery/pause diagnostics).
+  // Placeholders are substituted by hostFormat via `{name}`; names are kept verbatim and
+  // each language is free to reorder them.
+  errToolPromptEmpty: 'Reminder content cannot be empty.',
+  errToolPromptTooLong: 'Reminder content cannot exceed {maxChars} characters.',
+  errToolCreateNotObject: 'The create argument must be an object.',
+  errToolSelectorExactlyOne: 'Exactly one of after_seconds / at / every_seconds must be provided.',
+  errToolTimeZoneInvalid: 'time_zone must be a valid IANA time zone.',
+  errToolAtNeedsZone: 'The at string must carry an explicit zone: RFC 3339 ending in Z or ±HH:mm (e.g. 2026-10-26T09:00:00+08:00). If the zone is unknown, pass the {date, time, time_zone} triple instead.',
+  errToolAtObjectMissing: 'The at object must contain date / time / time_zone.',
+  errToolAtBadDate: 'at.date must be YYYY-MM-DD (two digits each for month and day) and a day that actually exists.',
+  errToolAtBadTime: 'at.time must be HH:mm or HH:mm:ss (1-3 fractional digits allowed), e.g. 09:00, 9:30:15.5.',
+  errToolAtTimeZoneInvalid: 'at.time_zone must be a valid IANA time zone.',
+  errToolAtLocalGap: '{date} {time} is not a valid time in {timeZone} (that wall-clock interval may be skipped by daylight saving on that day).',
+  errToolAtShape: 'at must be a string or a {date, time, time_zone} object.',
+  errToolInternalFailed: 'The scheduled-task operation failed. Please try again.',
+  errToolPersistenceUnconfirmed: 'Task persistence is unconfirmed. Use user_schedule_list to verify before relying on this result.',
+  errToolLogUnreadable: 'Failed to read the session scheduling log.',
+  errToolQuotaFull: 'This session is limited to {maxSchedules} scheduled tasks. Delete some tasks first.',
+  errToolScheduleIdInvalid: 'schedule id must be a non-empty string with no surrounding whitespace.',
+  errToolUidInvalid: 'uid must be a non-empty string with no surrounding whitespace.',
+  errToolScheduleNotFoundById: 'Scheduled task {id} was not found.',
+  errToolEditOverdue: 'Scheduled task {id} is already past its target time, so its content cannot be edited; delete it and create a new one.',
+  errToolPauseNotFoundById: 'No pausable scheduled task {id} was found.',
+  errToolPauseUnsupportedKind: 'Only "in N minutes" (after) reminders can be paused.',
+  errToolPauseOverdue: 'This task is already due and cannot be paused; delete it or wait for delivery.',
+  errToolResumeNotFound: 'No paused task {uid} was found.',
+  cmdCreateHint: 'JSON payload, e.g. {"prompt":"check the build result","after_seconds":300}; also {"prompt":"…","at":{"date":"2026-08-21","time":"15:32","time_zone":"Asia/Shanghai"}}',
+  cmdListHint: 'No payload needed. Press Enter once to claim the command, then Enter again to run it (this is how every kernel command with input works)',
+  cmdIdHint: 'JSON payload, e.g. {"id":"schedule-…"}; a bare id also works: schedule-…',
+  cmdEditHint: 'JSON payload, e.g. {"id":"schedule-…","prompt":"the new reminder text"}',
+  cmdResumeHint: 'JSON payload, e.g. {"id":"schedule-…"} ({"uid":"…"} also works); a bare id also works: schedule-…',
+  quickScheduleDesc: 'Quick scheduled reminders: /schedule <time> <text>. Lenient time parsing: +30m, +1h30m, 30分钟后, 1532, 15:32, 9点半, 明天9点, 后天 10:00, 8月21日 15:32, 0821-1532, 2026-08-21 15:32. Repeated forms: +1h*3 (3 times at an even interval) and +1h+1h+0.5h (chained sequence, cumulative times), each expanded into separate tasks, at most 10, with at least 60s between repeats.',
+  quickScheduleHint: '<time> <text>, e.g. 1532 check the build result; also +30m, 明天9点, +1h*3, +1h+30m',
+  quickLaterDesc: 'Delayed send: /later <time> <text> sends that text as you when the time comes (not a reminder — a timed send); images/files can be attached and go out with the text. Same time formats as /schedule, including repeat forms: +1h*3 (N times at an even interval), +1h+1h+0.5h (relative sequence), 15:32+16:32 / 9:00+1d (wall-clock anchored sequence) expand into several timed sends (the same text and attachments each time). Repeat forms are experimental and can be turned off in the plugin setting "Advanced syntax".',
+  quickLaterHint: '<time> <text>, e.g. 1532 check the build result; images/files can be attached; several items with +1h*3 or +1h+30m; sends as you when the time comes',
+  replyMissingPayload: 'Missing JSON payload.',
+  replyPayloadNotObject: 'JSON payload must be an object.',
+  replyPayloadInvalid: 'Failed to parse JSON payload.',
+  replyCreateFailed: 'Creation failed.',
+  replySteerNotInjected: 'Steer handler is not injected.',
+  replySteerIdRequired: 'invalid_rule: schedule id is required.',
+  replyEditMissingPrompt: 'Nothing to change to: the /user-schedule-edit payload must give both id and prompt, e.g. {"id":"schedule-…","prompt":"the new reminder text"}.',
+  replyVerbWill: 'Will send',
+  replyVerbSet: 'Reminder set: ',
+  replyHintLaterOneShot: ' (sent as you when due)',
+  replyHintReminderOneShot: ' (cancel any time from the blue pending bar above the input box)',
+  replyHintLaterMulti: ' (each sent as you when due; cancel individually from the pending bar)',
+  replyHintReminderMulti: ' (each can be cancelled separately from the pending bar above the input box)',
+  replyExpanded: 'Expanded into {count} tasks: {times}',
+  replyWithAttachments: ' (with {count} attachments)',
+  replyPartial: ' | Note: only {created}/{total} were created, {failure}',
+  replyPartsJoined: ' | ',
+  replyQuoted: '"{content}"',
+  parseUsage: 'Usage: /schedule <time> <text>, e.g. /schedule 1532 check the build result',
+  parseUnrecognized: 'Unrecognized time format. Supported: +30m, 1532, 15:32, 30分钟后, 明天9点, 2026-08-21 15:32; repeat +1h*3; sequence +1h+1h+0.5h.',
+  parseUnrecognizedSpec: 'Unrecognized time format. Supported: +30m, 1532, 15:32, 30分钟后, 明天9点, and similar.',
+  parseDanglingSuffix: 'The time expression is followed by another duration/count that was not applied. For several times write +1h*3 (3 times at an even interval) or 15:32+16:32, 9:00+1d (sequence, separated by +); leave a space after the count. If that part is your text, please reword it.',
+  parseSpecMultiOnly: 'Repeat/sequence forms expand into several tasks and are only supported by /schedule and /later; for a single item write one time such as +1h.',
+  parseSpecChainOnly: 'An anchored sequence expands into several tasks and is only supported by /schedule and /later; for a single item write only one time.',
+  parseAdvancedDisabled: 'Repeat forms (+1h*3, +1h+1h+0.5h, 15:32+16:32) are an experimental feature ("Advanced syntax") that is currently turned off in settings. To enable: Settings → Plugins → Scheduled reminders → Advanced syntax.',
+  parseInternalUnhandled: 'Internal error: repeat form was not expanded.',
+  parseInvalidField: 'Invalid date or time value.',
+  parseDateNotExist: 'That date does not exist.',
+  parseTimePassed: 'The target time has already passed.',
+  parseTimePassedToday: 'That time has already passed today; use "tomorrow" or a specific date.',
+  parseTimeUnresolvable: 'Cannot resolve the target time.',
+  parseAnchorNotAbsolute: 'The anchor must be an absolute time.',
+  parseDstSkipped: '{date} {hhmm} does not exist in {timeZone} (daylight saving skipped it); pick another time or timezone.',
+  parseChainStepInvalid: 'Invalid time in the sequence.',
+  parseOccurrencesTooMany: 'At most {max} at a time (repeat forms expand into that many one-shot tasks and count against the session quota).',
+  parseOccurrencesTooTight: 'Repeat forms need at least {minSeconds} seconds between items; for a single one you can omit the count.',
+  parseRepeatNotPositive: 'The repeat count must be a positive integer, e.g. +1h*3, +30m×2.',
+  parseRepeatTooMany: 'Too many repeats ({count}). {detail}',
+  parseSegmentsTooMany: 'Time sequence too long ({count} segments). {detail}',
+  parseChainTooMany: 'Time sequence too long ({count} times). The limit is {max}.',
+  parseGapTooTight: 'Two adjacent times are {gapSeconds} seconds apart; repeat forms need at least {minSeconds} seconds between them.',
+  parseContentEmpty: 'Reminder text cannot be empty.',
+  parseContentTooLong: 'Reminder text cannot exceed {chars} characters.',
+  relOverdue: 'overdue',
+  relSoon: 'sending soon',
+  relMinutes: 'in ~{m} min',
+  relHours: 'in ~{h} h',
+  relHoursMinutes: 'in ~{h} h {m} min',
+  relDays: 'in ~{d} days',
+};
+
+/**
+ * 单语言文案字典类型（宽化为 string）。
+ *
+ * @deprecated 只作对外兼容保留（`skill.ts` 用它标 `skillFilePaths` 的返回类型）。新代码请
+ * 直接用 `HostStrings` 这个**已宽化**的映射，或就地写 `{ [K in keyof typeof zh]: string }`，
+ * 理由见 `ui.ts` 的 `schedDicts` 注释：别名会让「整块串门」失去编译期报错。
+ */
+export type HostStrings = { [K in keyof typeof zh]: string };
+
+/**
+ * 宿主侧字典的键联合。`src/user-tools.ts` / `src/commands.ts` 新增回执键时靠它保证拼写，
+ * 也保证 8 门齐全（每门都是 `keyof typeof zh` 的映射类型）。
+ */
+export type HostUIKey = keyof typeof zh;
+
+/**
+ * 全部 8 门宿主字典。每门就地标注映射类型，不复用 `HostStrings` 别名（同上）。
+ */
+export const hostDicts: Record<LocaleId, { [K in keyof typeof zh]: string }> = {
+  zh,
+  en,
+  ja: jaDict,
+  es: esDict,
+  fr: frDict,
+  de: deDict,
+  ru: ruDict,
+  pt: ptDict,
+};
+
+/**
+ * 按 locale id 取宿主字典；未收录 id 回退中文。
+ * @param localeId - 宿主 locale 服务的 active id（可为 undefined）。
+ * @returns 该语言字典；未收录回退 `zh`。
+ */
+export function hostDictFor(localeId: string | undefined): { [K in keyof typeof zh]: string } {
+  return hostDicts[isLocaleId(localeId) ? localeId : 'zh'];
+}
+
+/** 把 {maxChars} / {count} 类占位符替换为参数。 */
+export function hostFormat(template: string, params: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) =>
+    key in params ? String(params[key]) : `{${key}}`,
+  );
+}

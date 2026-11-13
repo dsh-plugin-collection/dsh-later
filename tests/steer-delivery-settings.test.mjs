@@ -53,7 +53,9 @@ test('steer 风险提示常驻，且随「投递确认」开关切换口径', ()
 });
 
 test('中英文案齐备（漏英文会回落中文，难以察觉）', () => {
-  const src = read('client/index.tsx');
+  // 设置卡词条搬家：`client/index.tsx` 里现在只剩 `mergedFor()` 调用，文案在
+  // `client/locales/settings.ts`。断言仍是「每个 key 至少出现两次（zh + en）」。
+  const src = read('client/locales/settings.ts');
   for (const key of [
     'steerDeliveryLabel',
     'steerDeliveryOption_followup',
@@ -83,10 +85,18 @@ test('dock 的未确认提示走投影对账（不依赖命令返回值）', () 
 });
 
 test('dock 文案齐备', () => {
-  const src = read('client/strings.ts');
+  // dock UI 词条搬家：`client/strings.ts` 现在只放 CLIENT_ERR 令牌，字典在
+  // `client/locales/ui.ts`。这两条是 dock 词条，取 8 门里各自的 zh/en 两份——
+  // 字典扩到 8 门后同一个 key 共出现 8 次，所以这里按「zh 一条 + en 一条」精确计数，
+  // 而不是继续要求整文件恰好 2 次（那会把扩语言误判成回归）。
+  const src = read('client/locales/ui.ts');
+  const zhBlock = src.slice(src.indexOf('export const zh = {'), src.indexOf('} as const;'));
+  const enBlock = src.slice(src.indexOf('const en: { [K in keyof typeof zh]: string } = {'));
   for (const key of ['steerUnconfirmed', 'steerRetry']) {
-    const hits = src.split(`${key}:`).length - 1;
-    assert.equal(hits, 2, `${key} 应中英各一份，实际 ${hits} 份`);
+    const zhHits = zhBlock.split(`${key}:`).length - 1;
+    const enHits = enBlock.split(`${key}:`).length - 1;
+    assert.equal(zhHits, 1, `${key} 在 zh 字典里应恰好一份，实际 ${zhHits} 份`);
+    assert.equal(enHits, 1, `${key} 在 en 字典里应恰好一份，实际 ${enHits} 份`);
   }
 });
 

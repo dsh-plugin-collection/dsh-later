@@ -26,7 +26,7 @@ import {
   tooltipPortalProps,
 } from '../primitives-compat.js';
 import { detectTimeZone, formatHhmm } from '../../time-utils.js';
-import type { SchedStrings } from '../strings.js';
+import type { SchedStrings } from '../locales/ui.js';
 import { useNow } from '../useCountdown.js';
 import { useSchedT, type SchedTranslate } from '../useSchedT.js';
 import type { CommandOutcome } from '../command-outcome.js';
