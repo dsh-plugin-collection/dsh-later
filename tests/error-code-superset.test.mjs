@@ -288,14 +288,17 @@ test('UserScheduleErrorCode 是上游 ScheduleInputError.code 的超集（#54）
     missing,
     [],
     `本插件 UserScheduleErrorCode 缺少上游 code：${missing.join(', ')}。` +
-      '请在 src/user-tools.ts 的联合里追加，并在 src/strings.ts 的 zh/en 字典补 err* 文案。',
+      '请在 src/user-tools.ts 的联合里追加，并在 src/locales/host.ts 的 zh/en 字典补 err* 文案。',
   );
 });
 
 test('subagent_session 具备 zh / en 两套文案（#54）', () => {
-  const source = readFileSync(resolve(root, 'src/strings.ts'), 'utf8');
+  // 字典搬家后读真实落点：8 门宿主文案在 `src/locales/host.ts`。`src/strings.ts` 现在只剩
+  // 再导出与 `HostLocaleId`，在那里 grep 只会拿到 0 条——那是"找不到"，不是"文案没了"。
+  // 断言本身没变：zh / en 各一条、非空、第一条是中文、两条不相等。
+  const source = readFileSync(resolve(root, 'src', 'locales', 'host.ts'), 'utf8');
   const messages = [...source.matchAll(/errSubagentSession:\s*'([^']*)'/g)].map((match) => match[1]);
-  assert.equal(messages.length, 2, 'src/strings.ts 的 zh / en 字典应各有一条 errSubagentSession');
+  assert.equal(messages.length, 2, 'src/locales/host.ts 的 zh / en 字典应各有一条 errSubagentSession');
   for (const message of messages) {
     assert.ok(message.trim().length > 0, 'errSubagentSession 文案不能为空');
   }

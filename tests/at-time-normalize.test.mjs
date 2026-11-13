@@ -291,7 +291,10 @@ test('守门人与面板不再各写一份时间正则', () => {
 });
 
 test('工具描述与守门人口径一致（模型看得见的文法不能比实现严或松）', () => {
-  const src = readFileSync(resolvePath(import.meta.dirname, '..', 'src/strings.ts'), 'utf8');
+  // 字典搬家后读真实落点：宿主侧 8 语言文案在 `src/locales/host.ts`（曾内联在
+  // `src/strings.ts`，那个文件现在只剩再导出 + `HostLocaleId`，没有字面量可抓）。
+  // 断言的仍是"zh / en 两段各自写了什么"，没有放宽。
+  const src = readFileSync(resolvePath(import.meta.dirname, '..', 'src/locales/host.ts'), 'utf8');
   const zh = src.slice(src.indexOf('paramAtDesc:'), src.indexOf('paramTimeZoneDesc:'));
   assert.match(zh, /HH:mm/, '中文描述要写清接受的形状');
   assert.match(zh, /时区/, '要说明无偏移串会被拒这件事');

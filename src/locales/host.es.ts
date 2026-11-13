@@ -1,0 +1,154 @@
+/**
+ * 宿主侧微文案 —— Spanish（机器初翻，**未经母语审校**）。
+ *
+ * ⚠️ 状态声明：本文件由机器翻译产出，只做过「占位符逐字保留、专有名词不译、无零宽字符」
+ * 三项机械校验，**没有**经过西班牙语母语者审校。
+ *
+ * 这里的文本会进**模型的 system-prompt**（工具描述与参数说明）。翻错比翻丑的代价大：
+ * 它可能让模型把 `at` 写成不带时区的字符串、或者把 `every_seconds` 当成「有次数上限」。
+ * 所以这几条措辞在审校时优先级最高。
+ *
+ * 不翻译的：`after_seconds` / `at` / `every_seconds` / `time_zone` / `prompt` / `id`
+ * 这些**字段名**，`after` / `at` / `every` 这些 kind 名，`user_schedule_*` 工具名，
+ * `{date, time, time_zone}` 与 `HH:mm` / `RFC 3339` / `IANA` / `UTC` / `GUI` / `DSH`，
+ * 以及 `invalid_prompt` / `deleted:false` 这类回执取值。
+ *
+ * @module dsh-later/locales/host.es
+ */
+import type { zh } from './host.js';
+
+const dict: { [K in keyof typeof zh]: string } = {
+  toolCreateDesc: 'Crea un recordatorio programado en la sesión actual. Debes proporcionar un prompt no vacío y exactamente un selector: after_seconds (retardo en segundos, entero positivo), at (hora con desplazamiento explícito u hora local {date,time,time_zone}) o every_seconds (intervalo fijo en segundos, ≥300). time_zone es opcional; por defecto se usa la zona detectada de la sesión. El origen se marca como herramienta de usuario y el panel de la GUI lo mostrará. every_seconds es un intervalo fijo **sin condición de fin** (se repite indefinidamente hasta que el usuario lo elimine); si el usuario indica un número máximo de veces (p. ej. «recuérdame cada hora 3 veces»), NO uses every_seconds: **llama a esta herramienta N veces por separado**, cada una con at indicando la hora absoluta correspondiente (t+1h, t+2h, t+3h).',
+  toolListDesc: 'Lista los recordatorios programados activos creados por el usuario en la sesión actual (incluye id, objetivo en UTC, estado scheduled/overdue y modo de entrega).',
+  toolDeleteDesc: 'Elimina un recordatorio activo con el id exacto devuelto por user_schedule_create / user_schedule_list; un id desconocido o ya terminado devuelve deleted:false.',
+  paramPromptDesc: 'Contenido del recordatorio (no vacío tras recortar). El límite lo fija el ajuste del plugin «permitir prompts largos»: 1000 caracteres por defecto, ampliable en los ajustes; una llamada que lo exceda devuelve invalid_prompt y el mensaje indica la longitud permitida en ese momento.',
+  paramAfterSecondsDesc: 'Retardo en segundos, entero positivo.',
+  paramEverySecondsDesc: 'Intervalo fijo en segundos, como mínimo 300; sin condición de fin (si hay un límite de veces, crea varios elementos con at).',
+  paramAtDesc: 'Objetivo absoluto: una cadena RFC 3339 con zona explícita (terminada en Z o ±HH:mm), o un objeto de calendario local {date, time, time_zone}. La hora local admite HH:mm y HH:mm:ss (se permiten 1–3 dígitos de milisegundos); el plugin la completa al HH:mm:ss que exige el upstream. Una cadena sin ninguna información de zona se rechaza en lugar de adivinarla.',
+  paramTimeZoneDesc: 'Zona horaria IANA (p. ej. Asia/Shanghai); opcional, por defecto la zona detectada de la sesión.',
+  paramIdDesc: 'Id exacto del schedule dentro de la sesión.',
+  presentCreate: 'Crear recordatorio programado',
+  presentList: 'Listar recordatorios programados',
+  presentDelete: 'Eliminar recordatorio programado',
+  cmdLaterDesc: 'Crea un recordatorio programado dentro de la sesión (canal interno de la GUI).',
+  cmdScheduleDesc: 'Crea un recordatorio programado dentro de la sesión (canal interno de la GUI).',
+  cmdListDesc: 'Lista los recordatorios programados creados por el usuario en la sesión actual (canal interno de la GUI).',
+  cmdDeleteDesc: 'Elimina un recordatorio programado dentro de la sesión (canal interno de la GUI).',
+  cmdEditDesc: 'Modifica el contenido de un recordatorio programado dentro de la sesión (conserva la hora original; canal interno de la GUI).',
+  cmdPauseDesc: 'Pausa un recordatorio programado de tipo after (solo canal interno de la GUI; no se puede pausar si ya venció).',
+  cmdResumeDesc: 'Reanuda un recordatorio de tipo after pausado (solo canal interno de la GUI).',
+  cmdSteerDesc: 'Enviar ahora: entrega de inmediato al agent el recordatorio con el id indicado (solo one-shot; canal interno de la GUI).',
+  errEmptyPrompt: 'El contenido del recordatorio no puede estar vacío.',
+  errInvalidSelector: 'Debes proporcionar uno de after_seconds, at o every_seconds.',
+  errMultipleSelectors: 'Solo puedes proporcionar uno de after_seconds, at o every_seconds.',
+  errNotFuture: 'La hora debe estar en el futuro.',
+  errTimeOutOfRange: 'La hora está fuera del rango permitido.',
+  errFrequencyTooHigh: 'La frecuencia es demasiado alta.',
+  errInvalidRule: 'La regla no es válida.',
+  errSubagentSession: 'Esta sesión pertenece a una delegación de subagente y nunca recibirá entregas de recordatorios.',
+  errScheduleNotFound: 'El recordatorio no existe.',
+  errAlreadyOverdue: 'El recordatorio ya venció.',
+  errQuotaExceeded: 'Se alcanzó el límite de tareas ({max} elementos).',
+  errPersistenceUncertain: 'Persistencia incierta.',
+  errUnsupportedKind: 'Tipo de operación no admitido.',
+  errNotPaused: 'El recordatorio no está en pausa.',
+  errInternalError: 'La operación falló.',
+  warnSchedulerNotArmed: 'Aviso: esta sesión no tiene el planificador montado, así que este recordatorio NO se activará. Reinicia el proceso del host o abre una sesión nueva y vuelve a crearlo (las sesiones que ya existían antes de una recarga en caliente del plugin pueden no remontarse).',
+
+  // ─── 工具错误回执（task-7，src/user-tools.ts）— machine-translated block ──
+  // 与 zh 侧同名区块一一对应；占位符 {maxChars} / {date} / {time} / {timeZone} /
+  // {maxSchedules} / {id} / {uid} 逐字保留，位置按本语言语序调整。
+  errToolPromptEmpty: 'El contenido del recordatorio no puede estar vacío.',
+  errToolPromptTooLong: 'El contenido del recordatorio no puede superar {maxChars} caracteres.',
+  errToolCreateNotObject: 'El argumento de create debe ser un objeto.',
+  errToolSelectorExactlyOne: 'Se debe proporcionar exactamente uno de after_seconds / at / every_seconds.',
+  errToolTimeZoneInvalid: 'time_zone debe ser una zona horaria IANA válida.',
+  errToolAtNeedsZone: 'La cadena at debe incluir una zona explícita: RFC 3339 terminada en Z o ±HH:mm (p. ej. 2026-10-26T09:00:00+08:00). Si se desconoce la zona, pase la terna {date, time, time_zone}.',
+  errToolAtObjectMissing: 'El objeto at debe contener date / time / time_zone.',
+  errToolAtBadDate: 'at.date debe ser YYYY-MM-DD (dos dígitos para mes y día) y un día que exista realmente.',
+  errToolAtBadTime: 'at.time debe ser HH:mm o HH:mm:ss (se permiten 1–3 dígitos fraccionarios), p. ej. 09:00, 9:30:15.5.',
+  errToolAtTimeZoneInvalid: 'at.time_zone debe ser una zona horaria IANA válida.',
+  errToolAtLocalGap: '{date} {time} no es una hora válida en {timeZone} (ese intervalo puede ser saltado por el horario de verano en esa fecha).',
+  errToolAtShape: 'at debe ser una cadena o un objeto {date, time, time_zone}.',
+  errToolInternalFailed: 'La operación de tarea programada falló. Inténtelo de nuevo.',
+  errToolPersistenceUnconfirmed: 'No se ha confirmado la persistencia de la tarea. Use user_schedule_list para verificarla antes de fiarse de este resultado.',
+  errToolLogUnreadable: 'No se pudo leer el registro de programación de la sesión.',
+  errToolQuotaFull: 'Esta sesión admite como máximo {maxSchedules} tareas programadas. Elimine primero algunas tareas.',
+  errToolScheduleIdInvalid: 'schedule id debe ser una cadena no vacía y sin espacios al inicio ni al final.',
+  errToolUidInvalid: 'uid debe ser una cadena no vacía y sin espacios al inicio ni al final.',
+  errToolScheduleNotFoundById: 'No se encontró la tarea programada {id}.',
+  errToolEditOverdue: 'La tarea programada {id} ya superó su hora objetivo, por lo que no se puede editar su contenido; elimínela y cree una nueva.',
+  errToolPauseNotFoundById: 'No se encontró una tarea programada pausable {id}.',
+  errToolPauseUnsupportedKind: 'Solo se pueden pausar los recordatorios del tipo "en N minutos" (after).',
+  errToolPauseOverdue: 'La tarea ya ha llegado a su hora y no se puede pausar; elimínela o espere el envío.',
+  errToolResumeNotFound: 'No se encontró ninguna tarea en pausa {uid}.',
+
+  // ─── Superficie de comandos (task-8, src/commands.ts) — machine-translated block ──
+  // Correspondencia 1:1 con las claves de zh. Los marcadores {count} / {times} / {created} /
+  // {total} / {failure} / {content} / {max} / {minSeconds} / {gapSeconds} / {date} /
+  // {hhmm} / {timeZone} / {detail} se mantienen literalmente.
+  // ⚠️ No se traducen los nombres de comando /schedule, /later, /user-schedule-edit, los
+  // campos id / prompt / uid ni los ejemplos de entrada (+1h*3, 1532, 15:32, 30分钟后,
+  // 明天9点…): el usuario los escribe tal cual en la caja de entrada; traducidos, el
+  // analizador ya no los acepta.
+  cmdCreateHint: 'Carga JSON, p. ej. {"prompt":"comprobar el resultado de la compilación","after_seconds":300}; también vale {"prompt":"…","at":{"date":"2026-08-21","time":"15:32","time_zone":"Asia/Shanghai"}}',
+  cmdListHint: 'No hace falta carga. Pulsa Intro una vez para reclamar el comando y otra vez para ejecutarlo (así funcionan todos los comandos del kernel con input)',
+  cmdIdHint: 'Carga JSON, p. ej. {"id":"schedule-…"}; también sirve un id suelto: schedule-…',
+  cmdEditHint: 'Carga JSON, p. ej. {"id":"schedule-…","prompt":"el nuevo texto del recordatorio"}',
+  cmdResumeHint: 'Carga JSON, p. ej. {"id":"schedule-…"} (también {"uid":"…"}); o un id suelto: schedule-…',
+  quickScheduleDesc: 'Comando rápido de recordatorios: /schedule <hora> <texto>. Interpretación flexible de la hora: +30m, +1h30m, 30分钟后, 1532, 15:32, 9点半, 明天9点, 后天 10:00, 8月21日 15:32, 0821-1532, 2026-08-21 15:32. Formas múltiples: +1h*3 (3 veces a intervalo fijo) y +1h+1h+0.5h (secuencia encadenada, horas acumuladas), cada una se expande en tareas independientes, como máximo 10 y con al menos 60 s entre repeticiones.',
+  quickScheduleHint: '<hora> <texto>, p. ej. 1532 comprobar el resultado de la compilación; también +30m, 明天9点, +1h*3, +1h+30m',
+  quickLaterDesc: 'Envío diferido: /later <hora> <texto> envía ese texto en tu nombre cuando llega la hora (no es un recordatorio, es un envío programado); admite imágenes/archivos, que salen junto con el texto. Mismos formatos de hora que /schedule, incluidas las formas múltiples: +1h*3 (N veces a intervalo fijo), +1h+1h+0.5h (secuencia relativa), 15:32+16:32 / 9:00+1d (secuencia anclada al reloj de pared) se expanden en varios envíos programados (el mismo texto y adjuntos en cada uno). Las formas múltiples son experimentales y pueden desactivarse en el ajuste «Sintaxis avanzada» del plugin.',
+  quickLaterHint: '<hora> <texto>, p. ej. 1532 comprobar el resultado de la compilación; admite imágenes/archivos; varios con +1h*3 o +1h+30m; se envía en tu nombre cuando llega la hora',
+  replyMissingPayload: 'Falta la carga JSON.',
+  replyPayloadNotObject: 'La carga JSON debe ser un objeto.',
+  replyPayloadInvalid: 'No se pudo analizar la carga JSON.',
+  replyCreateFailed: 'No se pudo crear.',
+  replySteerNotInjected: 'El manejador de interrupción no está inyectado.',
+  replySteerIdRequired: 'invalid_rule: schedule id es obligatorio.',
+  replyEditMissingPrompt: 'Falta el nuevo texto: la carga de /user-schedule-edit debe incluir id y prompt, p. ej. {"id":"schedule-…","prompt":"el nuevo texto del recordatorio"}.',
+  replyVerbWill: 'Se enviará el',
+  replyVerbSet: 'Recordatorio programado: ',
+  replyHintLaterOneShot: ' (se envía en tu nombre cuando llega la hora)',
+  replyHintReminderOneShot: ' (puedes cancelarlo en cualquier momento desde la barra azul de pendientes sobre la caja de entrada)',
+  replyHintLaterMulti: ' (se envía en tu nombre uno a uno cuando llega la hora; se cancelan por separado desde la barra de pendientes)',
+  replyHintReminderMulti: ' (cada uno se cancela por separado desde la barra de pendientes sobre la caja de entrada)',
+  replyExpanded: 'Expandido en {count} tareas: {times}',
+  replyWithAttachments: ' (con {count} adjuntos)',
+  replyPartial: ' | Nota: solo se crearon {created}/{total}, {failure}',
+  replyPartsJoined: ' | ',
+  replyQuoted: '«{content}»',
+  parseUsage: 'Uso: /schedule <hora> <texto>, p. ej. /schedule 1532 comprobar el resultado de la compilación',
+  parseUnrecognized: 'Formato de hora no reconocido. Admitidos: +30m, 1532, 15:32, 30分钟后, 明天9点, 2026-08-21 15:32; repetición +1h*3; secuencia +1h+1h+0.5h.',
+  parseUnrecognizedSpec: 'Formato de hora no reconocido. Admitidos: +30m, 1532, 15:32, 30分钟后, 明天9点, etc.',
+  parseDanglingSuffix: 'Tras la expresión de hora viene otro tramo de duración/repetición que no se aplicó. Para varias horas escribe +1h*3 (3 veces a intervalo fijo) o 15:32+16:32, 9:00+1d (secuencia separada por +); deja un espacio después del recuento. Si esa parte es tu texto, reformúlalo.',
+  parseSpecMultiOnly: 'Las formas múltiples/secuencia se expanden en varias tareas y solo las admiten /schedule y /later; para un solo elemento escribe una única hora como +1h.',
+  parseSpecChainOnly: 'Una secuencia anclada se expande en varias tareas y solo la admiten /schedule y /later; para un solo elemento escribe una sola hora.',
+  parseAdvancedDisabled: 'Las formas múltiples (+1h*3, +1h+1h+0.5h, 15:32+16:32) son una función experimental («Sintaxis avanzada») desactivada actualmente en los ajustes. Para activarla: Ajustes → Plugins → Recordatorios programados → Sintaxis avanzada.',
+  parseInternalUnhandled: 'Error interno: la forma múltiple no se expandió.',
+  parseInvalidField: 'Valor de fecha u hora no válido.',
+  parseDateNotExist: 'Esa fecha no existe.',
+  parseTimePassed: 'La hora objetivo ya pasó.',
+  parseTimePassedToday: 'Esa hora ya pasó hoy; usa «mañana» o una fecha concreta.',
+  parseTimeUnresolvable: 'No se puede determinar la hora objetivo.',
+  parseAnchorNotAbsolute: 'El ancla debe ser una hora absoluta.',
+  parseDstSkipped: 'Las {hhmm} del {date} no existen en {timeZone} (el cambio de horario de verano saltó esa hora); elige otra hora o zona horaria.',
+  parseChainStepInvalid: 'Hora no válida en la secuencia.',
+  parseOccurrencesTooMany: 'Como máximo {max} a la vez (las formas múltiples se expanden en ese número de tareas de un solo uso y consumen la cuota de la sesión).',
+  parseOccurrencesTooTight: 'Las formas múltiples necesitan al menos {minSeconds} segundos entre elementos; para uno solo puedes omitir el recuento.',
+  parseRepeatNotPositive: 'El número de repeticiones debe ser un entero positivo, p. ej. +1h*3, +30m×2.',
+  parseRepeatTooMany: 'Demasiadas repeticiones ({count}). {detail}',
+  parseSegmentsTooMany: 'Secuencia de horas demasiado larga ({count} tramos). {detail}',
+  parseChainTooMany: 'Secuencia de horas demasiado larga ({count} horas). El límite es {max}.',
+  parseGapTooTight: 'Dos horas contiguas distan {gapSeconds} segundos; las formas múltiples necesitan al menos {minSeconds} segundos entre ellas.',
+  parseContentEmpty: 'El texto del recordatorio no puede estar vacío.',
+  parseContentTooLong: 'El texto del recordatorio no puede superar los {chars} caracteres.',
+  relOverdue: 'vencido',
+  relSoon: 'se enviará pronto',
+  relMinutes: 'en ~{m} min',
+  relHours: 'en ~{h} h',
+  relHoursMinutes: 'en ~{h} h {m} min',
+  relDays: 'en ~{d} días',
+};
+
+export default dict;

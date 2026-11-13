@@ -28,7 +28,91 @@ import { DEFAULT_MAX_SCHEDULES } from './user-tools.js';
 import type { CommandInputWithAttachments } from './upstream-shims.js';
 import { epochFromLocal, localFieldsOf } from './smart-window.js';
 import { detectTimeZone, formatAbsolute, formatHhmm, formatRelative } from './time-utils.js';
-import { hostDictFor } from './strings.js';
+import type { TextLocale } from './time-utils.js';
+import { hostDictFor, hostFormat } from './strings.js';
+import type { HostUIKey } from './locales/host.js';
+import { isLocaleId } from './locales/locale-id.js';
+
+/**
+ * 命令面的活动语言作用域。
+ *
+ * ## 为什么与 `user-tools.ts` 用同一套「栈 + 活动作用域」而不是加形参
+ *
+ * 命令面的中文散在三层：命令工厂（handler 回执）、解析器（`parseScheduleInput` 等
+ * 同步纯函数）、以及它们调用到的 `expandOccurrences` / `resolveTarget` / `resolveChain`。
+ * 给每层加一个 locale 形参意味着改十几个签名，且**可选形参会静默失效**——某个层忘了
+ * 透传就悄悄退回中文，正是本轮要修的缺陷。作用域是压栈的，一次进入覆盖整条调用链，
+ * 不需要逐层透传。
+ *
+ * ## 为什么这里不复用 `user-tools.ts` 的 `enterHostLocale`
+ *
+ * 那个栈是 `user-tools.ts` 的私有状态，而本模块的**解析函数是导出的**，被
+ * `tests/occurrences.test.mjs` 等直接以 `(raw, now, tz)` 调用（不进入任何作用域）。
+ * 两模块各持一个栈，语义都是「无作用域 ⇒ zh」，互不干扰；反过来把 commands 的
+ * 作用域压到 user-tools 的栈上，会让「命令层包工具层」时内层读到的是外层强加的
+ * 语言，遮蔽 user-tools 自己按 locale 服务取值的路径。各自持有、各自由入口进入，
+ * 责任边界清楚。
+ *
+ * ⚠️ 所有路径都是**同步**的（不 await 跨作用域），所以裸栈就够，不需要
+ * AsyncLocalStorage。handler 里 `await` 之前的解析与之后的回执都在同一个
+ * `try/finally` 内，`finally` 弹出的是自己压的那一层。
+ */
+let localeStack: string[] = [];
+
+/** 当前活动作用域的语言 id；无作用域返回 undefined（调用方据此回退 zh）。 */
+export function currentCommandLocale(): string | undefined {
+  return localeStack.length > 0 ? localeStack[localeStack.length - 1] : undefined;
+}
+
+/**
+ * 进入一个语言作用域，返回退出函数（幂等）。
+ *
+ * 用法：`const exit = enterCommandLocale(getLocale()); try { … } finally { exit(); }`
+ * @param locale - 宿主 locale 服务的 active id；未收录或 `undefined` 一律按 zh。
+ */
+export function enterCommandLocale(locale: string | undefined): () => void {
+  localeStack.push(locale ?? 'zh');
+  let popped = false;
+  return () => {
+    if (popped) return;
+    popped = true;
+    localeStack.pop();
+  };
+}
+
+/** 清空作用域栈（仅供测试在用例之间复位，避免异常用例把语言泄漏给下一条）。 */
+export function resetCommandLocaleForTest(): void {
+  localeStack = [];
+}
+
+/**
+ * 当前作用域下**已校验**的语言 id。
+ *
+ * 字典与时间格式化是两套机制：`hostDictFor` 自己会回退，而 `formatRelative` 的
+ * `locale` 形参只认这 8 个 id，传进去一个未收录的串会落到「非 en 即中文」分支。
+ * 所以在边界上先归一，两套机制读同一个值，不会出现「文案英文、相对时间中文」。
+ */
+function activeLocale(): TextLocale {
+  const id = currentCommandLocale();
+  return isLocaleId(id) ? id : 'zh';
+}
+
+/** 当前作用域的宿主字典。 */
+function tr(): ReturnType<typeof hostDictFor> {
+  return hostDictFor(currentCommandLocale());
+}
+
+/**
+ * 按当前作用域渲染一条带占位符的回执。
+ *
+ * 用 `{name}` 占位符而**不是**模板字符串拼接：拼接把语序固化进代码（中文
+ * 「{date} 的 {hhmm} 在 {timeZone} 不存在」与德语「{date} {hhmm} gibt es in
+ * {timeZone} nicht」语序相反），那正是多语言最常见的错法。参数名逐字保留，
+ * 位置由各语言译文自己决定。
+ */
+function tf(key: HostUIKey, params: Record<string, string | number> = {}): string {
+  return hostFormat(tr()[key], params);
+}
 
 /**
  * 用户创建/删除成功后的通知回调（宿主用它重驱用户调度器）。
@@ -61,15 +145,15 @@ function renderError(message: string): CommandResult {
 /** 解析 JSON 载荷；非法返回错误描述。 */
 function parsePayload(rawInput: string): { ok: true; value: unknown } | { ok: false; text: string } {
   const text = rawInput.trim();
-  if (text.length === 0) return { ok: false, text: '缺少 JSON 载荷。' };
+  if (text.length === 0) return { ok: false, text: tr().replyMissingPayload };
   try {
     const value = JSON.parse(text);
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      return { ok: false, text: 'JSON 载荷必须是一个对象。' };
+      return { ok: false, text: tr().replyPayloadNotObject };
     }
     return { ok: true, value };
   } catch {
-    return { ok: false, text: 'JSON 载荷解析失败。' };
+    return { ok: false, text: tr().replyPayloadInvalid };
   }
 }
 
@@ -93,7 +177,7 @@ const BARE_ID_RE = /^schedule-[\w-]+$/;
  */
 export function coercePayload(rawInput: string): { ok: true; value: unknown } | { ok: false; text: string } {
   const text = rawInput.trim();
-  if (text.length === 0) return { ok: false, text: '缺少 JSON 载荷。' };
+  if (text.length === 0) return { ok: false, text: tr().replyMissingPayload };
   if (BARE_ID_RE.test(text)) return { ok: true, value: { id: text } };
   return parsePayload(text);
 }
@@ -131,10 +215,18 @@ export interface ScheduleSyntaxOptions {
   readonly advancedSyntax?: boolean;
 }
 
-/** 关闭高级语法时的统一提示：说清去哪儿开，而不是只说"不支持"。 */
-export const ADVANCED_SYNTAX_DISABLED =
-  '多次写法（+1h*3、+1h+1h+0.5h、15:32+16:32）属于实验性功能「高级语法」，当前已在设置中关闭。' +
-  '开启路径：设置 → 插件 → 定时提醒 → 高级语法。';
+/**
+ * 关闭高级语法时的统一提示（**兼容导出**，恒为中文）。
+ *
+ * 为什么保留而不是删掉：`docs/ui/08-microcopy.md` 与 `CHANGELOG.md` 按名字引用它，
+ * 删常量会牵出作用域外的文档改动，收益不值风险。
+ *
+ * 为什么它是「恒为中文」而不是「跟随 locale」：它是个**模块级常量**，在任何 locale
+ * 作用域之外求值；让它跟随语言只能做成函数，那就等于改了对外的符号形状。
+ * 真正的回执（`parseScheduleInput` 被拒时）走 `tr().parseAdvancedDisabled`，
+ * 跟随宿主语言；这个常量只留给文档与依赖它的旧调用方。
+ */
+export const ADVANCED_SYNTAX_DISABLED: string = hostDictFor('zh').parseAdvancedDisabled;
 
 /** 该时间写法是否属于高级语法（等间隔重复 / 相对序列 / 绝对锚点序列）。 */
 function isMultiForm(target: TargetMatch['target']): boolean {
@@ -285,21 +377,28 @@ type OccurrenceExpansion = { ok: true; segments: readonly number[] } | { ok: fal
 function expandOccurrences(target: TargetMatch['target']): OccurrenceExpansion | undefined {
   if (target.kind !== 'repeats' && target.kind !== 'sequence') return undefined;
 
-  const tooMany = `一次最多 ${MAX_OCCURRENCES} 条（多次写法会展开成同等数量的一次性任务，并受会话总额度约束）。`;
-  const tooTight = `多次写法的间隔至少 ${MIN_OCCURRENCE_INTERVAL_SECONDS} 秒；只想发一条可以不带次数。`;
+  // ⚠️ `tooMany` / `tooTight` 是**被拼进别的句子**的半句（`重复次数过多（N 次）。{detail}`），
+  // 所以它们自己也是带占位符的模板，而不是先拼好的成品串——把 `MAX_OCCURRENCES`
+  // 直接插进模板，`{max}` 就永远填不上。
+  const tooMany = tf('parseOccurrencesTooMany', { max: MAX_OCCURRENCES });
+  const tooTight = tf('parseOccurrencesTooTight', { minSeconds: MIN_OCCURRENCE_INTERVAL_SECONDS });
 
   if (target.kind === 'repeats') {
     const { baseSeconds, count } = target;
     if (!Number.isInteger(count) || count < 1) {
-      return { ok: false, error: '重复次数必须是正整数，如 +1h*3、+30m×2。' };
+      return { ok: false, error: tr().parseRepeatNotPositive };
     }
-    if (count > MAX_OCCURRENCES) return { ok: false, error: `重复次数过多（${count} 次）。${tooMany}` };
+    if (count > MAX_OCCURRENCES) {
+      return { ok: false, error: tf('parseRepeatTooMany', { count, detail: tooMany }) };
+    }
     if (count > 1 && baseSeconds < MIN_OCCURRENCE_INTERVAL_SECONDS) return { ok: false, error: tooTight };
     return { ok: true, segments: Array.from({ length: count }, () => baseSeconds) };
   }
 
   const { segments } = target;
-  if (segments.length > MAX_OCCURRENCES) return { ok: false, error: `时间序列过长（${segments.length} 段）。${tooMany}` };
+  if (segments.length > MAX_OCCURRENCES) {
+    return { ok: false, error: tf('parseSegmentsTooMany', { count: segments.length, detail: tooMany }) };
+  }
   if (segments.some((seconds) => seconds < MIN_OCCURRENCE_INTERVAL_SECONDS)) return { ok: false, error: tooTight };
   return { ok: true, segments };
 }
@@ -601,14 +700,14 @@ function resolveTarget(matched: TargetMatch, now: number, timeZone: string): Tar
   // 多次写法在 parseScheduleInput 里已展开成 N 个目标，不该走到这里；
   // 这条分支只为收窄下面的 `at` 联合（真到了这里就是调用顺序写错了）。
   if (t.kind === 'repeats' || t.kind === 'sequence' || t.kind === 'chain') {
-    return { status: 'error', error: '内部错误：多次写法未经展开处理。' };
+    return { status: 'error', error: tr().parseInternalUnhandled };
   }
 
   // 范围校验
   if ((t.month !== undefined && (t.month < 1 || t.month > 12)) ||
       (t.day !== undefined && (t.day < 1 || t.day > 31)) ||
       t.hour > 23 || t.minute > 59) {
-    return { status: 'error', error: '日期或时间数值无效。' };
+    return { status: 'error', error: tr().parseInvalidField };
   }
 
   const hhmm = `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
@@ -624,8 +723,8 @@ function resolveTarget(matched: TargetMatch, now: number, timeZone: string): Tar
   // 显式完整日期（含年）
   if (t.year !== undefined && t.month !== undefined && t.day !== undefined) {
     const date = `${String(t.year).padStart(4, '0')}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
-    if (epochOf(date) === undefined) return { status: 'error', error: '日期不存在。' };
-    if ((epochOf(date) as number) <= now) return { status: 'error', error: '目标时间已过去。' };
+    if (epochOf(date) === undefined) return { status: 'error', error: tr().parseDateNotExist };
+    if ((epochOf(date) as number) <= now) return { status: 'error', error: tr().parseTimePassed };
     return atOk(date);
   }
 
@@ -637,7 +736,7 @@ function resolveTarget(matched: TargetMatch, now: number, timeZone: string): Tar
       const epoch = epochOf(date);
       if (epoch !== undefined && epoch > now) return atOk(date);
     }
-    return { status: 'error', error: '目标时间已过去。' };
+    return { status: 'error', error: tr().parseTimePassed };
   }
 
   // 今天/明天/后天/大后天（显式指定，不自动顺延）
@@ -645,8 +744,8 @@ function resolveTarget(matched: TargetMatch, now: number, timeZone: string): Tar
     const f = localFieldsOf(now + t.dayOffset * 24 * 3600 * 1000, timeZone);
     const date = `${f.year}-${String(f.month).padStart(2, '0')}-${String(f.day).padStart(2, '0')}`;
     const epoch = epochOf(date);
-    if (epoch === undefined) return { status: 'error', error: '无法解析目标时间。' };
-    if (epoch <= now) return { status: 'error', error: '该时刻今天已过去，可改用「明天」或具体日期。' };
+    if (epoch === undefined) return { status: 'error', error: tr().parseTimeUnresolvable };
+    if (epoch <= now) return { status: 'error', error: tr().parseTimePassedToday };
     return atOk(date);
   }
 
@@ -657,7 +756,7 @@ function resolveTarget(matched: TargetMatch, now: number, timeZone: string): Tar
     const epoch = epochOf(date);
     if (epoch !== undefined && epoch > now) return atOk(date);
   }
-  return { status: 'error', error: '无法解析目标时间。' };
+  return { status: 'error', error: tr().parseTimeUnresolvable };
 }
 
 /** 锚点序列的落定结果。 */
@@ -678,7 +777,7 @@ function resolveChain(
 ): ChainResolution {
   const landed = resolveTarget({ consumed: 0, target: chain.anchor }, now, timeZone);
   if (landed.status === 'error') return { ok: false, error: landed.error };
-  if (landed.target.kind !== 'at') return { ok: false, error: '锚点必须是绝对时刻。' };
+  if (landed.target.kind !== 'at') return { ok: false, error: tr().parseAnchorNotAbsolute };
 
   const targets: ResolvedTarget[] = [landed.target];
   let date = landed.target.at.date;
@@ -693,7 +792,11 @@ function resolveChain(
         if (shifted === undefined) {
           return {
             ok: false,
-            error: `${date} 的 ${time.slice(0, 5)} 在 ${timeZone} 不存在（夏令时切换跳过了这个时刻），请换一个时刻或时区。`,
+            error: tf('parseDstSkipped', {
+              date,
+              hhmm: time.slice(0, 5),
+              timeZone,
+            }),
           };
         }
         epoch = shifted;
@@ -710,7 +813,7 @@ function resolveChain(
       // 明天」这条既有规则自动作用在每一步上（23:00+01:00 → 次日 01:00）。
       const next = resolveTarget({ consumed: 0, target: step.target }, epoch, timeZone);
       if (next.status === 'error') return { ok: false, error: next.error };
-      if (next.target.kind !== 'at') return { ok: false, error: '序列里的时刻写法无效。' };
+      if (next.target.kind !== 'at') return { ok: false, error: tr().parseChainStepInvalid };
       date = next.target.at.date;
       time = next.target.at.time;
       epoch = next.target.epoch;
@@ -748,15 +851,14 @@ export function parseScheduleInput(
   options: ScheduleSyntaxOptions = { advancedSyntax: true },
 ): ParsedScheduleInput {
   const s = normalizeInput(raw);
-  if (s.length === 0) return { ok: false, error: '用法：/schedule <时间> <内容>，如 /schedule 1532 检查构建结果' };
+  if (s.length === 0) return { ok: false, error: tr().parseUsage };
 
   const matched = matchTimeExpr(s);
   if (matched === undefined) {
     return {
       ok: false,
       error:
-        '无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点、2026-08-21 15:32；' +
-        '重复 +1h*3；序列 +1h+1h+0.5h。',
+        tr().parseUnrecognized,
     };
   }
 
@@ -768,15 +870,14 @@ export function parseScheduleInput(
     return {
       ok: false,
       error:
-        '时间写法后面还跟着一段时长/次数，没有生效。多时刻请写成 +1h*3（等间隔 3 次）或 15:32+16:32、9:00+1d（序列，用 + 分隔）；' +
-        '次数后面要留一个空格。若那部分是正文，请换个说法。',
+        tr().parseDanglingSuffix,
     };
   }
 
   // Beta 开关：多次写法可关。**关闭 ≠ 回到旧行为**——旧行为是静默建成一条乱码任务，
   // 那是 bug，不在可回退的功能面里；这里只把它从"展开成 N 条"降级为"明确拒绝"。
   if (options.advancedSyntax === false && isMultiForm(matched.target)) {
-    return { ok: false, error: ADVANCED_SYNTAX_DISABLED };
+    return { ok: false, error: tr().parseAdvancedDisabled };
   }
 
   const occurrences = expandOccurrences(matched.target);
@@ -786,7 +887,7 @@ export function parseScheduleInput(
   if (matched.target.kind === 'chain') {
     const { steps } = matched.target;
     if (steps.length + 1 > MAX_OCCURRENCES) {
-      return { ok: false, error: `时间序列过长（${steps.length + 1} 个时刻）。${MAX_OCCURRENCES} 个为上限。` };
+      return { ok: false, error: tf('parseChainTooMany', { count: steps.length + 1, max: MAX_OCCURRENCES }) };
     }
     const chain = resolveChain(matched.target, now, timeZone);
     if (!chain.ok) return { ok: false, error: chain.error };
@@ -796,7 +897,13 @@ export function parseScheduleInput(
       const cur = chain.targets[index] as ResolvedTarget;
       const gapSeconds = (epochOfTarget(cur, now) - epochOfTarget(prev, now)) / 1000;
       if (gapSeconds < MIN_OCCURRENCE_INTERVAL_SECONDS) {
-        return { ok: false, error: `相邻两个时刻相差 ${Math.round(gapSeconds)} 秒，多次写法至少要隔 ${MIN_OCCURRENCE_INTERVAL_SECONDS} 秒。` };
+        return {
+          ok: false,
+          error: tf('parseGapTooTight', {
+            gapSeconds: Math.round(gapSeconds),
+            minSeconds: MIN_OCCURRENCE_INTERVAL_SECONDS,
+          }),
+        };
       }
     }
     targets = chain.targets;
@@ -815,9 +922,12 @@ export function parseScheduleInput(
   }
 
   const content = rest.trim();
-  if (content.length === 0) return { ok: false, error: '提醒内容不能为空。' };
+  // ⚠️ 这条与 `user-tools.ts` 的 `errToolPromptEmpty` 是**同一句话的两处实现**：
+  // 前者给 `/schedule`、`/later` 的解析器，后者给工具。故意不合并成一次调用，
+  // 因为两条路径的语言作用域是各自进入的（见文件头 localeStack 注释）。
+  if (content.length === 0) return { ok: false, error: tf('parseContentEmpty') };
   if (content.length > limits.maxChars) {
-    return { ok: false, error: `提醒内容不能超过 ${limits.maxChars} 字符。` };
+    return { ok: false, error: tf('parseContentTooLong', { chars: limits.maxChars }) };
   }
 
   return { ok: true, target: targets[0] as ResolvedTarget, targets, content };
@@ -833,26 +943,26 @@ export function parseScheduleSpec(spec: string, now: number, timeZone: string): 
   const s = normalizeInput(spec);
   const matched = matchTimeExpr(s);
   if (matched === undefined) {
-    return { ok: false, error: '无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点 等。' };
+    return { ok: false, error: tr().parseUnrecognizedSpec };
   }
   const occurrences = expandOccurrences(matched.target);
   if (occurrences !== undefined && !occurrences.ok) return { ok: false, error: occurrences.error };
   if (matched.target.kind === 'chain') {
     return {
       ok: false,
-      error: '锚点序列会展开成多条任务，仅 /schedule 与 /later 支持；单条写法请只写一个时刻。',
+      error: tr().parseSpecChainOnly,
     };
   }
   if (occurrences !== undefined && occurrences.segments.length > 1) {
     return {
       ok: false,
-      error: '多次/序列写法会展开成多条任务，仅 /schedule 与 /later 支持；单条写法请用 +1h 这类单一时间。',
+      error: tr().parseSpecMultiOnly,
     };
   }
   const resolved = resolveTarget(matched, now, timeZone);
   if (resolved.status === 'error') return { ok: false, error: resolved.error };
   if (s.slice(matched.consumed).trim().length > 0) {
-    return { ok: false, error: '无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点 等。' };
+    return { ok: false, error: tr().parseUnrecognizedSpec };
   }
   if (resolved.target.kind === 'after') {
     return { ok: true, kind: 'after', afterSeconds: resolved.target.afterSeconds };
@@ -864,19 +974,37 @@ export function parseScheduleSpec(spec: string, now: number, timeZone: string): 
  * 多次写法的时刻列表文案：首条给完整日期，同一天的后续条只给 `HH:mm`。
  *
  * 跨天的序列（`+1d+1d*3` 之类）会退回到完整日期形式——只看 `HH:mm` 会丢「哪一天」。
+ *
+ * 列表分隔符按语言取：中文用顿号「、」（这是句读习惯，不是可选项——英文列表用
+ * 顿号读起来像乱码），其余语言统一用「, 」。它是**标点**，不进字典：真正需要
+ * 本地化的措辞都在 `parse*` / `reply*` 键里，标点单独建键只会把字典撑大而没有
+ * 译者能给出比这更好的选择。
  */
 function describeEpochs(epochs: readonly number[], timeZone: string): string {
   const first = epochs[0];
   if (first === undefined) return '';
+  const locale = activeLocale();
+  const separator = locale === 'zh' ? '、' : ', ';
   const base = localFieldsOf(first, timeZone);
   return epochs
     .map((epoch, index) => {
-      if (index === 0) return formatAbsolute(epoch, timeZone);
+      if (index === 0) return formatAbsolute(epoch, timeZone, locale);
       const f = localFieldsOf(epoch, timeZone);
       const sameDate = f.year === base.year && f.month === base.month && f.day === base.day;
-      return sameDate ? formatHhmm(epoch, timeZone) : formatAbsolute(epoch, timeZone);
+      return sameDate ? formatHhmm(epoch, timeZone) : formatAbsolute(epoch, timeZone, locale);
     })
-    .join('、');
+    .join(separator);
+}
+
+/**
+ * 把「相对时间」包进括号，括号形状随语言。
+ *
+ * 中文用全角（），西文用半角 () 且**不**在括号内补空格——`Intl` 已经给出
+ * `in ~1 h` 这样的串，中文习惯写作「约 1 小时后」。这是排版规则：既不属于
+ * 字典条目（没有可译的词），也不该由 8 门各写一遍括号形状。
+ */
+function joinParenthetical(inner: string, locale: TextLocale): string {
+  return locale === 'zh' ? `（${inner}）` : ` (${inner})`;
 }
 
 /** 命令工厂：返回三个命令定义。
@@ -896,7 +1024,37 @@ export function userScheduleCommands(
   onUserSteer?: UserSteerHandler,
   getLocale?: () => string | undefined,
 ): CommandDefinition[] {
+  /**
+   * 命令**描述与占位提示**的字典：注册时求值一次。
+   *
+   * 这与 handler 里每次执行重新取的 `tr()` 是两种节奏，必须分开：
+   *  - 命令面板是在注册时把 `description` / `input.hint` 拷进注册表的，之后切语言
+   *    不会重建面板条目；注册时取一次，与内核的实际行为一致。
+   *  - handler 的**回执**是执行那一刻出现在会话里的文字，必须按当时的 locale 渲染。
+   *
+   * 上一版这里只有一个 `const t`，handler 复用它 ⇒ 回执永远是「注册那一刻」的语言；
+   * 而 `registerUserScheduleCommands` 在插件 apply 时注册，那时 locale 服务通常还没
+   * 就绪，`getLocale()` 返回 undefined ⇒ 回执恒为中文。这正是英文用户看到中文回执的根因。
+   */
   const t = hostDictFor(getLocale?.());
+  /**
+   * 包一层 handler：进入语言作用域执行，`finally` 退出。
+   *
+   * 为什么在**入口**进入而不是让每个 handler 自己进：解析器（`parseScheduleInput`
+   * 及其下游 `expandOccurrences` / `resolveTarget` / `resolveChain`）也是文案来源，
+   * 它们都在 handler 内部被调用。入口进一次，整条调用链自动覆盖；逐个函数进入
+   * 则会漏掉「某条解析失败路径」，那类漏法在测试里看不出来（默认回退 zh 永远是通顺中文）。
+   */
+  const withLocale = (
+    handler: (invocation: CommandInvocation) => Promise<CommandResult>,
+  ) => async (invocation: CommandInvocation): Promise<CommandResult> => {
+    const exit = enterCommandLocale(getLocale?.());
+    try {
+      return await handler(invocation);
+    } finally {
+      exit();
+    }
+  };
   const resolveSettings = (): { maxSchedules: number; limits: PromptLimits; advancedSyntax: boolean } => {
     if (typeof getSettings === 'function') {
       const value = getSettings();
@@ -933,10 +1091,10 @@ export function userScheduleCommands(
     name: `${PREFIX}-create`,
     description: t.cmdLaterDesc,
     input: {
-      hint: 'JSON 载荷，例如 {"prompt":"检查构建结果","after_seconds":300}；也可用 {"prompt":"…","at":{"date":"2026-08-21","time":"15:32","time_zone":"Asia/Shanghai"}}',
+      hint: t.cmdCreateHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const { maxSchedules, limits } = resolveSettings();
@@ -949,7 +1107,7 @@ export function userScheduleCommands(
         kind: 'success',
         text: JSON.stringify(armed ? { ...result } : { ...result, warning: t.warnSchedulerNotArmed }),
       };
-    },
+    }),
   };
 
   const list: CommandDefinition = {
@@ -966,26 +1124,26 @@ export function userScheduleCommands(
       // 对 `-list` 这是净代价（原来裸回车一次出结果）。收窄 input 能让它回到一次
       // 回车，但代价是手敲 `/user-schedule-list {}` 整行又发给模型——那是 issue #10
       // 的正主，不能为一次回车把它换回来。权衡后的取舍，所以文案里把两次回车直说。
-      hint: '无需载荷。回车一次认领命令、再回车一次执行（内核的 input 命令都这样）',
+      hint: t.cmdListHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const result = await userScheduleList(invocation.agent);
       if (!result.ok) {
         return { kind: 'error', text: `${result.code}: ${result.message}` };
       }
       return { kind: 'success', text: JSON.stringify(result.schedules) };
-    },
+    }),
   };
 
   const del: CommandDefinition = {
     name: `${PREFIX}-delete`,
     description: t.cmdDeleteDesc,
     input: {
-      hint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+      hint: t.cmdIdHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const id = (parsed.value as Record<string, unknown>)['id'];
@@ -1001,17 +1159,17 @@ export function userScheduleCommands(
         }
       }
       return { kind: 'success', text: JSON.stringify({ id: result.id, deleted: result.deleted }) };
-    },
+    }),
   };
 
   const edit: CommandDefinition = {
     name: `${PREFIX}-edit`,
     description: t.cmdEditDesc,
     input: {
-      hint: 'JSON 载荷，例如 {"id":"schedule-…","prompt":"新的提醒内容"}',
+      hint: t.cmdEditHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const value = parsed.value as Record<string, unknown>;
@@ -1038,7 +1196,7 @@ export function userScheduleCommands(
       if (value['prompt'] === undefined) {
         const id = value['id'];
         if (typeof id === 'string' && id.length > 0 && id.trim() === id) {
-          return renderError('缺少要改成的新内容：/user-schedule-edit 的载荷必须同时给出 id 与 prompt，例如 {"id":"schedule-…","prompt":"新的提醒内容"}。');
+          return renderError(tr().replyEditMissingPrompt);
         }
       }
       const { limits } = resolveSettings();
@@ -1052,7 +1210,7 @@ export function userScheduleCommands(
         /* 通知失败不影响命令成功结果 */
       }
       return { kind: 'success', text: JSON.stringify(result) };
-    },
+    }),
   };
 
   /** 暂停 after 提醒：sidecar 留档 + 日志 delete（GUI ⏸）。 */
@@ -1060,10 +1218,10 @@ export function userScheduleCommands(
     name: `${PREFIX}-pause`,
     description: t.cmdPauseDesc,
     input: {
-      hint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+      hint: t.cmdIdHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const id = (parsed.value as Record<string, unknown>)['id'];
@@ -1077,7 +1235,7 @@ export function userScheduleCommands(
         /* 通知失败不影响命令成功结果 */
       }
       return { kind: 'success', text: JSON.stringify(result) };
-    },
+    }),
   };
 
   /** 恢复暂停项：after_seconds=remaining 重建；uid 不变、日志 id 会变。 */
@@ -1085,10 +1243,10 @@ export function userScheduleCommands(
     name: `${PREFIX}-resume`,
     description: t.cmdResumeDesc,
     input: {
-      hint: 'JSON 载荷，例如 {"id":"schedule-…"}（也可用 {"uid":"…"}）；或直接给裸 id：schedule-…',
+      hint: t.cmdResumeHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const uid = (parsed.value as Record<string, unknown>)['uid']
@@ -1104,7 +1262,7 @@ export function userScheduleCommands(
         /* 通知失败不影响命令成功结果 */
       }
       return { kind: 'success', text: JSON.stringify(result) };
-    },
+    }),
   };
 
   // 用户主动插话（GUI「插话发送」按钮）：把已到点的 reminder 立即 steer 进 agent。
@@ -1113,18 +1271,18 @@ export function userScheduleCommands(
     name: `${PREFIX}-steer-now`,
     description: t.cmdSteerDesc,
     input: {
-      hint: 'JSON 载荷，例如 {"id":"schedule-…"}；也可直接给裸 id：schedule-…',
+      hint: t.cmdIdHint,
     },
     recordInput: false,
-    handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
+    handler: withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       if (onUserSteer === undefined) {
-        return { kind: 'error', text: '插话处理器未注入。' };
+        return { kind: 'error', text: tr().replySteerNotInjected };
       }
       const parsed = coercePayload(invocation.rawInput);
       if (!parsed.ok) return renderError(parsed.text);
       const id = (parsed.value as Record<string, unknown>)['id'];
       if (typeof id !== 'string' || id.length === 0) {
-        return { kind: 'error', text: 'invalid_rule: schedule id 必填。' };
+        return { kind: 'error', text: tr().replySteerIdRequired };
       }
       try {
         const result = await onUserSteer(invocation.agent, id);
@@ -1138,7 +1296,7 @@ export function userScheduleCommands(
           text: `steer_failed: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
-    },
+    }),
   };
 
   // 人类友好快捷命令：/schedule <时间> <内容>（到点以「上下文注入」提醒注入）与
@@ -1149,7 +1307,8 @@ export function userScheduleCommands(
   // `input.attachments`，命令框架已把 composer 附件做耐久化准入；/schedule
   // 未声明，宿主会在 handler 之前就拒绝带附件的调用，故 context 路径不接附件。
   const buildQuickHandler = (delivery: 'context' | 'user') => {
-    return async (invocation: CommandInvocation): Promise<CommandResult> => {
+    // 与其它七个 handler 一致：整条调用链（含解析器与成功回执的拼接）都在语言作用域内。
+    return withLocale(async (invocation: CommandInvocation): Promise<CommandResult> => {
       const timeZone = detectTimeZone();
       const { maxSchedules, limits, advancedSyntax } = resolveSettings();
       // 一次取 now：既喂给解析器，也作为成功文案的基准时刻，避免两次 Date.now()
@@ -1187,44 +1346,78 @@ export function userScheduleCommands(
         }
         epochs.push(target.kind === 'after' ? now + target.afterSeconds * 1000 : target.epoch);
       }
-      if (epochs.length === 0) return renderError(failure ?? '创建失败。');
+      if (epochs.length === 0) return renderError(failure ?? tr().replyCreateFailed);
 
       const armed = armScheduler(invocation.agent);
-      const verb = delivery === 'user' ? '将于' : '已设定提醒：';
+      /**
+       * 回执由五段拼成：正文头、用户内容、附件说明、操作提示、部分失败、调度器告警。
+       *
+       * 之所以分段取而不是拼一句成品模板：**语序在不同语言里不一样**。中文
+       * 「将于 X（约 1 小时后）「内容」（附件）」的括号包在时间外面；英文要把
+       * content 放进双引号、把 " (sent as you when due)" 甩到句尾。硬拼一句模板
+       * 会把这些顺序锁死在代码里。因此每段各自是一个键，`replyPartsJoined`
+       * （中文全角竖线 / 英文半角竖线）只负责把「部分失败」与「告警」接上去。
+       *
+       * ⚠️ `formatAbsolute` / `formatRelative` 必须传当前 locale：它们是与字典
+       * **两套独立机制**（一个走 `Intl`，一个走字典）。漏传的后果是英文界面里
+       * 文案翻好了、相对时间还是「约 1 小时后」——正是本轮 diff 最容易漏的一处。
+       */
+      const locale = activeLocale();
+      const verb = delivery === 'user' ? tr().replyVerbWill : tr().replyVerbSet;
       const hint =
         epochs.length === 1
           ? delivery === 'user'
-            ? '（到点会以你的身份发出）'
-            : '（输入框上方蓝色待发条可随时取消）'
+            ? tr().replyHintLaterOneShot
+            : tr().replyHintReminderOneShot
           : delivery === 'user'
-            ? '（到点逐条以你的身份发出，待发条里可单独取消）'
-            : '（每条可在输入框上方待发条单独取消）';
-      const attachNote = attachments.length > 0 ? `（含 ${attachments.length} 个附件）` : '';
+            ? tr().replyHintLaterMulti
+            : tr().replyHintReminderMulti;
+      const attachNote = attachments.length > 0
+        ? tf('replyWithAttachments', { count: attachments.length })
+        : '';
       const times =
         epochs.length === 1
-          ? `${formatAbsolute(epochs[0] as number, timeZone)}（${formatRelative(epochs[0] as number, now)}）`
+          ? `${formatAbsolute(epochs[0] as number, timeZone, locale)}${joinParenthetical(
+              formatRelative(epochs[0] as number, now, tr()),
+              locale,
+            )}`
           : describeEpochs(epochs, timeZone);
-      const head = epochs.length === 1 ? `${verb}${times}` : `已展开为 ${epochs.length} 条任务：${times}`;
+      // 单条：中文是「将于11/13周五 14:42（约 1 小时后）」，英文是「Will send Fri, ... 」——
+      // 动词短语与时间之间**要一个空格**，但中文习惯不留（「将于11/13」）。
+      // 这是排版规则不是译文，所以按语言在代码里加，不塞进字典（否则 8 门各写一遍
+      // 前导空格，模型与译者都没法确认它对不对）。
+      const head =
+        epochs.length === 1
+          ? `${verb}${locale === 'zh' ? '' : ' '}${times}`
+          : tf('replyExpanded', { count: epochs.length, times });
+      // 引用号与时间之间同理：中文「时间」直接贴「」，西文需要空格再打引号。
+      const quoteGap = locale === 'zh' ? '' : ' ';
       const partial =
         failure !== undefined && epochs.length < parsed.targets.length
-          ? `｜注意：只建成 ${epochs.length}/${parsed.targets.length} 条，${failure}`
+          ? tf('replyPartial', {
+              created: epochs.length,
+              total: parsed.targets.length,
+              failure,
+            })
           : '';
       // 调度器不在位：这条承诺（"将于 X 发送"）兑现不了，必须跟着文案说出来。
-      const notArmed = armed ? '' : `｜${t.warnSchedulerNotArmed}`;
-      return { kind: 'success', text: `${head}「${content}」${attachNote}${hint}${partial}${notArmed}` };
-    };
+      const joined = tr().replyPartsJoined;
+      const notArmed = armed ? '' : `${joined}${t.warnSchedulerNotArmed}`;
+      return {
+        kind: 'success',
+        text: `${head}${quoteGap}${tf('replyQuoted', { content })}${attachNote}${hint}${partial}${notArmed}`,
+      };
+    });
   };
 
   const quick: CommandDefinition = {
     name: 'schedule',
-    description:
-      '定时提醒快捷命令：/schedule <时间> <内容>。时间宽容识别：+30m、+1h30m、30分钟后、1532、15:32、9点半、明天9点、后天 10:00、8月21日 15:32、0821-1532、2026-08-21 15:32。' +
-      '多次写法：+1h*3（等间隔 3 次）与 +1h+1h+0.5h（链式序列，累计时刻），各自展开成独立任务，最多 10 条、多次时间隔 ≥60 秒。',
+    description: t.quickScheduleDesc,
     // 声明 input → DSH 命令系统在输入框「等待补全」：选中/回车 /schedule 后
     // 保留 `/schedule ` token + hint 提示，等你写完参数回车才执行；带参整行
     // 回车也走命令系统（不会当普通用户消息直接发给模型）。
     input: {
-      hint: '<时间> <内容>，如 1532 检查构建结果；也支持 +30m、明天9点、+1h*3、+1h+30m',
+      hint: t.quickScheduleHint,
     },
     recordInput: false,
     handler: buildQuickHandler('context'),
@@ -1246,15 +1439,12 @@ export function userScheduleCommands(
   // `input`：字面量直接塞进 `input` 会触发对象字面量的过多属性检查（TS2353），变量赋值
   // 只做结构检查。运行期形状完全不变——`attachments: true` 照旧随定义交给宿主。
   const laterInput: CommandInputWithAttachments = {
-    hint: '<时间> <内容>，如 1532 检查构建结果；可附带图片/文件；多条用 +1h*3 或 +1h+30m；到点会以你的身份发出',
+    hint: t.quickLaterHint,
     attachments: true,
   };
   const later: CommandDefinition = {
     name: 'later',
-    description:
-      '延迟发送：/later <时间> <内容>，到点以你的身份发出该内容（不是提醒，是代发）；可附带图片/文件，到点随内容一起发出。时间格式同 /schedule，' +
-      '含多次写法：+1h*3（等间隔 N 次）、+1h+1h+0.5h（相对序列）、15:32+16:32 / 9:00+1d（锚点序列）会展开成多条代发任务（同一内容与附件逐条带上）。' +
-      '多次写法为实验性功能，可在插件设置「高级语法」中关闭。',
+    description: t.quickLaterDesc,
     input: laterInput,
     recordInput: false,
     handler: buildQuickHandler('user'),

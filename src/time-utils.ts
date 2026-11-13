@@ -18,8 +18,31 @@ export function detectTimeZone(): string {
 
 /** 常见时区候选（面板下拉用）。 */
 
-/** 文案语言 id（zh 中文；en 英文；其余回退中文）。 */
-export type TextLocale = 'zh' | 'en';
+/**
+ * 文案语言 id：与 DSH 的 8 种语言同集（`src/locales/locale-id.ts`）。
+ *
+ * ⚠️ 这里只决定**时间怎么排版**，不读字典——`formatRelative` 的措辞由调用方传入
+ * （理由见该函数注释：本模块会进 client bundle，不能在这里 import 8 门宿主字典）。
+ * 8 门语言的措辞住在各自的字典里，不在这里拼字符串。
+ */
+export type TextLocale = 'zh' | 'en' | 'ja' | 'es' | 'fr' | 'de' | 'ru' | 'pt';
+
+/**
+ * 把 8 门语言映射到 `Intl` 的 locale 标签。
+ *
+ * 不回退到 `zh-CN`：一个日语用户在面板上看到「8月26日(周三) 14:45」比看到
+ * 「8月26日(水) 14:45」更容易误读星期，而 Intl 本来就支持这 8 种语言。
+ */
+const INTL_LOCALE: Record<TextLocale, string> = {
+  zh: 'zh-CN',
+  en: 'en-US',
+  ja: 'ja-JP',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  ru: 'ru-RU',
+  pt: 'pt-PT',
+};
 
 /**
  * 相对时间文案：zh "约 X 分钟后"；en "in ~X minutes" 等。
@@ -27,32 +50,59 @@ export type TextLocale = 'zh' | 'en';
  * @param now - 当前 epoch 毫秒（默认 Date.now()）。
  * @param locale - 文案语言（默认 zh，host 侧无浏览器语境保持中文）。
  */
-export function formatRelative(epoch: number, now: number = Date.now(), locale: TextLocale = 'zh'): string {
+export interface RelativePhrases {
+  readonly relOverdue: string;
+  readonly relSoon: string;
+  readonly relMinutes: string;
+  readonly relHours: string;
+  readonly relHoursMinutes: string;
+  readonly relDays: string;
+}
+
+/** 兜底中文措辞：`phrases` 缺席时用它（纯函数可被单测直接调用，不需要字典）。 */
+const REL_FALLBACK: RelativePhrases = {
+  relOverdue: '已到期',
+  relSoon: '即将发送',
+  relMinutes: '约 {m} 分钟后',
+  relHours: '约 {h} 小时后',
+  relHoursMinutes: '约 {h} 小时 {m} 分后',
+  relDays: '约 {d} 天后',
+};
+
+/**
+ * 相对时间文案：zh「约 X 分钟后」、en「in ~X minutes」等 **8 门**。
+ *
+ * ⚠️ 措辞由**调用方**传进来（{@link RelativePhrases}），本函数不 import 字典。
+ * 为什么：本模块同时进 host 产物与 client bundle（`tsconfig.client.json` 收了它），
+ * 在这里 import 8 门宿主字典会给 client 白搭约 118KB——足够把整个客户端 bundle 几乎翻倍。
+ * 宿主侧传 `hostDictFor(locale)`，客户端侧传 `dictFor(locale)`（`src/client/locales/ui.ts`），
+ * 两边各有自己的字典，本函数只负责分档。
+ *
+ * 历程：这里曾是 zh/en 两套字面量 +「其余回退中文」的口子，于是德语/俄语界面会把
+ * 「约 1 小时后」原样印出来。现在 8 门齐全，措辞在各自的字典里。
+ *
+ * @param epoch - 目标 epoch 毫秒。
+ * @param now - 当前 epoch 毫秒（默认 Date.now()）。
+ * @param phrases - 该语言的相对时间措辞；省略时用中文兜底。
+ */
+export function formatRelative(
+  epoch: number,
+  now: number = Date.now(),
+  phrases: RelativePhrases = REL_FALLBACK,
+): string {
   const diff = epoch - now;
-  if (locale === 'en') {
-    if (diff < 0) return 'overdue';
-    if (diff < MINUTE_MS) return 'sending soon';
-    const minutes = Math.round(diff / MINUTE_MS);
-    if (minutes < 60) return `in ~${minutes} min`;
-    const hours = Math.floor(minutes / 60);
-    const restMinutes = minutes % 60;
-    if (hours < 24) {
-      return restMinutes === 0 ? `in ~${hours} h` : `in ~${hours} h ${restMinutes} min`;
-    }
-    const days = Math.floor(hours / 24);
-    return `in ~${days} days`;
-  }
-  if (diff < 0) return '已到期';
-  if (diff < MINUTE_MS) return '即将发送';
+  if (diff < 0) return phrases.relOverdue;
+  if (diff < MINUTE_MS) return phrases.relSoon;
   const minutes = Math.round(diff / MINUTE_MS);
-  if (minutes < 60) return `约 ${minutes} 分钟后`;
+  if (minutes < 60) return phrases.relMinutes.replace('{m}', String(minutes));
   const hours = Math.floor(minutes / 60);
   const restMinutes = minutes % 60;
   if (hours < 24) {
-    return restMinutes === 0 ? `约 ${hours} 小时后` : `约 ${hours} 小时 ${restMinutes} 分后`;
+    return restMinutes === 0
+      ? phrases.relHours.replace('{h}', String(hours))
+      : phrases.relHoursMinutes.replace('{h}', String(hours)).replace('{m}', String(restMinutes));
   }
-  const days = Math.floor(hours / 24);
-  return `约 ${days} 天后`;
+  return phrases.relDays.replace('{d}', String(Math.floor(hours / 24)));
 }
 
 /** 毫秒常量（避免依赖 smart-window 再复制）。 */
@@ -64,7 +114,7 @@ export const DAY_MS = 24 * HOUR_MS;
  * 完整时间文案：zh "{M}月{d}日 {周X} HH:mm"、en "Wed, Aug 26, 14:45"（按指定时区）。
  */
 export function formatAbsolute(epoch: number, timeZone: string, locale: TextLocale = 'zh'): string {
-  const formatter = new Intl.DateTimeFormat(locale === 'en' ? 'en-US' : 'zh-CN', {
+  const formatter = new Intl.DateTimeFormat(INTL_LOCALE[locale] ?? 'zh-CN', {
     timeZone,
     month: 'numeric',
     day: 'numeric',

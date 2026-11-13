@@ -15,7 +15,9 @@
  * @module dsh-later/client/useSchedT
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { dictFor, format, type SchedLocaleId, type SchedStrings, type SchedUIKey } from './strings.js';
+import {
+  dictFor, format, isLocaleId, type LocaleId as SchedLocaleId, type SchedStrings, type SchedUIKey,
+} from './locales/ui.js';
 
 /** 宿主 locale 服务的结构化子集（避免引入运行时包类型依赖）。 */
 export interface LocaleFaceLike {
@@ -71,7 +73,8 @@ export function useSchedT(locale: LocaleFaceLike | undefined, seatT?: SeatTransl
   );
   const getActive = useCallback(() => (locale === undefined ? 'zh' : locale.getSnapshot().active), [locale]);
   const active = useSyncExternalStore(subscribe, getActive);
-  const lang: SchedLocaleId = active === 'en' ? 'en' : 'zh';
+  // 8 门都要如实上报：SchedButton 用它选时间格式，不能把日语用户报成中文。
+  const lang: SchedLocaleId = isLocaleId(active) ? active : 'zh';
   const t = dictFor(active);
   return { lang, t, tr: schedTranslate(seatT, active) };
 }

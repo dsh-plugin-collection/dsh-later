@@ -27,6 +27,12 @@ const { GROUP_BADGE_SETTING_KEY, isGroupBadgeVisible } = await loadTranspiledTre
 
 const host = () => readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const card = () => readFileSync(new URL('../src/client/components/SchedulerSettingsCard.tsx', import.meta.url), 'utf8');
+// 设置卡词条搬家：原先内联在 `src/client/index.tsx` 的 `locale.register(NS, {zh, en})`，
+// 现在在 `src/client/locales/settings.ts`（8 门各一份）。`index.tsx` 只剩 `mergedFor()` 调用，
+// 在那里读字典只会得到"找不到"的假红。
+const dictFile = () => readFileSync(new URL('../src/client/locales/settings.ts', import.meta.url), 'utf8');
+// 与字典无关的那些断言仍在读入口源码本身（两条设置轨道的接线、facet 的 settingKey）：
+// 它们锁的是 `index.tsx` 里的**胶面**，不是文案，所以读的仍是 `index.tsx`。
 const client = () => readFileSync(new URL('../src/client/index.tsx', import.meta.url), 'utf8');
 const facetGlue = () => readFileSync(new URL('../src/client/group-status-facet.ts', import.meta.url), 'utf8');
 const logic = () => readFileSync(new URL('../src/client/schedule-facet.ts', import.meta.url), 'utf8');
@@ -38,13 +44,20 @@ function codeOf(src) {
 }
 
 /**
- * 取 `zh: {` / `en: {` 那**一个**字典对象的源码（收尾按 6 空格缩进的 `},`）。
- * 不能一直取到 locale 调用结尾：那样 zh 的窗口会把 en 整块包进来，同名 key 被英文盖掉。
+ * 取 `zh` / `en` 那**一个**字典对象的源码。
+ *
+ * 位置随结构迁移改过一次，判据没变：原先内联在 `index.tsx` 的 `locale.register` 里（缩进
+ * 6 空格），现在在 `src/client/locales/settings.ts`（顶格）。收尾仍按该字典自己的 `};`
+ * 截断，不能一直取到文件尾——那样 zh 的窗口会把 en 整块包进来，同名 key 被英文盖掉。
+ *
+ * `en` 带映射类型标注（`const en: { [K in keyof typeof zh]: string } = {`），所以不能
+ * 只认 `= {` 一种形状，用 `[^=]*=` 跨过类型标注。
  */
 function dictSource(src, lang) {
-  const start = src.indexOf(`\n      ${lang}: {`);
-  assert.notEqual(start, -1, `client 源码里找不到 ${lang} 字典`);
-  const close = src.slice(start + 1).search(/^      \},$/m);
+  const m = new RegExp(`\\n(?:export )?const ${lang}\\b[^=\\n]*=\\s*\\{`).exec(src);
+  assert.notEqual(m, null, `settings.ts 源码里找不到 ${lang} 字典`);
+  const start = m.index;
+  const close = src.slice(start + 1).search(/^\};$/m);
   assert.notEqual(close, -1, `${lang} 字典找不到收尾`);
   return src.slice(start, start + 1 + close);
 }
@@ -72,11 +85,12 @@ test('设置卡把这一行归入布尔联合，默认值与 host 一致（true�
 });
 
 test('中英字典都有这一行的 label 与 hint，且取值非空', () => {
-  const src = client();
+  const src = dictFile();
   for (const lang of ['zh', 'en']) {
     const dict = dictSource(src, lang);
     for (const key of ['showInGroupBadgeLabel', 'showInGroupBadgeHint']) {
-      const m = dict.match(new RegExp(`\\n\\s{8}${key}:\\s*\\n?\\s*'((?:[^'\\\\]|\\\\.)*)'`));
+      // 缩进从 8 空格变 2 空格（字典从 `locale.register` 内联挪到独立文件的顶格对象）。
+      const m = dict.match(new RegExp(`\\n\\s{2}${key}:\\s*\\n?\\s*'((?:[^'\\\\]|\\\\.)*)'`));
       assert.ok(m !== null, `${lang} 字典缺 ${key}`);
       assert.ok(m[1].trim().length > 0, `${lang} 的 ${key} 是空串`);
     }

@@ -7,7 +7,9 @@ import { readFileSync } from 'node:fs';
 
 const card = () => readFileSync(new URL('../src/client/components/SchedulerSettingsCard.tsx', import.meta.url), 'utf8');
 const host = () => readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-const client = () => readFileSync(new URL('../src/client/index.tsx', import.meta.url), 'utf8');
+// 设置卡词条搬家：原先内联在 `src/client/index.tsx` 的 `locale.register`，现在在
+// `src/client/locales/settings.ts`。该处诊断信息「缺 zh/en 之一」的判据没变。
+const client = () => readFileSync(new URL('../src/client/locales/settings.ts', import.meta.url), 'utf8');
 const hook = () => readFileSync(new URL('../src/client/hooks/useSchedulerSettings.ts', import.meta.url), 'utf8');
 
 test('host schema 与 client 类型都声明两字段（三处齐全的第一、二处）', () => {

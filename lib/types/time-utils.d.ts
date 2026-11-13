@@ -1,6 +1,14 @@
 export declare function detectTimeZone(): string;
-export type TextLocale = 'zh' | 'en';
-export declare function formatRelative(epoch: number, now?: number, locale?: TextLocale): string;
+export type TextLocale = 'zh' | 'en' | 'ja' | 'es' | 'fr' | 'de' | 'ru' | 'pt';
+export interface RelativePhrases {
+    readonly relOverdue: string;
+    readonly relSoon: string;
+    readonly relMinutes: string;
+    readonly relHours: string;
+    readonly relHoursMinutes: string;
+    readonly relDays: string;
+}
+export declare function formatRelative(epoch: number, now?: number, phrases?: RelativePhrases): string;
 export declare const MINUTE_MS: number;
 export declare const HOUR_MS: number;
 export declare const DAY_MS: number;

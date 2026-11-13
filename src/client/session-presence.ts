@@ -79,7 +79,7 @@ import {
 } from './presence.js';
 import type { ScheduleSummaryEntry, ScheduleSummaryMap } from './schedule-summary.js';
 import type { ScheduleSummaryStore } from './schedule-summary-store.js';
-import { dictFor, format, type SchedStrings } from './strings.js';
+import { dictFor, format, type SchedStrings } from './locales/ui.js';
 
 /** 宿主 locale 服务的结构化子集。 */
 export interface PresenceLocaleLike {

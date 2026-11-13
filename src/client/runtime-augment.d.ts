@@ -16,7 +16,7 @@
  */
 import type { ComponentType, ReactNode } from 'react';
 import type { Context } from '@deepseek-ai/cordis';
-import type { SchedUIKey } from './strings.js';
+import type { SchedUIKey } from './locales/ui.js';
 
 /** 一个 slot 声明的核心字段（足够 plugin 调用；不展开 SlotMap 全部键）。
  *

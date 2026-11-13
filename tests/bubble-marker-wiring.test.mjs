@@ -42,7 +42,11 @@ test('设置卡：bubbleMarker 是 enum，四档齐全', () => {
 });
 
 test('字典：四档选项与 tooltip 在 zh/en 都存在', () => {
-  const src = read('src/client/strings.ts');
+  // dock UI 词条搬家：`src/client/strings.ts` 现在只放 CLIENT_ERR 令牌，字典在
+  // `src/client/locales/ui.ts`（8 门各一份）。判据没变：每个 key 在中英两块里各一处。
+  const src = read('src/client/locales/ui.ts');
+  const zhBlock = src.slice(src.indexOf('export const zh = {'), src.indexOf('} as const;'));
+  const enBlock = src.slice(src.indexOf('const en: { [K in keyof typeof zh]: string } = {'));
   for (const key of [
     'bubbleMarkerLabel',
     'bubbleMarkerHint',
@@ -59,8 +63,12 @@ test('字典：四档选项与 tooltip 在 zh/en 都存在', () => {
     'clockMd',
     'clockYmd',
   ]) {
-    const hits = src.split(`${key}:`).length - 1;
-    assert.equal(hits, 2, `${key} 应同时出现在 zh/en（实际 ${hits} 处）`);
+    // 扩到 8 门后同一 key 在整文件里出现 8 次；按 zh / en 两块各数一次，
+    // 锁的仍是「中英都有、各一份」。另 6 门由映射类型在编译期保证齐全。
+    const zhHits = zhBlock.split(`${key}:`).length - 1;
+    const enHits = enBlock.split(`${key}:`).length - 1;
+    assert.equal(zhHits, 1, `${key} 在 zh 字典里应恰好一处（实际 ${zhHits} 处）`);
+    assert.equal(enHits, 1, `${key} 在 en 字典里应恰好一处（实际 ${enHits} 处）`);
   }
 });
 

@@ -16,7 +16,9 @@ import { readFileSync } from 'node:fs';
 const host = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const commands = readFileSync(new URL('../src/commands.ts', import.meta.url), 'utf8');
 const dock = readFileSync(new URL('../src/client/components/ScheduleDock.tsx', import.meta.url), 'utf8');
-const readDict = readFileSync(new URL('../src/strings.ts', import.meta.url), 'utf8');
+// 字典搬家后读真实落点：宿主侧 8 语文案在 `src/locales/host.ts`。
+// `src/strings.ts` 已只剩再导出与 `HostLocaleId`，在那里找 key 只会得到"找不到"的假红。
+const readDict = readFileSync(new URL('../src/locales/host.ts', import.meta.url), 'utf8');
 
 /** 取锚点后的源码片段。 */
 function sliceAround(source, marker, span = 1200) {

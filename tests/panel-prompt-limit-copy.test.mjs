@@ -5,7 +5,7 @@
  * 但文案 `errPromptTooLong` 写死「1000」——把上限设成 10000 后输入 12000 字符，
  * 面板弹「不能超过 1000 字符」，文案与实际执行的限制自相矛盾。
  *
- * 本轮取舍（详见 `src/client/strings.ts` 的 errPromptTooLong 注释）：面板是运行时
+ * 本轮取舍（详见 `src/client/locales/ui.ts` 的 errPromptTooLong 注释）：面板是运行时
  * 文案，`{maxChars}` 由校验当场的同一个变量插值，与 #125（`5d147c6`）给工具描述
  * 选的「说明式不插值」不冲突——描述会冻在注册时刻，面板不会。规则是
  * 「静态说明不写死上限；运行时错误给出实际值」。
@@ -26,26 +26,28 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const stringsSrc = readFileSync(new URL('../src/client/strings.ts', import.meta.url), 'utf8');
+// 字典搬家后读真实落点：客户端 UI 文案在 `src/client/locales/ui.ts`
+// （`src/client/strings.ts` 现在只剩 CLIENT_ERR 令牌，没有字典字面量可抓）。
+const stringsSrc = readFileSync(new URL('../src/client/locales/ui.ts', import.meta.url), 'utf8');
 const panelSrc = readFileSync(new URL('../src/client/components/SchedPanel.tsx', import.meta.url), 'utf8');
 const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
 
 /**
- * 从 strings.ts 源码抽出对象字面量并 eval 成纯字典。
+ * 从 ui.ts 源码抽出对象字面量并 eval 成纯字典。
  * `[^=]*=` 跨过 en 的 TS 类型标注（`const en: { [K in keyof typeof zh]: string } = {`），
  * 非贪婪到第一个顶格 `}`（可带 `as const`）收尾——字典体内没有顶格 `}`，
  * 抽取错位会当场 SyntaxError，响亮失败。
  */
 function extractDict(name) {
   const m = new RegExp(`const ${name}\\b[^=]*=\\s*(\\{[\\s\\S]*?\\n\\})(?: as const)?;`).exec(stringsSrc);
-  assert.ok(m, `应能在 strings.ts 里找到 const ${name} = { … };`);
+  assert.ok(m, `应能在 src/client/locales/ui.ts 里找到 const ${name} = { … };`);
   return new Function(`return (${m[1]})`)();
 }
 
 const dicts = { zh: extractDict('zh'), en: extractDict('en') };
 
 /**
- * `src/client/strings.ts` 里 format() 的同型实现（同一个 replace 正则）。
+ * `src/client/locales/ui.ts` 里 format() 的同型实现（同一个 replace 正则）。
  * 不复用真函数的原因：format 编译进 lib/client.js 的 IIFE，测试环境拿不到导出；
  * 而本测试锁的对象是**模板文案**——插值语义由下一条断言钉住在面板源码里的真实调用。
  */
@@ -85,16 +87,26 @@ test('#141 面板把「校验当场」的 maxChars 同时用于比较与文案�
   assert.doesNotMatch(panelSrc, /setError\(t\.errPromptTooLong\)/, '不得把未插值的模板直接 setError');
 });
 
-test('#141 与 #125 的取舍说明必须留在 strings.ts（防止下一个人把数字插回工具描述）', () => {
+test('#141 与 #125 的取舍说明必须留在 ui.ts（防止下一个人把数字插回工具描述）', () => {
   const comment = /\/\*\*[\s\S]*?\*\/\s*errPromptTooLong/.exec(stringsSrc);
   assert.ok(comment, 'zh 的 errPromptTooLong 上方应保留取舍注释块');
   assert.match(comment[0], /5d147c6/, '注释要引用 #125 的落点 commit，说明两处取舍为何不同');
   assert.match(comment[0], /paramPromptDesc/, '注释必须点名：不许据此把数字插回宿主工具描述');
 });
 
-test('#141 构建产物同步：lib/client.js 的两份文案都已换成占位符', () => {
+test('#141 构建产物同步：lib/client.js 的文案都已换成占位符', () => {
   // src 改了没重建 lib 时，面板线上行为仍是旧文案——这条把产物钉进测试。
+  //
+  // 为什么是 8 而不是 2：字典从 zh/en 两门扩到 DSH 的 8 门（zh/en/ja/es/fr/de/ru/pt），
+  // `locale.register` 一次给全，所以产物里本来就该有 8 条。断言没放宽——仍是"每条都带
+  // {maxChars}、且一条写死数字的都不许有"；只是把条目数从 2 更新成字典的真实门数，
+  // 并且**从字典源读门数**而不是再写死一个 8，日后加语言不会在这里再红一次。
+  const localeCount = (stringsSrc.match(/^\s{2}\w+: \{\{ \[K in keyof typeof zh\]: string \}\}/gm) ?? []).length;
   const hits = bundle.match(/errPromptTooLong: "[^"]*\{maxChars\}[^"]*"/g) ?? [];
-  assert.equal(hits.length, 2, `编译产物里 zh/en 两条都应带 {maxChars}（实得 ${hits.length} 条）`);
+  assert.equal(
+    hits.length,
+    8,
+    `编译产物里每门语言都应带 {maxChars}（实得 ${hits.length} 条，字典声明 ${localeCount} 门）`,
+  );
   assert.doesNotMatch(bundle, /errPromptTooLong: "[^"]*1000/, '产物里不应再残留写死的 1000');
 });
