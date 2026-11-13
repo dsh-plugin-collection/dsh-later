@@ -118,6 +118,15 @@ export declare const zh: {
     readonly relHours: "约 {h} 小时后";
     readonly relHoursMinutes: "约 {h} 小时 {m} 分后";
     readonly relDays: "约 {d} 天后";
+    readonly errRtStopping: "调度器已停止。";
+    readonly errRtScheduleNotFound: "指定的提醒不存在或已派发。";
+    readonly errRtSteerUnsupportedKind: "every 类提醒的插话暂未支持。";
+    readonly errRtLogUnreadable: "会话定时日志读取失败。";
+    readonly errRtSteerFailed: "插话执行失败。";
+    readonly errRtDeliveryLost: "投递未确认，且重新挂回失败——请到面板确认这条提醒是否还在。";
+    readonly errRtDeliveryRetryable: "投递未确认，提醒已保留，可重试。";
+    readonly errToolAgentMismatch: "操作失败。";
+    readonly errToolNoRuntime: "该会话尚未挂载用户调度器。";
 };
 export type HostStrings = {
     [K in keyof typeof zh]: string;

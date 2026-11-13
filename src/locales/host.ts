@@ -163,6 +163,16 @@ export const zh = {
   relHours: '约 {h} 小时后',
   relHoursMinutes: '约 {h} 小时 {m} 分后',
   relDays: '约 {d} 天后',
+  // ── 运行时回执（自带 locale：runtime 对象跨调用存活，不能靠作用域栈）──
+  errRtStopping: '调度器已停止。',
+  errRtScheduleNotFound: '指定的提醒不存在或已派发。',
+  errRtSteerUnsupportedKind: 'every 类提醒的插话暂未支持。',
+  errRtLogUnreadable: '会话定时日志读取失败。',
+  errRtSteerFailed: '插话执行失败。',
+  errRtDeliveryLost: '投递未确认，且重新挂回失败——请到面板确认这条提醒是否还在。',
+  errRtDeliveryRetryable: '投递未确认，提醒已保留，可重试。',
+  errToolAgentMismatch: '操作失败。',
+  errToolNoRuntime: '该会话尚未挂载用户调度器。',
 } as const;
 
 /**
@@ -297,6 +307,16 @@ const en: { [K in keyof typeof zh]: string } = {
   relHours: 'in ~{h} h',
   relHoursMinutes: 'in ~{h} h {m} min',
   relDays: 'in ~{d} days',
+  // ── 运行时回执（自带 locale：runtime 对象跨调用存活，不能靠作用域栈）──
+  errRtStopping: 'The scheduler has stopped.',
+  errRtScheduleNotFound: 'That reminder does not exist or was already dispatched.',
+  errRtSteerUnsupportedKind: 'Steering a recurring (every) reminder is not supported yet.',
+  errRtLogUnreadable: 'Failed to read the session schedule log.',
+  errRtSteerFailed: 'Failed to execute the steer.',
+  errRtDeliveryLost: 'Delivery was not confirmed and re-arming also failed — check the panel to see whether this reminder still exists.',
+  errRtDeliveryRetryable: 'Delivery was not confirmed; the reminder was kept and can be retried.',
+  errToolAgentMismatch: 'The operation failed.',
+  errToolNoRuntime: 'This session has no user scheduler mounted yet.',
 };
 
 /**

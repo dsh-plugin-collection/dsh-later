@@ -53,6 +53,7 @@ import { detectTimeZone, formatHhmm } from './time-utils.js';
 import { laterUserSource } from './later-message-source.js';
 import { dueTargetOf, isDue } from './due.js';
 import { isRootAgent } from './upstream-compat.js';
+import { hostDictFor } from './strings.js';
 
 /** runtime 关心的设置子集（插话投递策略）。 */
 export interface SteerDeliverySettings {
@@ -197,6 +198,22 @@ export class UserScheduleRuntime {
     });
   }
 
+  /**
+   * 当前语言的宿主字典。
+   *
+   * 为什么不走 `user-tools.ts` 的 `enterHostLocale` 作用域栈：那套是「一次调用内」的，
+   * 而 runtime 对象**跨多次调用存活**（每个 root agent 一个），它的回执在任意时刻被
+   * 命令层取用。所以这里每次现取，与 `src/index.ts` 工具描述那侧的取法一致：
+   * ctx.get 的可选链（**不能**写进 inject，见 index.ts 那段说明），拿不到回退中文。
+   */
+  private dict(): ReturnType<typeof hostDictFor> {
+    try {
+      return hostDictFor(this.ctx.get('locale')?.getSnapshot().active);
+    } catch {
+      return hostDictFor(undefined);
+    }
+  }
+
   /** 是否仍为活动 root agent。 */
   private isLive(): boolean {
     try {
@@ -333,7 +350,7 @@ export class UserScheduleRuntime {
    */
   async steerById(id: string): Promise<{ ok: true; id: string; steered: true } | { ok: false; code: string; message: string }> {
     if (this.stopping || this.disposal !== undefined) {
-      return { ok: false, code: 'stopping', message: '调度器已停止。' };
+      return { ok: false, code: 'stopping', message: this.dict().errRtStopping };
     }
     /**
      * 暂停项的插话：直接从 sidecar 留档取材，不经过日志。
@@ -374,16 +391,16 @@ export class UserScheduleRuntime {
       const folded = claimedState.folded.active.filter((record) => claimedState.owned.has(record.id));
       const record = folded.find((r) => r.id === scheduleId);
       if (record === undefined) {
-        return { ok: false, code: 'schedule_not_found', message: '指定的提醒不存在或已派发。' };
+        return { ok: false, code: 'schedule_not_found', message: this.dict().errRtScheduleNotFound };
       }
       if (record.kind !== 'after' && record.kind !== 'at') {
-        return { ok: false, code: 'unsupported_kind', message: 'every 类提醒的插话暂未支持。' };
+        return { ok: false, code: 'unsupported_kind', message: this.dict().errRtSteerUnsupportedKind };
       }
       const delivery = claimedState.delivery.get(scheduleId) ?? 'context';
       claimed = { kind: 'one-shot', records: [record], delivery };
     } catch (error) {
       this.ctx.logger.warn(`later: steer fold 失败: ${renderThrown(error)}`);
-      return { ok: false, code: 'internal_error', message: '会话定时日志读取失败。' };
+      return { ok: false, code: 'internal_error', message: this.dict().errRtLogUnreadable };
     }
 
     let message: ReturnType<typeof this.buildMessage>;
@@ -428,7 +445,7 @@ export class UserScheduleRuntime {
       steeredDelivery = reState.delivery.get(scheduleId) ?? 'context';
     } catch (error) {
       this.ctx.logger.warn(`later: steer 失败 agent "${this.agent.id}": ${renderThrown(error)}`);
-      return { ok: false, code: 'internal_error', message: '插话执行失败。' };
+      return { ok: false, code: 'internal_error', message: this.dict().errRtSteerFailed };
     }
 
     // 送达确认：默认开启。
@@ -446,8 +463,8 @@ export class UserScheduleRuntime {
          */
         const rearmedId = await this.rearmOneShot(this.agent.session.header?.id, scheduleId, steeredRecord, steeredDelivery);
         return rearmedId === undefined
-          ? { ok: false, code: 'delivery_unconfirmed', message: '投递未确认，且重新挂回失败——请到面板确认这条提醒是否还在。' }
-          : { ok: false, code: 'delivery_unconfirmed', message: '投递未确认，提醒已保留，可重试。' };
+          ? { ok: false, code: 'delivery_unconfirmed', message: this.dict().errRtDeliveryLost }
+          : { ok: false, code: 'delivery_unconfirmed', message: this.dict().errRtDeliveryRetryable };
       }
       // 策略为「丢弃」：与旧实现一致，确认失败也认作已出列。
       try {
@@ -830,7 +847,7 @@ export class UserScheduleRuntime {
       this.deliver(message);
     } catch (error) {
       this.ctx.logger.warn(`later: 暂停项插话失败 agent "${this.agent.id}": ${renderThrown(error)}`);
-      return { ok: false, code: 'internal_error', message: '插话执行失败。' };
+      return { ok: false, code: 'internal_error', message: this.dict().errRtSteerFailed };
     }
     // 投递成功即出列：清掉留档，避免已送达的提醒继续显示为"待发送"。
     // 未确认时（onUnconfirmed='keep'）**不清留档** —— 留档就是暂停项的「active」，
@@ -838,7 +855,7 @@ export class UserScheduleRuntime {
     const confirmed = await this.verifyDelivery(message);
     if (!confirmed && this.getSettings().onUnconfirmed === 'keep') {
       this.noteUnconfirmed();
-      return { ok: false, code: 'delivery_unconfirmed', message: '投递未确认，提醒已保留，可重试。' };
+      return { ok: false, code: 'delivery_unconfirmed', message: this.dict().errRtDeliveryRetryable };
     }
     try {
       removePaused(sessionId, id);
