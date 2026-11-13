@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 1.13.0 — 2026-11-13
+
 - **fix** 定时面板的锚定在 `0.2.2-rc.2` 上退回为静态定位（issue #158）。那一代把
   `dsh-client-ui-primitives` 的 `useAnchoredPosition` 整个删掉，替代面是
   `useAnchoredMaxHeight`（只算高度）与 `usePointerGrace`（指针离开的关闭延迟），定位改由
