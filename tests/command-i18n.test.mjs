@@ -321,3 +321,22 @@ test('host 字典：新增的命令面键 8 门齐全（漏键会让 tsc 报错�
     }
   }
 });
+
+// ── 4. 拼接处不得产生多余空格 ───────────────────────────────────────────────
+
+test('命令面 i18n：动词短语与时间拼接后不得出现双空格', () => {
+  // `src/commands.ts` 的回执头是 `${verb}${locale === 'zh' ? '' : ' '}${times}`：
+  // 空格由**代码**按语言补，字典里的 verb **不能**自带尾空格，否则西文渲染成
+  // "Reminder set:  Fri, 13.11."（两个空格）。2026-11 清理时确实发现 6 门都带了
+  // 尾空格——人眼在单条文案上看不出来，只有拼接后才暴露，所以钉在这里。
+  for (const locale of LOCALE_IDS) {
+    for (const key of ['replyVerbSet', 'replyVerbWill']) {
+      const value = hostDicts[locale][key];
+      assert.equal(
+        value,
+        value.trimEnd(),
+        `${locale}.${key} 不应有尾随空格（空格由 commands.ts 按语言补）：${JSON.stringify(value)}`,
+      );
+    }
+  }
+});
