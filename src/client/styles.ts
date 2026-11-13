@@ -324,7 +324,27 @@ const COMPONENTS = [
 '  position: fixed; inset: 0; z-index: 1099; background: transparent;',
 '}',
 /*
- * 定位三档（见 src/client/primitives-compat.ts 的 PANEL_ANCHOR_BACKEND）：
+ * ## 抬升面 token 的分界线：0.1.7-rc.2
+ *
+ * 两个 token 的出现代次不同（逐代扫宿主前端 css 实测）：
+ *
+ * | token | 从哪一代开始有 | 谁缺 |
+ * |---|---|---|
+ * | `--dsw-menu-surface-fill` | **0.1.7-rc.2** | 0.1.2-rc.1 / 0.1.5-rc.3 / 0.1.7-rc.1 |
+ * | `--dsw-menu-backdrop-filter` | 0.1.7-rc.1 | 0.1.2-rc.1 / 0.1.5-rc.3 |
+ *
+ * 缺 token 时 `background: var(--dsw-menu-surface-fill)` 是**无效声明**——不是"取到透明"，
+ * 是整条被丢弃，面板连兜底背景都没有，于是**全透明**，底下的 dock 文字直接透上来
+ * （0.1.2-rc.1 的 12 代截图里肉眼可见）。缺 backdrop-filter 则无害得多：拿不到毛玻璃而已。
+ *
+ * 所以三条定位相关声明都给兜底：`background` 是
+ * `var(新, var(老, 字面量))` 三级；两个 `backdrop-filter` 用 `none`（它是合法值，
+ * 缺 token 时就是"不模糊"，与新一代上有模糊的差异属于该代的观感上限）。
+ *
+ * 教训记在这里：UI 面的"面板打开了"不等于"面板长得对"。这条是靠 12 代截图逐张看出来的，
+ * 判据（`panelOpened === true`）当时是绿的。
+ *
+ * ## 定位三档（见 src/client/primitives-compat.ts 的 PANEL_ANCHOR_BACKEND）：
  *   · hook（0.2.2-rc.2 之前）：宿主把 left/top 写成行内值，这里的 auto 只为兜住首帧；
  *   · css-anchor（0.2.2-rc.2 起）：anchored 的行内值 top + height 参与布局，**必须**给
  *     height，否则 `top` 是确定的、高度是 auto，两条都满足时 `bottom` 不产生约束，
@@ -336,9 +356,10 @@ const COMPONENTS = [
 '  box-sizing: border-box; display: flex; flex-direction: column;',
 '  width: min(340px, calc(100vw - 24px));',
 '  padding: 12px;',
-'  background: var(--dsw-menu-surface-fill);',
-'  backdrop-filter: var(--dsw-menu-backdrop-filter);',
-'  -webkit-backdrop-filter: var(--dsw-menu-backdrop-filter);',
+  /* 双层兜底，理由见 `.ss-panel` 规则上方的「抬升面 token 的分界线」。 */
+'  background: var(--dsw-menu-surface-fill, var(--dsw-alias-bg-layer-2, #fff));',
+'  backdrop-filter: var(--dsw-menu-backdrop-filter, none);',
+'  -webkit-backdrop-filter: var(--dsw-menu-backdrop-filter, none);',
 '  border: 0; border-radius: var(--dsw-radius-lg);',
 '  box-shadow: var(--dsw-elevation-prominent);',
   /* 描边与阴影同变量：--dsw-elevation-prominent 自身含 --dsw-elevation-stroke，

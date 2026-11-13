@@ -142,3 +142,68 @@ test('本地文案覆盖只给暂停项，未暂停项以投影为准', () => {
   assert.equal(writes, 1, 'submitEdit 里只应有一处 setPromptOverrides，且在暂停分支内');
 });
 
+
+/**
+ * 按 CSS 的 `var()` 语义求值一条声明的**最终取值**。
+ *
+ * 为什么要模拟而不是断言字符串：`var(--x)` 在 `--x` 未定义时**不是取到透明，而是整条
+ * 声明无效被丢弃**。0.1.2-rc.1 / 0.1.5-rc.3 / 0.1.7-rc.1 三代的宿主 css 里就没有
+ * `--dsw-menu-surface-fill`（逐代扫 dist/assets/*.css 实测），所以那三代上面板的背景
+ * 整条失效、变成全透明，底下的 dock 文字直接透上来——12 代截图里肉眼可见。
+ * 只断言"源码里出现了这个 token"看不出这件事。
+ *
+ * @param {string} declaration - 形如 `var(--a, var(--b, #fff))` 的取值。
+ * @param {Record<string,string>} vars - 该代次宿主**真的定义过**的自定义属性。
+ * @returns {string|undefined} 最终取值；`undefined` 表示整条声明无效。
+ */
+function resolveCssValue(declaration, vars) {
+  const m = /^var\(\s*(--[\w-]+)\s*(?:,\s*([\s\S]*))?\)$/.exec(declaration.trim());
+  if (m === null) return declaration.trim();
+  const [, name, fallback] = m;
+  if (vars[name] !== undefined) return vars[name];
+  if (fallback === undefined) return undefined;
+  return resolveCssValue(fallback, vars);
+}
+
+/** 从 `.ss-panel` 规则体里取某条属性的取值（取第一条命中）。 */
+function panelProp(css, prop) {
+  const rule = panelRule(css);
+  const m = new RegExp(`\\n\\s*'\\s*${prop}:\\s*([^';]+);'`).exec(rule);
+  assert.ok(m !== null, `.ss-panel 里应能找到 ${prop}`);
+  return m[1].trim();
+}
+
+/** 各代次宿主真正定义过的 token（取自逐代扫描 dist/assets/*.css 的结果）。 */
+const HOST_TOKENS = {
+  '0.1.2-rc.1': { '--dsw-alias-bg-layer-2': 'rgb(255,255,255)' },
+  '0.1.5-rc.3': { '--dsw-alias-bg-layer-2': 'rgb(255,255,255)' },
+  '0.1.7-rc.1': { '--dsw-alias-bg-layer-2': 'rgb(255,255,255)', '--dsw-menu-backdrop-filter': 'blur(40px)' },
+  '0.2.2-rc.2': {
+    '--dsw-alias-bg-layer-2': 'rgb(255,255,255)',
+    '--dsw-menu-surface-fill': 'rgba(255,255,255,.8)',
+    '--dsw-menu-backdrop-filter': 'blur(40px)',
+  },
+};
+
+test('缺 menu-surface-fill 的老代次上，面板背景仍有取值（不能整条失效变全透明）', () => {
+  const background = panelProp(styles, 'background');
+  for (const version of ['0.1.2-rc.1', '0.1.5-rc.3', '0.1.7-rc.1', '0.2.2-rc.2']) {
+    assert.notEqual(
+      resolveCssValue(background, HOST_TOKENS[version]),
+      undefined,
+      `${version} 上面板背景不得为空（缺 token 时必须走兜底）`,
+    );
+  }
+  // 新代次仍取官方的菜单面，不被兜底顶掉。
+  assert.equal(
+    resolveCssValue(background, HOST_TOKENS['0.2.2-rc.2']),
+    'rgba(255,255,255,.8)',
+    '0.2.2-rc.2 上应取官方的 --dsw-menu-surface-fill',
+  );
+});
+
+test('缺 backdrop-filter 的老代次上收敛成 none（不模糊是那代的观感上限，但不能失效）', () => {
+  const filter = panelProp(styles, 'backdrop-filter');
+  assert.equal(resolveCssValue(filter, HOST_TOKENS['0.1.2-rc.1']), 'none');
+  assert.equal(resolveCssValue(filter, HOST_TOKENS['0.2.2-rc.2']), 'blur(40px)');
+});
