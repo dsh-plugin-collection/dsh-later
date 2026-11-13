@@ -108,7 +108,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   replySteerIdRequired: 'invalid_rule: schedule id ist erforderlich.',
   replyEditMissingPrompt: 'Kein neuer Text angegeben: Die Nutzlast von /user-schedule-edit muss id und prompt enthalten, z. B. {"id":"schedule-…","prompt":"der neue Erinnerungstext"}.',
   replyVerbWill: 'Geplant am',
-  replyVerbSet: 'Erinnerung gesetzt: ',
+  replyVerbSet: 'Erinnerung gesetzt:',
   replyHintLaterOneShot: ' (wird zur Zeit in deinem Namen gesendet)',
   replyHintReminderOneShot: ' (jederzeit über den blauen Ausstehend-Streifen über dem Eingabefeld abbrechbar)',
   replyHintLaterMulti: ' (wird zur Zeit einzeln in deinem Namen gesendet; im Ausstehend-Streifen einzeln abbrechbar)',

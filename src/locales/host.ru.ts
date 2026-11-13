@@ -108,7 +108,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   replySteerIdRequired: 'invalid_rule: schedule id обязателен.',
   replyEditMissingPrompt: 'Не указан новый текст: нагрузка /user-schedule-edit должна содержать и id, и prompt, например {"id":"schedule-…","prompt":"новый текст напоминания"}.',
   replyVerbWill: 'Будет отправлено',
-  replyVerbSet: 'Напоминание назначено: ',
+  replyVerbSet: 'Напоминание назначено:',
   replyHintLaterOneShot: ' (уйдёт от вашего имени в указанное время)',
   replyHintReminderOneShot: ' (можно отменить в любой момент полосой ожидающих над полем ввода)',
   replyHintLaterMulti: ' (уйдут по одному от вашего имени в указанное время; отменяются по отдельности в полосе ожидающих)',
