@@ -1223,22 +1223,29 @@ rc.3 的版本被钉上了代际 tag，等于对外声称「验证过了」。�
 同类事故的通用教训：**任何触碰外部状态的命令，即使带 `--dry-run`，也应先假设它会写**。
 验证行为要用一次性的测试目标，不要拿生产包试。
 
-#### ⚠️ 待清理：那次事故留下的两枚 tag
+#### 事故收尾状态（2026-11-16 更新）
 
-截至 2026-11-16，npm 上仍有这两枚不该存在的 tag：
+那两枚误建的 tag 分两种结局，别混在一起看：
 
-| tag | 指向 | 性质 | 命令 |
-|---|---|---|---|
-| `dsh-0-2-2-rc-3` | `1.14.0` | **假声明**：钉上去时 rc.3 一面都没验过 | `npm dist-tag rm dsh-later dsh-0-2-2-rc-3` |
-| `probe-test-tag` | `1.13.0` | 纯垃圾：为复现 `--dry-run` 行为又造的 | `npm dist-tag rm dsh-later probe-test-tag` |
+| tag | 现状 | 说明 |
+|---|---|---|
+| `dsh-0-2-2-rc-3` | **已成为正式句柄** | 内容本来就对（指向 1.14.0），后续补完 rc.3 五面验证后被收进 `TAGGED_GENERATIONS`，`sync:tags` 对账通过，README 声明它 |
+| `probe-test-tag` | **仍需清理** | 纯垃圾，与任何验证状态无关 |
+
+`dsh-0-2-2-rc-3` 的处理值得记一笔：它**误建在先、验证在后**，顺序是错的；补救的办法不是删掉重来
+（删不掉），而是把顺序补正——先真的跑完五面，再把它收进白名单并写进 README，让它从此
+有台账支撑。判断一个 tag 是否可信要看**有没有对应验证**，而不是看它的创建时间。
+
+`probe-test-tag` 的清理命令：
+
+```bash
+npm dist-tag rm dsh-later probe-test-tag
+```
 
 **删不掉的原因**：当时使用的 token 是「绕过 2FA 的 Granular Token」，npm 已废弃这类 token 的
 **破坏性操作**权限（`pnpm dist-tag rm` 报 `Granular access tokens that bypass two-factor
 authentication may not perform this action`）。添加可以，删除不行。需要在网页端
 （`https://www.npmjs.com/package/dsh-later/access`）或用带 2FA 的凭据执行。
 
-`npm run sync:tags` 现在会把 `dsh-0-2-2-rc-3` 正确列为「应回收」——**但执行删除同样受 2FA 限制**，
-所以这条只能人工收尾，脚本管不到。
-
-清理完之后 `npm run sync:tags` 应输出「✅ 已是目标状态」。在那之前它就是一件
-**已知的、对外可见的不一致**，记在这里免得被忘掉。
+⚠️ `npm run sync:tags` 只看 `dsh-*` 前缀（避免误删别人的 tag），所以它**不会**把
+`probe-test-tag` 列为应回收——这一条只能人工盯，脚本管不到。
