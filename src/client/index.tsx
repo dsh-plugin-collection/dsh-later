@@ -36,7 +36,7 @@ import { fileMediaUrlCompat } from './workspace-path-compat.js';
 import type { ClientConfigForm, ClientSettingsScope, LaterDockSeatProbe } from './runtime-augment.js';
 import { name } from '../domain.js';
 import { dictFor, LOCALE_IDS } from './locales/ui.js';
-import { mergedFor } from './locales/settings.js';
+import { mergedFor, settingsDicts } from './locales/settings.js';
 import { injectStyles } from './styles.js';
 import { isGroupBadgeVisible } from './schedule-facet.js';
 import { mountLaterScheduleFacet } from './group-status-facet.js';
@@ -439,10 +439,15 @@ function apply(ctx: Context): void {
     order: 30,
     key: SETTINGS_NS,
     locale: NS,
-    label: () => {
-      const active = locale === undefined ? 'zh' : locale.getSnapshot().active;
-      return active === 'en' ? 'Session Scheduler' : '定时提醒';
-    },
+    // 导航条目名走字典（8 门），不用就地折叠的中英两门。
+    // 形状（`label: () => …` 这个 thunk）本来就是对的：官方
+    // dsh-client-ui-settings-general 的 README 说 nav label "may be locale-following
+    // thunks, resolved through resolveSlotLabel and re-rendered on the section ledger
+    // bump or the locale revision"；错的是 thunk 体内只认 en/zh。
+    // `cardT` 是 `locale.bind(NS)`，宿主那边的 translate 每次现读 active 再走回退链，
+    // 所以切换语言后导航名会自己跟上，不需要刷新页面（issue #169 验收第 4 条）。
+    // 旧宿主没有 locale 服务时 `cardT === undefined`，保留原有降级语义：中文。
+    label: () => (cardT === undefined ? settingsDicts.zh.title : cardT('title')),
     inject: () => ({ scope, t: cardT, surface }),
   });
 
