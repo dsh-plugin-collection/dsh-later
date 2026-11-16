@@ -88,7 +88,7 @@ export declare const zh: {
     readonly replyPartsJoined: "｜";
     readonly replyQuoted: "「{content}」";
     readonly parseUsage: "用法：/schedule <时间> <内容>，如 /schedule 1532 检查构建结果";
-    readonly parseUnrecognized: "无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点、2026-08-21 15:32；重复 +1h*3；序列 +1h+1h+0.5h。";
+    readonly parseUnrecognized: "无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点，以及绝对日期 <年-月-日> <时:分>；重复 +1h*3；序列 +1h+1h+0.5h。";
     readonly parseUnrecognizedSpec: "无法识别的时间格式。支持：+30m、1532、15:32、30分钟后、明天9点 等。";
     readonly parseDanglingSuffix: "时间写法后面还跟着一段时长/次数，没有生效。多时刻请写成 +1h*3（等间隔 3 次）或 15:32+16:32、9:00+1d（序列，用 + 分隔）；次数后面要留一个空格。若那部分是正文，请换个说法。";
     readonly parseSpecMultiOnly: "多次/序列写法会展开成多条任务，仅 /schedule 与 /later 支持；单条写法请用 +1h 这类单一时间。";
@@ -127,6 +127,9 @@ export declare const zh: {
     readonly errRtDeliveryRetryable: "投递未确认，提醒已保留，可重试。";
     readonly errToolAgentMismatch: "操作失败。";
     readonly errToolNoRuntime: "该会话尚未挂载用户调度器。";
+    readonly parseAfterTooLong: "时间太长：单条提醒最多 {maxDays} 天。";
+    readonly errToolAfterTooLong: "延时太长：after_seconds 最多 {maxDays} 天。";
+    readonly errToolAfterBadNumber: "延时必须是正整数秒：after_seconds / every_seconds 都要大于 0。";
 };
 export type HostStrings = {
     [K in keyof typeof zh]: string;
