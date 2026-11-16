@@ -67,9 +67,18 @@ const JSON_OUT = argv.has('--json');
  * ⚠️ 这份清单**只增不减地人工维护**是有意的：自动给「表里最新一代」打 tag 会让每次
  * rc 都留一枚 tag，而绝大多数 rc 不会有人去寻址。
  */
-const TAGGED_GENERATIONS = [
-  // 发版时按需加。示例：
-  // '0.2.2-rc.3',
+export const TAGGED_GENERATIONS = [
+  /**
+   * 内核三轨分发后的第一枚 `next` 轨代次。
+   *
+   * 为什么是它：`latest` 压在 0.2.2-rc.1，而 rc.3 只在 `next` 上 —— 用户若想「用 next 轨
+   * 内核跑这个插件」，除了 `dsh-later@latest`（未必在新内核上验过）就没有第二个句柄。
+   * 代际 tag 正好补上这个缺口。
+   *
+   * 之所以敢进白名单，是因为它**先**跑完了 mount / function / type / gate / UI 五面
+   * （见 docs/verification.md 与 KERNEL_GENERATIONS 里那一代的注释）。
+   */
+  '0.2.2-rc.3',
 ];
 
 /** 台账里出现过的代次 id。用于拒绝「未验证就打 tag」。 */

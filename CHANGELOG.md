@@ -4,6 +4,21 @@
 
 ## 未发布
 
+- **feat** `0.2.2-rc.3` 启用代际安装句柄 `dsh-later@dsh-0-2-2-rc-3`（issue #168 收尾）。
+
+  内核三轨分发后，`npm i dsh-later` 装的是 `latest`（在 0.2.2-rc.1 上验证），而想用 `next`
+  轨内核（0.2.2-rc.3）的人此前没有对应句柄。现在 `TAGGED_GENERATIONS` 收进这一代，
+  句柄由 `npm run sync:tags` 与台账机械对账。
+
+  README 中英两版的代次表各加一列「安装句柄 / Install handle」，只对已验证并打过 tag 的代次
+  填值，其余为 `—`，并说明了句柄的含义与「为什么不是每代都打」。
+
+- **test** `tests/generation-tags.test.mjs` 增到 10 条：新增两条钉住 README 与白名单
+  **双向一致**（白名单里的每代都要出现在两版 README；README 里的每个句柄都必须在白名单与
+  台账里）。带变异自证：把 README 的句柄改成不存在的版本 → 5 条红；把白名单清空 →
+  3 条红；还原后转绿。
+
+
 - **feat** 支持 `0.2.2-rc.3`（内核三轨分轨后的第一枚 `next` 轨代次）。
 
   内核开始三轨分发：`latest`=0.2.2-rc.1、`next`=0.2.2-rc.3、`alpha`=0.2.2-alpha.3。
