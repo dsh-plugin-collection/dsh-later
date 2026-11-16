@@ -58,7 +58,8 @@
     "verify:ui": "node scripts/ui-matrix/run.mjs",
     "check:lib-reach": "node scripts/lib-reachability.mjs",
     "check:release": "node scripts/release-selfcheck.mjs",
-    "verify:cold": "node scripts/verify-cold-attribution.mjs"
+    "verify:cold": "node scripts/verify-cold-attribution.mjs",
+    "sync:tags": "node scripts/sync-generation-tags.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

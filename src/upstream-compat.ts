@@ -360,6 +360,31 @@ export const KERNEL_GENERATIONS = [
     id: '0.2.2-rc.2',
     sessionApi: 'own-events' as const,
   },
+  {
+    /**
+     * `0.2.2-rc.3` 代次（issue #168 的前置验证）：五面实测全绿。
+     *
+     * 这一代是内核**三轨分发**（`latest`=0.2.2-rc.1、`next`=0.2.2-rc.3、
+     * `alpha`=0.2.2-alpha.3）之后的第一枚验证过的 `next` 轨版本。对本插件**没有**
+     * 新的破坏性变更：`dsh-schedule` 的 `createAtScheduleRecord` /
+     * `createAfterScheduleRecord` / `resolveEveryOccurrence` / `canonicalize` 都在，
+     * `dsh-client-ui-primitives` 与 rc.2 一样没有 `useAnchoredPosition`（CSS 锚点
+     * 兼容层继续生效，见 `src/client/primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND`），
+     * `sessionApi` 也仍是 `own-events`（`inheritedEventCount` 仍在）。
+     *
+     * 实证（`node scripts/verify-across-kernels.mjs --versions 0.2.2-rc.3 --steps
+     * mount,function,type,gate`）：`同源=same`、投递 `spliced=1 dispatch=Y`、
+     * 已关闭会话 `spliced=1 dispatch=Y`、子会话(depth=1) 不该投=Y、`at 形状 5/5`、
+     * type 换线 19 处两个 tsconfig 通过、gate 本代与最新都 pass。
+     * UI 面另有 `npm run verify:ui -- --versions 0.2.2-rc.3`：按钮/dock/面板/badge 齐全、
+     * `错误=0 警告=0`，截图确认面板与快捷项渲染正常。
+     *
+     * ⚠️ 入表标准没有放宽：本代**先**跑完五面才写进来。反过来「先打 tag 再补验证」
+     * 是本轮明确否决过的做法（那会造出「声明验证过、实际没验」的假元数据）。
+     */
+    id: '0.2.2-rc.3',
+    sessionApi: 'own-events' as const,
+  },
 ] as const;
 
 /**
