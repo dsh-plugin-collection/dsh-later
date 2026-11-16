@@ -50,6 +50,7 @@ export type ParsedScheduleInput = {
 };
 export interface ScheduleSyntaxOptions {
     readonly advancedSyntax?: boolean;
+    readonly locale?: string;
 }
 export declare const ADVANCED_SYNTAX_DISABLED: string;
 export declare const MAX_OCCURRENCES = 10;

@@ -30,6 +30,7 @@ import { epochFromLocal, localFieldsOf } from './smart-window.js';
 import { detectTimeZone, formatAbsolute, formatHhmm, formatRelative } from './time-utils.js';
 import type { TextLocale } from './time-utils.js';
 import { hostDictFor, hostFormat } from './strings.js';
+import { wordsFor, normalizeNumber, type TimeWords } from './time-words.js';
 import type { HostUIKey } from './locales/host.js';
 import { isLocaleId } from './locales/locale-id.js';
 
@@ -213,6 +214,16 @@ export interface ScheduleSyntaxOptions {
    * 与 schema 的 `default(true)` 及旧调用方（不传第三参）的行为一致。
    */
   readonly advancedSyntax?: boolean;
+  /**
+   * 用户界面语言，决定**接受哪些自然语言时间写法**（`src/time-words.ts`）。
+   *
+   * 不是界面文案：它只影响「这个写法认不认」，不影响任何显示字符串。
+   * 缺省（`undefined`）回退中文，与 `hostDictFor` 的回退同规则 —— 旧调用方行为不变。
+   *
+   * ⚠️ 刻意**不**做成「8 门全认」：让德语用户写 `mot` 时不会被法语 `mot` 抢走，
+   * 也让错误提示能说清「你这门语言支持哪些写法」。
+   */
+  readonly locale?: string;
 }
 
 /**
@@ -524,16 +535,52 @@ function extendAnchorChain(s: string, base: TargetMatch): TargetMatch | undefine
 }
 
 /** 在归一化文本开头尝试匹配一个时间表达式；失败返回 undefined。 */
-function matchTimeExpr(s: string): TargetMatch | undefined {
-  const single = matchSingleTimeExpr(s);
+function matchTimeExpr(s: string, words: TimeWords = wordsFor('zh')): TargetMatch | undefined {
+  const single = matchSingleTimeExpr(s, words);
   if (single === undefined) return undefined;
   if (single.target.kind !== 'at') return single;
   // 绝对时刻可以单独用（历史行为），也可以作锚点向右串 `+` 序列
   return extendAnchorChain(s, single) ?? single;
 }
 
+/**
+ * 词表驱动的时刻写法：按 `words.clock` 逐个试，第 1 组小时、第 2 组分钟（可缺省）。
+ *
+ * 为什么单独一个函数而不是在 `matchSingleTimeExpr` 里再堆一层 if：
+ * 各语言的正则形状一样（时/分两个捕获组），差异全在词表里；这里只负责
+ * 「试词表 → 归一 12 小时制 → 校验范围」这段共同逻辑。
+ *
+ * @param text - 待匹配文本（已去掉日期部分）。
+ * @param words - 当前语言的词表。
+ * @returns 解析出的时/分与已消费长度；不匹配返回 `undefined`。
+ */
+function matchWordClock(
+  text: string,
+  words: TimeWords,
+): { hour: number; minute: number; consumed: number } | undefined {
+  for (const re of words.clock) {
+    const m = re.exec(text);
+    if (m === null) continue;
+    const rawHour = Number(m[1]);
+    // 契约：第 1 组小时、第 2 组分钟（德语 `9 Uhr 30` 的分钟落在第 3 组，见 time-words.ts）。
+    const minRaw = m[2] ?? m[3];
+    const minute = minRaw === undefined ? 0 : Number(minRaw);
+    // 12 小时制：带 am/pm 时把 12 折成 0（12am = 0 点），pm 加 12（12pm = 12 点）。
+    // am/pm 的捕获组位置随语言不同（德语没有这一组），所以从整个匹配里取最后一个词。
+    const markerMatch = /(am|pm)\b/i.exec(m[0]);
+    const marker = markerMatch === null ? '' : markerMatch[1]!.toLowerCase();
+    let hour = rawHour;
+    if (marker === 'am') hour = rawHour === 12 ? 0 : rawHour;
+    else if (marker === 'pm') hour = rawHour === 12 ? 12 : rawHour + 12;
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return undefined;
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) return undefined;
+    return { hour, minute, consumed: m[0].length };
+  }
+  return undefined;
+}
+
 /** 单个时间表达式的匹配（不含锚点序列扩展）。 */
-function matchSingleTimeExpr(s: string): TargetMatch | undefined {
+function matchSingleTimeExpr(s: string, words: TimeWords = wordsFor('zh')): TargetMatch | undefined {
   // 1. 拉丁相对时长：+30m / +1h30m / +90s / +1w / +2.5h，
   //    可带重复次数 +1h*3（等间隔 ×N）或序列 +1h+1h+0.5h（链式累加）。
   if (s.startsWith('+')) {
@@ -581,7 +628,31 @@ function matchSingleTimeExpr(s: string): TargetMatch | undefined {
     return { consumed, target: { kind: 'after', afterSeconds: baseSeconds } };
   }
 
-  // 3. 紧凑日期：YYYYMMDD-HHMM / MMDD-HHMM（显式日期，不自动顺延）
+  // 2b. 多语言相对时长：en `in 30 minutes` / de `in 30 Minuten` / es `en 30 minutos` /
+  //     fr `dans 30 minutes` / ru `через 30 минут` / pt `em 30 minutos`。
+  //     ⚠️ 中文不在这里走：它的数词（半/两/一）与「×3」次数后缀跟其他语言差别太大，
+  //     仍由上面 2 的 `cnRel` 负责，两条规则各管各的范围不重叠。
+  //     第 1 组数值、第 2 组单位词（在 words.unit 里查）；小数逗号由 normalizeNumber 归一。
+  if (words.relative.length > 0) {
+    for (const re of words.relative) {
+      const m = re.exec(s);
+      if (m === null) continue;
+      const value = normalizeNumber(m[1] ?? '');
+      const unitSeconds = words.unit[(m[2] ?? '').toLowerCase()];
+      if (value === undefined || value <= 0 || unitSeconds === undefined) continue;
+      const baseSeconds = Math.round(value * unitSeconds);
+      let consumed = m[0].length;
+      // 次数后缀与中文一致：`in 30 minutes *3`
+      const suffix = REPEAT_SUFFIX_RE.exec(s.slice(consumed));
+      if (suffix !== null) {
+        consumed += suffix[0].length;
+        return { consumed, target: { kind: 'repeats', baseSeconds, count: Number(suffix[1]) } };
+      }
+      return { consumed, target: { kind: 'after', afterSeconds: baseSeconds } };
+    }
+  }
+
+  // 3. 紧凑日期：YYYYMMDD-HHMM / MMdd-HHMM（显式日期，不自动顺延）
   const compactFull = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(?!\d)/.exec(s);
   if (compactFull !== null) {
     return {
@@ -608,7 +679,9 @@ function matchSingleTimeExpr(s: string): TargetMatch | undefined {
   // 4. 通用组合：[今天|明天|后天|大后天] [日期] 时刻
   let i = 0;
   let dayOffset: number | undefined;
-  const dayWords: readonly (readonly [string, number])[] = [['大后天', 3], ['后天', 2], ['明天', 1], ['明日', 1], ['今天', 0], ['今日', 0]];
+  // 日词来自当前语言的词表（`src/time-words.ts`）：zh 有「明天/后天」，en 有 `tomorrow`，
+  // de 有 `morgen/übermorgen`……按表内顺序 `startsWith` 匹配，长的在前。
+  const dayWords = words.day;
   for (const [word, offset] of dayWords) {
     if (s.startsWith(word)) {
       dayOffset = offset;
@@ -645,7 +718,14 @@ function matchSingleTimeExpr(s: string): TargetMatch | undefined {
   let timeLen = 0;
   const colonTime = /^(\d{1,2}):(\d{2})/.exec(rest2);
   const cnTime = /^(\d{1,2}|[零一二两三四五六七八九十]+)\s*[点时]\s*(?:(半|\d{1,2}|[一二三四五]+)\s*分?)?\s*整?/.exec(rest2);
-  if (colonTime !== null) {
+  // ⚠️ 词表时钟必须排在 `colonTime` **前面**：`9:30pm` 会被裸 `HH:MM` 正则先吃掉前半截，
+  // 把 `pm` 剩在后面，于是 21:30 被解析成 09:30 —— 这正是本轮实测踩到的坑。
+  const wordClock = words.clock.length > 0 ? matchWordClock(rest2, words) : undefined;
+  if (wordClock !== undefined) {
+    hour = wordClock.hour;
+    minute = wordClock.minute;
+    timeLen = wordClock.consumed;
+  } else if (colonTime !== null) {
     hour = Number(colonTime[1]);
     minute = Number(colonTime[2]);
     timeLen = colonTime[0].length;
@@ -853,7 +933,8 @@ export function parseScheduleInput(
   const s = normalizeInput(raw);
   if (s.length === 0) return { ok: false, error: tr().parseUsage };
 
-  const matched = matchTimeExpr(s);
+  const words = wordsFor(options.locale);
+  const matched = matchTimeExpr(s, words);
   if (matched === undefined) {
     return {
       ok: false,
@@ -1314,7 +1395,7 @@ export function userScheduleCommands(
       // 一次取 now：既喂给解析器，也作为成功文案的基准时刻，避免两次 Date.now()
       // 让「约 1 小时后」与实际 scheduledAt 差出一个毫秒级的心跳。
       const now = Date.now();
-      const parsed = parseScheduleInput(invocation.rawInput, now, timeZone, limits, { advancedSyntax });
+      const parsed = parseScheduleInput(invocation.rawInput, now, timeZone, limits, { advancedSyntax, locale: currentCommandLocale() });
       if (!parsed.ok) return renderError(parsed.error);
 
       const content = parsed.content;
