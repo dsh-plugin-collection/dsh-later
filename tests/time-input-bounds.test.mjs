@@ -23,7 +23,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseScheduleInput } from '../lib/commands.js';
+import { enterCommandLocale, parseScheduleInput, resetCommandLocaleForTest } from '../lib/commands.js';
 import { validateCreateInput } from '../lib/user-tools.js';
 import { hostDicts } from '../lib/locales/host.js';
 import { LOCALE_IDS } from '../lib/locales/locale-id.js';
@@ -165,4 +165,18 @@ test('提示一致性：错误提示里不出现写死的绝对日期（那个�
       `${locale} 的提示里出现了写死的日期（会过期）：${text}`,
     );
   }
+});
+
+test('语言作用域：resetCommandLocaleForTest 能复位（异常用例的兜底）', () => {
+  // `enterCommandLocale` 的退出函数本身是幂等的（`finally` 一定会弹自己那层），
+  // 但**测试用例之间**需要一个兜底：某条用例若在断言里 throw，它自己的 finally 仍会跑，
+  // 可一旦有人手写了不平等的 enter，后续用例就会带着上一个语言的残留。
+  //
+  // 这个导出原来没有任何测试调用（整理时发现的孤儿），补上这条让它真正有守护对象：
+  // 先人为制造一次未配对的进入，确认 reset 之后回到中文。
+  enterCommandLocale('de');
+  assert.notEqual(String(parse('zzz 喝水', undefined).error), String(parse('zzz 喝水', 'zh').error),
+    '未配对地进入 de 之后，无 locale 的调用应受影响（证明栈确实起作用）');
+  resetCommandLocaleForTest();
+  assert.match(String(parse('zzz 喝水', undefined).error), /无法识别/u, 'reset 之后应回到中文');
 });
