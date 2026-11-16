@@ -4,6 +4,37 @@
 
 ## 未发布
 
+- **feat** 发布通道 tag 跟随内核 dist-tag：`latest` / `next` / `alpha` 三条对齐。
+
+  内核用三条轨分发（`latest`→0.2.2-rc.1、`next`→0.2.2-rc.3、`alpha`→0.2.2-alpha.3），
+  插件此前只有 `latest` 一条——用户跟着 `next` 或 `alpha` 轨用内核时没有配套的安装句柄。
+
+  现在三条通道都有，且**由验证事实推导**而不是人记：
+
+  | 你要做什么 | 命令 |
+  |---|---|
+  | 跟稳定线 | `npm i dsh-later@latest` |
+  | 跟候选线 | `npm i dsh-later@next` |
+  | 跟早期开发线 | `npm i dsh-later@alpha` |
+
+  `npm run sync:tags` 先查内核在该通道上当前指向哪一代，再从新台账
+  `scripts/lib/verified-on.ts`（版本 → 验证过的代次）里挑**在该代上验过的最高插件版本**。
+
+  ⚠️ **没有验证过就报「未判定」并拒绝执行，绝不回退到 `latest`** —— 回退会让用户以为
+  装上了配套版本，实际没有。这是本功能与「随便打个 tag」的区别。
+
+  台账住在 `scripts/lib/` 而不是 `src/`：它只被构建脚本与测试使用，宿主动态不加载它；
+  放进 `src/` 会产出 `lib/verified-on.js`，而 `check:lib-reach` 要求每个产物都能从
+  `lib/index.js` 走到——那个产物永远走不到。**没有**为了消告警让宿主模块去引用它，
+  那是伪造依赖，比告警本身坏。
+
+- **test** 新增 `tests/channel-tags.test.mjs`（12 条）：`VERIFIED_ON` 的代次必须在
+  `KERNEL_GENERATIONS` 里、未验证时返回 `undefined`、同通道多版挑最高、版本比较按数值
+  而非字典序、未知通道名抛错、通道 tag 不被误判成「应回收」。
+
+  变异自证：让未验证时回退到 `latest` → 7 条红；把版本比较改成字典序 → 3 条红；还原转绿。
+
+
 - **feat** `0.2.2-rc.3` 启用代际安装句柄 `dsh-later@dsh-0-2-2-rc-3`（issue #168 收尾）。
 
   内核三轨分发后，`npm i dsh-later` 装的是 `latest`（在 0.2.2-rc.1 上验证），而想用 `next`

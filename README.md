@@ -212,6 +212,18 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 | `0.2.2-rc.2` | 支持（primitives 删 `useAnchoredPosition`、`AgentRegistry.roots()` 移除，均已适配，见下方说明） | — |
 | `0.2.2-rc.3` | 支持（内核三轨分发的 `next` 轨；本代无新破坏性变更） | `dsh-later@dsh-0-2-2-rc-3` |
 
+**安装通道**（跟随内核的 dist-tag）：
+
+| 你的内核轨 | 装这个 |
+|---|---|
+| `latest`（稳定线） | `npm i dsh-later@latest`（等同不带 tag） |
+| `next`（候选线） | `npm i dsh-later@next` |
+| `alpha`（早期开发线） | `npm i dsh-later@alpha` |
+
+通道 tag 由 `npm run sync:tags` 跟随内核实时 dist-tag 推导：它先查内核在该通道上指向哪一代，
+再从 `scripts/lib/verified-on.ts` 的台账里挑「在该代上验证过的最高插件版本」。
+**没有验证过就报未判定并拒绝执行，绝不回退到 `latest`** —— 回退会让你以为装上了配套版本。
+
 **安装句柄**：给某一代内核专门打的 dist-tag。`npm i dsh-later@dsh-0-2-2-rc-3` 拿到的是「在
 `0.2.2-rc.3` 上验证过」的那一版。内核三轨分发（`latest` / `next` / `alpha`）之后，「最新的 rc」
 不再等于 `npm i dsh-later` 装的版本，所以需要这个句柄把验证状态说清楚。

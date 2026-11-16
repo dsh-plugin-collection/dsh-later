@@ -212,6 +212,20 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.2.2-rc.2` | Supported (primitives dropped `useAnchoredPosition`; `AgentRegistry.roots()` removed — both adapted, see below) | — |
 | `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
 
+**Install channel** (follows the kernel's dist-tag):
+
+| Your kernel track | Install |
+|---|---|
+| `latest` (stable) | `npm i dsh-later@latest` (same as no tag) |
+| `next` (release candidate) | `npm i dsh-later@next` |
+| `alpha` (early development) | `npm i dsh-later@alpha` |
+
+Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which
+generation the kernel points at on that channel, then picks the highest plugin version verified on
+that generation from the ledger in `scripts/lib/verified-on.ts`. **When nothing is verified it reports
+"unresolved" and refuses to run — it never falls back to `latest`**, because that would make you
+believe you installed a matching build.
+
 **Install handle**: a dist-tag pinned to a specific kernel generation. `npm i dsh-later@dsh-0-2-2-rc-3`
 gives you the release verified on `0.2.2-rc.3`. Now that the kernel ships three tracks
 (`latest` / `next` / `alpha`), "the newest rc" is no longer what plain `npm i dsh-later` installs,
