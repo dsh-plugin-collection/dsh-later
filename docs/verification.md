@@ -1222,3 +1222,23 @@ rc.3 的版本被钉上了代际 tag，等于对外声称「验证过了」。�
 
 同类事故的通用教训：**任何触碰外部状态的命令，即使带 `--dry-run`，也应先假设它会写**。
 验证行为要用一次性的测试目标，不要拿生产包试。
+
+#### ⚠️ 待清理：那次事故留下的两枚 tag
+
+截至 2026-11-16，npm 上仍有这两枚不该存在的 tag：
+
+| tag | 指向 | 性质 | 命令 |
+|---|---|---|---|
+| `dsh-0-2-2-rc-3` | `1.14.0` | **假声明**：钉上去时 rc.3 一面都没验过 | `npm dist-tag rm dsh-later dsh-0-2-2-rc-3` |
+| `probe-test-tag` | `1.13.0` | 纯垃圾：为复现 `--dry-run` 行为又造的 | `npm dist-tag rm dsh-later probe-test-tag` |
+
+**删不掉的原因**：当时使用的 token 是「绕过 2FA 的 Granular Token」，npm 已废弃这类 token 的
+**破坏性操作**权限（`pnpm dist-tag rm` 报 `Granular access tokens that bypass two-factor
+authentication may not perform this action`）。添加可以，删除不行。需要在网页端
+（`https://www.npmjs.com/package/dsh-later/access`）或用带 2FA 的凭据执行。
+
+`npm run sync:tags` 现在会把 `dsh-0-2-2-rc-3` 正确列为「应回收」——**但执行删除同样受 2FA 限制**，
+所以这条只能人工收尾，脚本管不到。
+
+清理完之后 `npm run sync:tags` 应输出「✅ 已是目标状态」。在那之前它就是一件
+**已知的、对外可见的不一致**，记在这里免得被忘掉。
