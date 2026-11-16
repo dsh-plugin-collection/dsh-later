@@ -1163,3 +1163,62 @@ so a resumed fork may still be a root"*。）
 重复保险，而这类实验**很容易看着成功、实际没测到**（本 skill 反复警告的失败类型）。
 
 若将来要合并两档判据，这里就是那块必须补的实验的挂点。
+
+## `0.2.2-rc.3`：内核三轨分轨后的首次验证（issue #168）
+
+内核开始**三轨分发**：`latest`=0.2.2-rc.1、`next`=0.2.2-rc.3、`alpha`=0.2.2-alpha.3。
+这是新行为——`latest` 压在 rc.1、rc.2/rc.3 在 `next` 上晾着。所以「最新的 rc」不再等于
+「`latest` 装的版本」，插件对哪一代验证过必须**分开声明**。
+
+### 五面实测（全绿）
+
+| 面 | 手段 | 结果 |
+|---|---|---|
+| mount / function | `verify-across-kernels.mjs --versions 0.2.2-rc.3 --steps mount,function` | `同源=same`、投递 `spliced=1 dispatch=Y`、已关闭会话同样、子会话(depth=1) 不该投=Y |
+| type | 同上 `--steps type` | 换线 19 处，两个 tsconfig 通过 |
+| gate | 同上 `--steps gate` | 本代 `pass`、最新 `pass` |
+| at 文法 | 随 function 面 | 5/5 |
+| **UI** | `npm run verify:ui -- --versions 0.2.2-rc.3` | 按钮/dock/面板/badge 齐全、`错误=0 警告=0`，截图 `.verify/ui-rc3/` |
+
+**这一代没有新的破坏性变更**：`dsh-schedule` 的 `createAtScheduleRecord` /
+`createAfterScheduleRecord` / `resolveEveryOccurrence` / `canonicalize` 都在；
+`dsh-client-ui-primitives` 与 rc.2 一样没有 `useAnchoredPosition`（CSS 锚点兼容层继续生效）；
+`sessionApi` 仍是 `own-events`（`inheritedEventCount` 仍在）。
+
+⚠️ `verify-across-kernels` 输出的 `HTTP 401` 是**静态资源**（favicon 之类）的，脚本刻意
+只记录不判红；真判据是 `错误=0 警告=0` 且有实际 UI 元素，这一点已用截图复核。
+
+### 代际 dist-tag：`npm run sync:tags`
+
+自动化，与 `KERNEL_GENERATIONS` 台账一对一，延续 `sync-peer-matrix` 的「不手抄」原则。
+
+| 行为 | 说明 |
+|---|---|
+| **默认只读** | 只打印「目标 tag → 版本」与线上现有 tag 的差量，不做任何修改 |
+| `--apply` | 才真的执行 `npm dist-tag add/rm` |
+| 拒绝越权 | 白名单里有、但**台账里没有**的代次会被拒绝并退出码 1 |
+| 回收 | 线上多出来的 `dsh-*` tag 会被标记为应回收（npm 不回收 tag，留着会让废版被永久寻址） |
+| 不碰别人的 tag | 非 `dsh-` 前缀的 tag 不归本脚本管 |
+
+tag 命名是全连字符 `dsh-<版本>`（如 `dsh-0-2-2-rc-3`）：npm 的 tag 不得是合法 semver 串，
+点分形式在部分版本会被拒，连字符形式与 cordis 的 `dsh-0-2-1-alpha-1` 惯例一致。
+
+**不是每一代都打 tag**：`TAGGED_GENERATIONS` 是显式白名单，由人按「外部是否真有寻址需求」
+维护。cordis 至今只有两枚代际 tag，本仓同理——自动给「表里最新一代」打 tag 会让每个 rc
+都留一枚死 tag。
+
+#### 一次真实事故（写进脚本设计的直接来由）
+
+2026-11-16 我用 `npm dist-tag add dsh-later@1.14.0 dsh-0-2-2-rc-3 --dry-run` 验证
+「tag 名合法吗」——**`--dry-run` 没有被忽略，它真的写进了 registry**。于是一个从未验证过
+rc.3 的版本被钉上了代际 tag，等于对外声称「验证过了」。更糟的是当时的 token 是
+「绕过 2FA 的 Granular Token」，**能加不能删**，那个假声明只能由有 2FA 权限的人清掉。
+
+三点教训直接变成了脚本的设计约束：
+
+1. **把「查」和「写」拆成两个明确的开关**，不依赖第三方 CLI 的 `--dry-run` 语义；
+2. **拒绝给不在台账里的代次打 tag**——当时 rc.3 连一面都没跑过，脚本本应拦住；
+3. 打印差量时把「这一代会造出什么语义」写出来，让人看清再按回车。
+
+同类事故的通用教训：**任何触碰外部状态的命令，即使带 `--dry-run`，也应先假设它会写**。
+验证行为要用一次性的测试目标，不要拿生产包试。
