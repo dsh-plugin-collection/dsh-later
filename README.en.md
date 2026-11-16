@@ -199,18 +199,25 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 ### Supported DSH kernels
 
-| Kernel generation | Status |
-|---|---|
-| `0.1.2-rc.1` | Supported |
-| `0.1.5-rc.3` | Supported |
-| `0.1.7-rc.1` / `0.1.7-rc.2` | Supported |
-| `0.2.0-rc.2` / `0.2.1-rc.2` | Supported |
-| `0.2.1-rc.3` / `0.2.1-rc.4` | Supported |
-| `0.2.2-alpha.2` | Supported |
-| `0.2.2-alpha.3` | Supported (`dsh-schedule` dropped its legacy exports, see below) |
-| `0.2.2-rc.1` | Supported |
-| `0.2.2-rc.2` | Supported (primitives dropped `useAnchoredPosition`; `AgentRegistry.roots()` removed — both adapted, see below) |
-| `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) |
+| Kernel generation | Status | Install handle |
+|---|---|---|
+| `0.1.2-rc.1` | Supported | — |
+| `0.1.5-rc.3` | Supported | — |
+| `0.1.7-rc.1` / `0.1.7-rc.2` | Supported | — |
+| `0.2.0-rc.2` / `0.2.1-rc.2` | Supported | — |
+| `0.2.1-rc.3` / `0.2.1-rc.4` | Supported | — |
+| `0.2.2-alpha.2` | Supported | — |
+| `0.2.2-alpha.3` | Supported (`dsh-schedule` dropped its legacy exports, see below) | — |
+| `0.2.2-rc.1` | Supported | — |
+| `0.2.2-rc.2` | Supported (primitives dropped `useAnchoredPosition`; `AgentRegistry.roots()` removed — both adapted, see below) | — |
+| `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
+
+**Install handle**: a dist-tag pinned to a specific kernel generation. `npm i dsh-later@dsh-0-2-2-rc-3`
+gives you the release verified on `0.2.2-rc.3`. Now that the kernel ships three tracks
+(`latest` / `next` / `alpha`), "the newest rc" is no longer what plain `npm i dsh-later` installs,
+so this handle states the verification explicitly. Only generations verified on the `next` track
+provide one; for everything else use `latest` (itself verified on `0.2.2-rc.1`). Handles are derived
+mechanically from the `KERNEL_GENERATIONS` ledger by `npm run sync:tags`, never hand-written.
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
 

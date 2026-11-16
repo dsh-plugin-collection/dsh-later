@@ -95,3 +95,35 @@ test('代际 tag：脚本的默认模式不含 --apply（只读是默认，写�
   assert.match(src, /const APPLY = argv\.has\('--apply'\)/u, 'APPLY 必须由显式的 --apply 决定');
   assert.match(src, /if \(!APPLY\) process\.exit\(0\)/u, '不传 --apply 时必须在写操作之前退出');
 });
+
+test('代际 tag：README 的「安装句柄」列与白名单逐项一致（不许手抄漂移）', async () => {
+  // README 里那句 `dsh-later@dsh-0-2-2-rc-3` 是给人看的权威值。它一旦和白名单漂开，
+  // 就会出现「文档说有句柄、实际没有」或反过来的情况——两者都让读者装了错版本。
+  const { TAGGED_GENERATIONS: readmeList } = await import('../scripts/sync-generation-tags.mjs');
+  const readmeZh = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readmeEn = readFileSync(new URL('../README.en.md', import.meta.url), 'utf8');
+
+  // 白名单里的每一代，两版 README 都必须出现它的句柄。
+  for (const generation of readmeList) {
+    const handle = `dsh-later@${tagNameFor(generation)}`;
+    assert.ok(readmeZh.includes(handle), `README.md 缺少句柄 ${handle}`);
+    assert.ok(readmeEn.includes(handle), `README.en.md 缺少句柄 ${handle}`);
+  }
+
+  // 反向：README 里出现的每个 `dsh-later@dsh-…` 都必须在白名单里。
+  const wanted = new Set(readmeList.map((g) => `dsh-later@${tagNameFor(g)}`));
+  for (const [name, text] of [['README.md', readmeZh], ['README.en.md', readmeEn]]) {
+    for (const m of text.matchAll(/dsh-later@(dsh-[0-9a-z-]+)/gu)) {
+      const handle = `dsh-later@${m[1]}`;
+      assert.ok(wanted.has(handle), `${name} 里的 ${handle} 不在 TAGGED_GENERATIONS 白名单里`);
+    }
+  }
+});
+
+test('代际 tag：README 的句柄只出现在台账内的代次上', () => {
+  const readmeZh = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const ledgerTags = new Set(LEDGER_IDS.map(tagNameFor));
+  for (const m of readmeZh.matchAll(/dsh-later@(dsh-[0-9a-z-]+)/gu)) {
+    assert.ok(ledgerTags.has(m[1]), `README 的句柄 ${m[1]} 对应的代次不在 KERNEL_GENERATIONS 里`);
+  }
+});
