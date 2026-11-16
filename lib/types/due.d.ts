@@ -1,3 +1,4 @@
+export declare const MAX_AFTER_SECONDS: number;
 export interface DueComparable {
     readonly scheduledAt?: unknown;
 }

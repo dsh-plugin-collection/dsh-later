@@ -31,6 +31,7 @@ import { detectTimeZone, formatAbsolute, formatHhmm, formatRelative } from './ti
 import type { TextLocale } from './time-utils.js';
 import { hostDictFor, hostFormat } from './strings.js';
 import { wordsFor, normalizeNumber, type TimeWords } from './time-words.js';
+import { MAX_AFTER_SECONDS } from './due.js';
 import type { HostUIKey } from './locales/host.js';
 import { isLocaleId } from './locales/locale-id.js';
 
@@ -717,7 +718,15 @@ function matchSingleTimeExpr(s: string, words: TimeWords = wordsFor('zh')): Targ
   let minute = 0;
   let timeLen = 0;
   const colonTime = /^(\d{1,2}):(\d{2})/.exec(rest2);
-  const cnTime = /^(\d{1,2}|[零一二两三四五六七八九十]+)\s*[点时]\s*(?:(半|\d{1,2}|[一二三四五]+)\s*分?)?\s*整?/.exec(rest2);
+  /**
+   * 汉字时刻：`9点` / `9点半` / `9点整` / `15时32分`。
+   *
+   * `時` 是日语写法，`点` 是中文写法。两个都收：`ja` 复用中文词表（见 `time-words.ts`
+   * 的 `wordsFor`），而日语用户写「明日9時」比「明日9点」自然得多——只收中文那个
+   * 会让 ja 的错误提示里写的示例自己解析不了（本轮实测踩到）。
+   * 收得更宽也不会误伤：`9時` 在中文输入里没有别的含义。
+   */
+  const cnTime = /^(\d{1,2}|[零一二两三四五六七八九十]+)\s*[点时時]\s*(?:(半|\d{1,2}|[一二三四五]+)\s*[分份]?)?\s*整?/.exec(rest2);
   // ⚠️ 词表时钟必须排在 `colonTime` **前面**：`9:30pm` 会被裸 `HH:MM` 正则先吃掉前半截，
   // 把 `pm` 剩在后面，于是 21:30 被解析成 09:30 —— 这正是本轮实测踩到的坑。
   const wordClock = words.clock.length > 0 ? matchWordClock(rest2, words) : undefined;
@@ -930,6 +939,33 @@ export function parseScheduleInput(
   limits: PromptLimits = { allowLong: false, maxChars: 1000 },
   options: ScheduleSyntaxOptions = { advancedSyntax: true },
 ): ParsedScheduleInput {
+  /**
+   * 传了 `options.locale` 就**进入语言作用域**，让函数体里所有 `tr()` / `tf()` 用对语言。
+   *
+   * 为什么需要这一步：本函数里几十处错误回执都走 `tr()`，而 `tr()` 读的是作用域栈，
+   * 不是 `options.locale`。命令 handler 那侧有 `withLocale` 包着所以没问题，但
+   * **从工具或测试直接调本函数**时栈是空的 ⇒ 回退中文，于是传了 `locale: 'de'`
+   * 仍然吐中文提示。这里补上，作用域与 `options.locale` 就一致了。
+   *
+   * 用 `try/finally` 还原：本函数可重入（`parseScheduleSpec` 也会调解析逻辑），
+   * 漏弹栈会让后续调用带着上一个语言的残留。
+   */
+  const exitLocale = options.locale === undefined ? undefined : enterCommandLocale(options.locale);
+  try {
+    return parseScheduleInputIn(raw, now, timeZone, limits, options);
+  } finally {
+    exitLocale?.();
+  }
+}
+
+/** `parseScheduleInput` 的本体（语言作用域已由外层进入）。 */
+function parseScheduleInputIn(
+  raw: string,
+  now: number,
+  timeZone: string,
+  limits: PromptLimits,
+  options: ScheduleSyntaxOptions,
+): ParsedScheduleInput {
   const s = normalizeInput(raw);
   if (s.length === 0) return { ok: false, error: tr().parseUsage };
 
@@ -1000,6 +1036,23 @@ export function parseScheduleInput(
     const resolved = resolveTarget(matched, now, timeZone);
     if (resolved.status === 'error') return { ok: false, error: resolved.error };
     targets = [resolved.target];
+  }
+
+  /**
+   * 时长上界的**唯一**校验点。
+   *
+   * 为什么放在这里而不是各条构造 `after` 的分支里：产生 `after` 的路径有三条
+   * （单条 `resolveTarget`、`repeats` 展开、`sequence` 累加），逐条拦容易漏；
+   * 而这里是它们**全部汇合之后**、返回之前，一次覆盖。
+   *
+   * 不拦的后果是抛异常而不是给错误：`+999999999999m` 折出来的 epoch 超出 `Date` 的
+   * 合法区间（约 ±8.64e15 ms），下游 `toISOString()` 抛 `RangeError`，而那条链路上
+   * 没有任何一处 try 住它。详见 `MAX_AFTER_SECONDS` 的注释。
+   */
+  for (const target of targets) {
+    if (target.kind === 'after' && target.afterSeconds > MAX_AFTER_SECONDS) {
+      return { ok: false, error: tf('parseAfterTooLong', { maxDays: Math.floor(MAX_AFTER_SECONDS / 86400) }) };
+    }
   }
 
   const content = rest.trim();
