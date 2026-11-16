@@ -52,6 +52,7 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const { KERNEL_GENERATIONS } = await import(join(root, 'lib', 'upstream-compat.js'));
+const { pickVersionForChannel, KERNEL_CHANNELS } = await import(join(root, 'scripts', 'lib', 'verified-on.ts'));
 
 const argv = new Set(process.argv.slice(2));
 const APPLY = argv.has('--apply');
@@ -112,13 +113,47 @@ function readRemoteTags() {
 }
 
 /**
+ * 读**内核**在三条通道上当前指向的版本。
+ *
+ * 每次现查而不是写死：内核会换轨（rc 提升为 latest、或新 rc 进 next），
+ * 写死就等于让通道 tag 跟着一个快照走，而用户看到的是实时状态。
+ *
+ * 查不到时返回空对象 —— 调用方据此把该通道报成「无法判定」，而不是猜一个版本。
+ */
+function readKernelChannels() {
+  try {
+    return JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'dist-tags', '--json']));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 推导三条通道 tag 的目标版本。
+ *
+ * @param kernelChannels - 内核的 `{channel: version}`。
+ * @returns {{targets: Array<{channel: string, kernel: string|undefined, version: string|undefined}>, unresolved: string[]}}
+ */
+export function computeChannelTargets(kernelChannels) {
+  const targets = [];
+  const unresolved = [];
+  for (const channel of KERNEL_CHANNELS) {
+    const kernel = kernelChannels[channel];
+    const version = pickVersionForChannel(channel, kernel);
+    if (version === undefined) unresolved.push(channel);
+    targets.push({ channel, kernel, version });
+  }
+  return { targets, unresolved };
+}
+
+/**
  * 计算差量。
  *
  * @param {Record<string, string>} remote - 线上现有 tag。
  * @param {string} currentVersion - 本仓 package.json 的版本（新 tag 指向它）。
  * @returns {{add: Array<{tag: string, generation: string}>, remove: string[], keep: Array<{tag: string, generation: string}>, unknown: string[]}}
  */
-export function computeDiff(remote, currentVersion) {
+export function computeDiff(remote, currentVersion, channelTargets = []) {
   const add = [];
   const keep = [];
   const unknown = [];
@@ -136,6 +171,16 @@ export function computeDiff(remote, currentVersion) {
     else add.push({ tag, generation });
   }
 
+  // 通道 tag（latest / next / alpha）：目标是「该通道内核上验证过的最新插件版」。
+  // 与代际 tag 分开算——它指向哪个版本由 verified-on 台账决定，不由 currentVersion 决定。
+  for (const { channel, version, kernel } of channelTargets) {
+    if (version === undefined) continue; // 未判定，由 render 单独报
+    wanted.add(channel);
+    const entry = { tag: channel, version, channel, kernel };
+    if (remote[channel] === version) keep.push(entry);
+    else add.push(entry);
+  }
+
   // 线上多出来的 `dsh-*` tag（白名单里没有的）应当回收：
   // npm 不回收 tag，留着会让某个废版被永久寻址到。
   const remove = Object.keys(remote).filter((tag) => tag.startsWith('dsh-') && !wanted.has(tag));
@@ -144,13 +189,31 @@ export function computeDiff(remote, currentVersion) {
 }
 
 /** 渲染人看的报告。 */
-function render(diff, remote) {
+function render(diff, remote, channelTargets = [], kernelChannels = {}) {
   const lines = [];
-  lines.push(`${pkg.name}@${pkg.version} · 代际 dist-tag 对账`);
+  lines.push(`${pkg.name}@${pkg.version} · dist-tag 对账（通道 + 代际）`);
   lines.push('');
-  lines.push(`台账代次 ${LEDGER_IDS.size} 个；需出 tag 的代次 ${TAGGED_GENERATIONS.length} 个`);
+  lines.push(`台账代次 ${LEDGER_IDS.size} 个；需出代际 tag 的代次 ${TAGGED_GENERATIONS.length} 个`);
   lines.push(`线上现有 tag：${Object.keys(remote).length ? Object.entries(remote).map(([t, v]) => `${t}→${v}`).join(', ') : '(无)'}`);
   lines.push('');
+  lines.push('通道目标（跟随内核 dist-tag）：');
+  for (const { channel, kernel, version } of channelTargets) {
+    const shown = version ?? '**未判定**';
+    const note = version === undefined
+      ? `（没有任何插件版本在 kernel@${channel} = ${kernel ?? '未知'} 上验证过）`
+      : `（kernel@${channel} = ${kernel}）`;
+    lines.push(`  ${channel.padEnd(6)} → ${String(shown).padEnd(10)} ${note}`);
+  }
+  lines.push('');
+
+  if (channelTargets.some((t) => t.version === undefined)) {
+    lines.push('❌ 拒绝执行：有通道无法判定目标版本');
+    lines.push('   原因通常是内核在该通道上的版本还没有被任何插件版本验证过。');
+    lines.push('   ⚠️ 刻意**不**回退到 latest —— 那会让用户以为装上了配套版本，实际没有。');
+    lines.push('   做法：跑 node scripts/verify-across-kernels.mjs --versions <该内核版本> --steps mount,function,type,gate');
+    lines.push('   过之后发一个新版本，并在 src/verified-on.ts 的 VERIFIED_ON 里登记。');
+    lines.push('');
+  }
 
   if (diff.unknown.length > 0) {
     lines.push('❌ 拒绝执行：以下代次不在 KERNEL_GENERATIONS 台账里');
@@ -168,9 +231,14 @@ function render(diff, remote) {
     return lines.join('\n');
   }
 
-  for (const { tag, generation } of diff.add) {
-    lines.push(`+ ${tag}  →  ${pkg.version}`);
-    lines.push(`   语义：${pkg.version} 在 ${generation} 上验证通过`);
+  for (const entry of diff.add) {
+    if (entry.channel !== undefined) {
+      lines.push(`+ ${entry.tag}  →  ${entry.version}`);
+      lines.push(`   语义：通道 ${entry.channel}，对应 kernel@${entry.channel} = ${entry.kernel}`);
+    } else {
+      lines.push(`+ ${entry.tag}  →  ${pkg.version}`);
+      lines.push(`   语义：${pkg.version} 在 ${entry.generation} 上验证通过`);
+    }
   }
   for (const tag of diff.remove) {
     lines.push(`- ${tag}  (线上 ${remote[tag]}，白名单里没有，应回收)`);
@@ -189,28 +257,32 @@ function render(diff, remote) {
  */
 function main() {
   const remote = readRemoteTags();
-  const diff = computeDiff(remote, pkg.version);
+  const kernelChannels = readKernelChannels();
+  const { targets: channelTargets, unresolved } = computeChannelTargets(kernelChannels);
+  const diff = computeDiff(remote, pkg.version, channelTargets);
 
   if (JSON_OUT) {
     process.stdout.write(JSON.stringify({ name: pkg.name, version: pkg.version, apply: APPLY, ...diff }, null, 2) + '\n');
   } else {
-    process.stdout.write(render(diff, remote) + '\n');
+    process.stdout.write(render(diff, remote, channelTargets, kernelChannels) + '\n');
   }
 
-  if (diff.unknown.length > 0) process.exit(1);
+  // 通道未判定与代次越权都拒绝执行：两者都会让某个 tag 指向一个没有验证支撑的版本。
+  if (diff.unknown.length > 0 || unresolved.length > 0) process.exit(1);
   if (!APPLY) process.exit(0);
 
   // ---- 写操作（只有显式 --apply 才到这里）----
   // ⚠️ 删 tag 需要「未绕过 2FA」的凭据。失败时如实报错，不吞异常：
   // npm 没有事务，一口气回滚成功的条目是不可能的，所以逐条报、让人看清哪条没成。
   let failed = 0;
-  for (const { tag } of diff.add) {
+  for (const entry of diff.add) {
+    const version = entry.channel !== undefined ? entry.version : pkg.version;
     try {
-      run('npm', ['dist-tag', 'add', `${pkg.name}@${pkg.version}`, tag]);
-      process.stdout.write(`✓ ${tag}\n`);
+      run('npm', ['dist-tag', 'add', `${pkg.name}@${version}`, entry.tag]);
+      process.stdout.write(`✓ ${entry.tag} → ${version}\n`);
     } catch (error) {
       failed += 1;
-      process.stderr.write(`✗ ${tag}: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(`✗ ${entry.tag}: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
   for (const tag of diff.remove) {
