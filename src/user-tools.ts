@@ -242,6 +242,7 @@ import {
   asLegacySchedules,
 } from './schedule-compat.js';
 import { OWNED_EVENT } from './domain.js';
+import { MAX_AFTER_SECONDS } from './due.js';
 import type { UserScheduleOwnedChange, UserScheduleDelivery } from './domain.js';
 import { hostDictFor, hostFormat } from './locales/host.js';
 import type { HostUIKey } from './locales/host.js';
@@ -611,6 +612,31 @@ export function validateCreateInput(
       return { ok: false, code: 'invalid_rule', message: hostT().errToolAtShape };
     }
   }
+  /**
+   * 数值上界：`after_seconds` / `every_seconds` 都要拦。
+   *
+   * 为什么不能只依赖上游：上游把这两个数直接折成 epoch，超出 `Date` 合法区间
+   * （约 ±8.64e15 ms）后 `toISOString()` 会**抛 `RangeError`**，这条链路上没有一处
+   * try 住它 —— `/schedule +999999999999m` 与工具传 `after_seconds: 1e15`
+   * 是同一个洞的两个入口。上界与解析器共用 `MAX_AFTER_SECONDS`，避免两边漂移。
+   */
+  const maxDays = Math.floor(MAX_AFTER_SECONDS / 86400);
+  const tooLong = (): UserScheduleError => ({
+    ok: false,
+    code: 'invalid_rule',
+    message: hostTf('errToolAfterTooLong', { maxDays }),
+  });
+  for (const key of ['after_seconds', 'every_seconds'] as const) {
+    const raw = args[key];
+    if (raw === undefined) continue;
+    // 形状错（非正整数 / 0 / 负数 / NaN / 无穷）与「太长」是**两种错误**，
+    // 文案也要分开：否则用户填 `-5` 会被告知「延时太长」，摸不着头脑。
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || !Number.isInteger(raw) || raw <= 0) {
+      return { ok: false, code: 'invalid_rule', message: hostT().errToolAfterBadNumber };
+    }
+    if (raw > MAX_AFTER_SECONDS) return tooLong();
+  }
+
   return { ok: true, value: { prompt: trimmed, time_zone, ...remainingSelectors(args, atNormalized) } };
 }
 

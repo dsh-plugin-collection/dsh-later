@@ -119,7 +119,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   replyPartsJoined: ' | ',
   replyQuoted: '„{content}“',
   parseUsage: 'Verwendung: /schedule <Zeit> <Text>, z. B. /schedule 1532 Build-Ergebnis prüfen',
-  parseUnrecognized: 'Zeitformat nicht erkannt. Unterstützt: +30m, 1532, 15:32, 30分钟后, 明天9点, 2026-08-21 15:32; Wiederholung +1h*3; Sequenz +1h+1h+0.5h.',
+  parseUnrecognized: 'Zeitformat nicht erkannt. Unterstützt: +30m, 1532, 15:32, in 30 Minuten, morgen 9 Uhr, sowie absolutes Datum <JJJJ-MM-TT> <HH:MM>; Wiederholung +1h*3; Sequenz +1h+1h+0.5h.',
   parseUnrecognizedSpec: 'Zeitformat nicht erkannt. Unterstützt: +30m, 1532, 15:32, 30分钟后, 明天9点 usw.',
   parseDanglingSuffix: 'Nach dem Zeitausdruck folgt eine weitere Dauer/Anzahl, die nicht angewendet wurde. Für mehrere Zeiten schreibe +1h*3 (3-mal im gleichen Abstand) oder 15:32+16:32, 9:00+1d (Sequenz, mit + getrennt); nach der Anzahl gehört ein Leerzeichen. Ist dieser Teil dein Text, formuliere ihn anders.',
   parseSpecMultiOnly: 'Mehrfach-/Sequenzformen werden zu mehreren Aufgaben und nur von /schedule und /later unterstützt; für einen einzelnen Eintrag schreibe nur eine Zeit wie +1h.',
@@ -158,6 +158,9 @@ const dict: { [K in keyof typeof zh]: string } = {
   errRtDeliveryRetryable: 'Die Zustellung wurde nicht bestätigt; die Erinnerung wurde behalten und kann erneut versucht werden.',
   errToolAgentMismatch: 'Der Vorgang ist fehlgeschlagen.',
   errToolNoRuntime: 'In dieser Sitzung ist noch kein Benutzer-Scheduler eingebunden.',
+  parseAfterTooLong: 'Zu weit entfernt: eine Erinnerung liegt höchstens {maxDays} Tage in der Zukunft.',
+  errToolAfterTooLong: 'Verzögerung zu lang: after_seconds erlaubt höchstens {maxDays} Tage.',
+  errToolAfterBadNumber: 'Die Verzögerung muss eine positive ganze Sekundenzahl sein: after_seconds und every_seconds müssen größer als 0 sein.',
 };
 
 export default dict;

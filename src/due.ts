@@ -42,6 +42,19 @@
  * @module dsh-later/due
  */
 
+/**
+ * 单条提醒允许的最大延时（秒）：36500 天 ≈ 100 年。
+ *
+ * 为什么必须有一条硬上限：`Date` 的合法区间到 `+275760-09-13` 为止，超出的 epoch 会让
+ * `new Date(x).toISOString()` **抛 `RangeError`**（不是返回 Invalid Date）。而这条链路上
+ * （`projection.ts` / `runtime.ts` 都在调 `toISOString()`）没有任何一处 try 住它 ——
+ * 于是一个 `+999999999999m`（≈ 1.9 亿年）就能让扫描器在算到期时刻时抛异常。
+ *
+ * 取 100 年而不是压到更小，是因为「设一年的提醒」是合理用例，而 100 年离 ECMAScript
+ * 的上限还有三个数量级，留足了余地。真正要防的是**溢出与分不清的荒谬值**，不是长延时本身。
+ */
+export const MAX_AFTER_SECONDS = 100 * 365.25 * 86400;
+
 /** 到期判定关心的最小记录面（`ScheduleRecord` 与 sidecar 条目都能收窄到这里）。 */
 export interface DueComparable {
   /** 目标时刻（ISO 8601 字符串）。 */
