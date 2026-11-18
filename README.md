@@ -92,9 +92,8 @@
 /later +2h+1h+30m 催我交周报
 ```
 
-dock 上的按钮就是 `/user-schedule-create` `-list` `-delete` `-edit` `-pause` `-resume` `-steer-now` 这几条命令（参数一段 JSON），手敲也能用。手敲要带载荷：`-list` 之外都要跟 JSON，例如 `/user-schedule-delete {"id":"schedule-…"}`；`-delete` / `-pause` / `-resume` / `-steer-now` 也接受裸 id。
-
-手敲这些命令（连同 `/schedule`、`/later`）都是**两次回车**：第一次回车把整行认领成命令，第二次回车才执行。这是内核「带参数的命令」的统一顺序，不是本插件的额外步骤——内核的命令入参描述里没有「参数可选」这一面，所以一次回车就把整行交出去的话，带参手敲会当成普通聊天消息发给模型。副作用是 `/user-schedule-list` 从一次回车变成两次：点按钮和面板刷新不受影响，只有手敲这条会觉得多按一下。
+dock 上的按钮就是 `/user-schedule-*` 那几条命令，手敲也能用（参数是 JSON）。
+手敲要按两次回车：第一次认领整行为命令，第二次才执行——这是内核带参命令的统一顺序。
 
 ### 带图片 / 文件
 
@@ -102,13 +101,11 @@ dock 上的按钮就是 `/user-schedule-create` `-list` `-delete` `-edit` `-paus
 
 - **只有 `/later` 带附件**。`/schedule`、面板、以及模型调用工具创建的提醒都不带——这是一条安全边界：附件块只能经「你亲手输入」这条可信通道进入代发内容，模型在工具参数里夹带 `attachments` 一律无效。
 - 多次写法（`+1h*3`）把**同一份**附件逐条带到每条任务上，各条仍可单独取消/编辑/插话。
-- dock 行显示的是**真缩略图**。发出之前，宿主那条「按会话日志授权」的图片通道读不到它（附件还没进日志，这是预期状态），于是走宿主的本地文件路由 `GET /api/file` 出图；发出之后两条通道都通。若这台宿主的附件后端不落盘，缩略图退化成「发送后可见 + 大小」的标记——那**不代表附件丢了**，到点照样随消息发出。
+- dock 行显示**真缩略图**；若这台宿主的附件后端不落盘，退化成「发送后可见 + 大小」的标记，那**不代表附件丢了**，到点照样随消息发出。
 - 每条任务在 dock 上最多渲染 8 个缩略图，超出显示 `+N`；非图片附件显示成「文件名 + 大小」的 chip。
 - 内核 `0.1.2` 的内容块里没有 `file` 变体，非图片附件到点会退成一条 `[附件] 文件名` 文本（图片块各代次都原样透传）。见[支持的 DSH 内核](#支持的-dsh-内核)。
 
-模型可以直接调用三个用户工具为你创建 / 查询 / 删除提醒（`user_schedule_create` / `user_schedule_list` / `user_schedule_delete`）。改内容、暂停、恢复、立即发送**不暴露给模型**，它们是 dock 行上的按钮（底层走 `/user-schedule-*` 命令，只由你亲手点）。**无限周期**提醒（每 1 小时一直发下去）只有模型这条路：让模型说「每小时提醒我喝水」，它会用 `every_seconds` 建一条周期任务；周期任务没有结束条件，需要你手动删。
-
-模型还有一份随插件分发的 `SKILL.md`（技能名 `later-reminders`）。它常驻在模型的 skill catalog 里，管的是「什么时候该主动给你排一条提醒」和「与内核官方 `schedule_create` 怎么选」；工具参数规则不写在这里，避免与 schema 两处漂移。这个位点是可选的：宿主的装配里没有 skills 服务时它就不出现，插件其余功能照常。
+模型能替你建 / 查 / 删提醒（`user_schedule_create` / `_list` / `_delete`），也能建**无限周期**任务（「每小时提醒我喝水」）。改内容、暂停、恢复、立即发送不暴露给模型，只在 dock 上由你亲手操作。随包还有一份 `SKILL.md`（技能名 `later-reminders`）常驻模型的 skill catalog，管「什么时候该主动排」；宿主装配里没有 skills 服务时它就不出现，其余功能照常。
 
 ### 待发送 dock
 
@@ -220,35 +217,25 @@ dock 上的按钮就是 `/user-schedule-create` `-list` `-delete` `-edit` `-paus
 | `next`（候选线） | `npm i dsh-later@next` |
 | `alpha`（早期开发线） | `npm i dsh-later@alpha` |
 
-通道 tag 由 `npm run sync:tags` 跟随内核实时 dist-tag 推导：它先查内核在该通道上指向哪一代，
-再从 `scripts/lib/verified-on.ts` 的台账里挑「在该代上验证过的最高插件版本」。
-**没有验证过就报未判定并拒绝执行，绝不回退到 `latest`** —— 回退会让你以为装上了配套版本。
+通道 tag 由 `npm run sync:tags` 跟随内核实时 dist-tag 推导：查内核在该通道指向哪一代，再挑「在该代上验证过的最高插件版本」。**没有验证过就报未判定并拒绝执行，绝不回退到 `latest`**——回退会让你以为装上了配套版本。
 
-**安装句柄**：给某一代内核专门打的 dist-tag。`npm i dsh-later@dsh-0-2-2-rc-3` 拿到的是「在
-`0.2.2-rc.3` 上验证过」的那一版。内核三轨分发（`latest` / `next` / `alpha`）之后，「最新的 rc」
-不再等于 `npm i dsh-later` 装的版本，所以需要这个句柄把验证状态说清楚。
-目前只有已在 `next` 轨上验证过的代次提供句柄；其余代次用 `latest` 即可（`latest` 本身也在
-`0.2.2-rc.1` 上验证过）。句柄由 `npm run sync:tags` 与 `KERNEL_GENERATIONS` 台账机械对账，不手抄。
+**安装句柄**：给某一代内核专门打的 dist-tag。`npm i dsh-later@dsh-0-2-2-rc-3` 拿到的是
+「在 `0.2.2-rc.3` 上验证过」的那一版——内核三轨分发之后，「最新的 rc」不再等于
+`npm i dsh-later` 装的版本，所以需要这个句柄把验证状态说清楚。
 
 声明在 `package.json` 的 `engines.dsh`：`>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`；Node 需要 `^22.19 || >=24`。
 
-`0.2.2-alpha.3` 起上游 `@deepseek-ai/dsh-schedule` 移除了四个旧导出（改用 domain / task 模型）。本插件已适配：上游有就用上游，缺了就用自己的等价实现，周期任务推进与提醒文案不受影响。
+`0.2.2-alpha.3` 起上游 `dsh-schedule` 改用 domain / task 模型，本插件已适配：上游有就用上游，缺了用自己的等价实现。
 
-`0.2.2-rc.2` 起有两处宿主侧破坏性变更，本插件都已适配：其一，`dsh-client-ui-primitives` 删掉了
-`useAnchoredPosition`（替代面 `useAnchoredMaxHeight` / `usePointerGrace` 语义不同），定时面板改走 **CSS 锚点定位**，
-老代次仍透传原 hook；其二，`AgentRegistry.roots()` 被移除（注册表只剩 `get()` / `list()`，owner 关系不可见），
-「只认 root」的判定改由会话头的 `delegationDepth` 补位。
+`0.2.2-rc.2` 起有两处宿主侧破坏性变更（primitives 与 registry 各一处），本插件都已适配，功能不受影响。
+这行声明与 `peerDependencies` 都由代次表推导，两侧都按版本段收口：0.2.1 起内核只看 `engines.dsh`，更早的代次只看 `dsh-*` peer。
 
-这行声明与 `peerDependencies` 都由代次表推导，两侧都按版本段收口。0.2.1 起内核只看 `engines.dsh`，更早的代次只看 `dsh-*` peer，所以两侧都得对。
-
-`0.2.2-alpha.2` 带来**两条契约变更**（不是外观差异）：`SessionProjectionStateMap` 从上游移除，以及 `register()` 的返回从同步 disposer 变成 `Promise<ProjectionHandle>`，并要求「注册完成前不得对外发布消费方」。落点见 [docs/verification.md](./docs/verification.md) 的「0.2.2-alpha.2：投影注册契约变更」。
+`0.2.2-alpha.2` 带来两条投影注册契约变更，本插件已适配；细节见 [docs/verification.md](./docs/verification.md) 的「0.2.2-alpha.2：投影注册契约变更」。
 
 两条边界：
 
 - **`0.1.1-rc.2` 不支持。** 它那条依赖线在 registry 里装不出来（`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` 未发布），任何工具都给不出结论。
 - **`0.1.5` 按 `rc.3` 验证，不覆盖 `rc.1`。** `dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，默认安装会把整条插件线解析到 `rc.3`，所以**你实际拿到的就是统一的 `rc.3`**，我们只按它验证。
-
-版本门禁在哪一侧生效也随代次不同：`0.2.0` 及更早的内核**不读** `engines.dsh`，只看 `@deepseek-ai/dsh-*` 的逐代 peer 枚举；`0.2.1` 起才由 `engines.dsh` 单独决定。所以「在这台老内核上被装进来了」不等于「这代内核认了你声明的范围」。
 
 老内核上有四处可见降级：功能不丢，外观与措辞会变。
 
@@ -279,23 +266,13 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 # 重启 dsh web 后生效
 ```
 
-> 开发提示：`npm run watch` 监听 `src/` 自动重建并跑形状回归测试。
->
-> 注意它**不再自动改 GUI 里跑的那份**（issue #46：旧行为会把未合并代码静默部署到所有
-> profile，多 worktree 并发时还会互相覆盖）。要在界面上看到效果，二选一：
->
-> ```sh
-> npm run deploy                     # 手动同步一次
-> DSH_LATER_RELINK=1 npm run watch   # 恢复「每次改动即部署」的旧行为
-> ```
+> 折腾源码的开发者看 [`AGENTS.md`](./AGENTS.md) 与 `package.json` 的 scripts；
+> 改动不会自动同步到 GUI 里跑的那份，要 `npm run deploy`。
 
 ### 第一条提醒
 
-1. 打开任意会话，输入框右侧出现「定时」按钮；
-2. 点击按钮 → 选一个智能时段，或填自定义时间与内容；
-3. 点确认 → 按钮旁出现倒计时芯片，输入框上方 dock 显示待发条目；
-4. 到点后对话里收到「定时提醒」消息——关掉网页也会触发；服务端重启后，即使那条会话没被打开过，也会自己拉起来投递（边界见[上文的「关网页也能触发」](#特性一览)）。
-
+打开任意会话 → 点输入框右侧的「定时」按钮 → 选时段、填内容 → 确认。输入框上方出现 dock 倒计时，
+到点对话里收到「定时提醒」消息。
 ---
 
 ## 长文本提醒
@@ -326,9 +303,6 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 | **高级语法** <span>实验性</span> | 多次写法总开关：`+1h*3`、`+1h+1h+0.5h`、`15:32+16:32`、`9:00+1d`。关闭后这些写法被明确拒绝并提示回设置开启 | **开启** |
 
 > 「高级语法」标实验性，是因为**展开后的观感仍需观察**：一次命令写 10 条会不会刷屏、60 秒地板与 10 条上限是否合适。文法本身有测试逐条覆盖，见 [docs/verification.md](./docs/verification.md)。
-> 关闭它**不会**退回旧版的静默误解析（`+1h*3 x` 建成一条内容为 `*3 x` 的任务）——那是 bug，不在可回退的功能面里；残片守卫与本开关无关，始终生效。
-
-> 进阶：也可以用 `cordis.patch.yml` 在启动期覆盖默认值（如 `maxSchedules`），见 `docs/` 与 schema。
 
 ---
 
@@ -357,13 +331,3 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 ## 许可
 
 MIT
-
----
-
-<div align="center">
-
-<img src="assets/icons/icon-presence-scheduled.svg?v=18" width="48" alt="scheduled"/>
-<img src="assets/icons/icon-presence-urgent.svg?v=18" width="48" alt="urgent"/>
-<img src="assets/icons/icon-presence-overdue.svg?v=18" width="48" alt="overdue"/>
-
-</div>
