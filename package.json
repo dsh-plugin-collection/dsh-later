@@ -24,10 +24,8 @@
   },
   "type": "module",
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/types/index.d.ts",
       "import": "./lib/index.js"
     },
     "./client": "./lib/client.js",
@@ -36,6 +34,7 @@
   "files": [
     "icon.svg",
     "lib",
+    "!lib/types",
     "cordis.patch.yml",
     "SKILL.md",
     "SKILL.en.md",
