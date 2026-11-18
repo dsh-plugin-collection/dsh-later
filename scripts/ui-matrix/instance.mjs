@@ -139,11 +139,16 @@ export function createInstance({ version, versionsRoot, pluginDir, home, profile
    */
   const ALWAYS_COPY = ['package.json'];
   const RUNTIME_ONLY_DIRS = ['locale', 'assets'];
-  for (const entry of [...ALWAYS_COPY, ...(Array.isArray(pkg.files) ? pkg.files : []), ...RUNTIME_ONLY_DIRS]) {
+  const declared = Array.isArray(pkg.files) ? pkg.files : [];
+  // files 支持负向模式（如 "!lib/types"）：副本要镜像 npm pack 的「排除」语义，
+  // 否则副本带着发布物里没有的 lib/types，与真实安装不一致（见 ui-matrix-harness 测试）。
+  const excluded = declared.filter((e) => e.startsWith('!')).map((e) => e.slice(1));
+  for (const entry of [...ALWAYS_COPY, ...declared.filter((e) => !e.startsWith('!')), ...RUNTIME_ONLY_DIRS]) {
     const src = join(pluginDir, entry);
     if (!existsSync(src)) continue;
     cpSync(src, join(copy, entry), lstatSync(src).isDirectory() ? { recursive: true } : undefined);
   }
+  for (const ex of excluded) rmSync(join(copy, ex), { recursive: true, force: true });
 
   // ③ profile 组合：与宿主自带 web profile 同构（base + web-app + 被测插件）。
   writeFileSync(join(profileDir, 'package.json'), `${JSON.stringify({

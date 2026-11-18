@@ -203,7 +203,12 @@ test('createInstance：插件副本跟着 package.json 的 files 白名单走（
     const declared = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).files;
     assert.ok(Array.isArray(declared) && declared.length > 0, 'package.json 要有 files 白名单');
     for (const entry of declared) {
-      assert.ok(existsSync(join(copy, entry)), `files 里的 ${entry} 没进副本`);
+      // 负向模式（"!lib/types"）描述「排除」：副本必须与 npm pack 一致地**不含**它。
+      if (entry.startsWith('!')) {
+        assert.ok(!existsSync(join(copy, entry.slice(1))), `files 排除的 ${entry} 不应进副本`);
+      } else {
+        assert.ok(existsSync(join(copy, entry)), `files 里的 ${entry} 没进副本`);
+      }
     }
     // 点名这两份：它们是 provider 每次读盘要用的东西，缺了不报错、只是静默没 skill。
     assert.ok(existsSync(join(copy, 'SKILL.md')), 'SKILL.md 必须在副本里');

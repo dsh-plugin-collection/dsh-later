@@ -125,6 +125,10 @@ const result = await build({
   //  · 不作用于注释：注释里的非 ASCII 不按这个选项处理，而本仓的注释主要留在 src/，产物里
   //    由 tsc 的 removeComments 与 esbuild 的 tree shake 去掉，不进入这条取舍。
   charset: 'utf8',
+  // 体积：曾试 minify:true（client 256.9→160.9KB、tarball -26KB），但本仓有 4 个
+  // 「读 lib/client.js 文本」的守护测试（CSS 一致性、状态行形状、合并标记、#141 占位符），
+  // minify 会使其变红。这些判据刻意依赖可读产物，故**不 minify**——可读性是守护契约的一部分。
+  // 真正的无副作用瘦身见 package.json files 排除 lib/types（仅开发用声明）。
   // 与 DSH 官方 client 插件一致：JSX 走 react/jsx-runtime（automatic），
   // 由 __ModuleLoader__ 的 require 从宿主解析；不用 transform 模式（会生成
   // 全局 React.createElement，宿主无全局 React 导致渲染崩溃）。

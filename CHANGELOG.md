@@ -4,6 +4,23 @@
 
 ## 未发布
 
+- **chore** 发布包瘦身：排除仅开发用的 `lib/types`（.d.ts），**不影响功能**。
+
+  tarball 211.8→**196.4 KB**（-7%）、解包 759.9→699.9 KB（-60 KB）、73→41 文件。
+  `lib/types` 是 TypeScript 声明，运行时与宿主都不读；跨代类型测试读的是本地构建产物，
+  不受影响。`files` 用负向模式 `!lib/types`，并移除指向它的顶层 `types` 与
+  `exports["."].types`（保留 `main`/`exports["."].import`/`./client` 运行时入口）。
+
+  另一条候选杠杆 **minify client.js** 被否决：本仓有 4 个「读 lib/client.js 文本」的守护
+  测试，minify 会使其变红——可读产物是守护契约的一部分。故不 minify（build.mjs 有注释）。
+
+  配套：`scripts/ui-matrix/instance.mjs` 的插件副本拷贝理解 `!` 排除（镜像 npm pack），
+  `tests/ui-matrix-harness.test.mjs` 同步断言「排除项不进副本」；新增
+  `tests/package-slim.test.mjs` 反向锚点锁定该决定。
+
+  验证：1007 测试全绿、typecheck 0 错、`check:release`/`check:lib-reach` 通过、
+  14 代矩阵绿 14、UI 面（rc.4）按钮/dock/面板/badge 齐全 `错误=0`。
+
 - **chore** 跟进内核 `next` 轨前进到 `0.2.2-rc.4`：验证并登记，**零代码改动**。
 
   内核 `next` 从 rc.3 前进到 rc.4。逐包 diff（schedule / primitives / agent / commands /
