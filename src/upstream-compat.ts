@@ -385,6 +385,25 @@ export const KERNEL_GENERATIONS = [
     id: '0.2.2-rc.3',
     sessionApi: 'own-events' as const,
   },
+  {
+    /**
+     * `0.2.2-rc.4` 代次：内核 `next` 轨从 rc.3 前进到 rc.4 后的跟进验证，五面全绿。
+     *
+     * 与 rc.3 逐包 diff（`dsh-schedule` / `dsh-client-ui-primitives` / `dsh-agent` /
+     * `dsh-commands` / `dsh-session` / `dsh-settings`）运行时产物**零差异**（仅
+     * sourcemap/样式/文档不同），对本插件无新破坏性变更，`sessionApi` 仍 `own-events`。
+     *
+     * 实证（`--versions 0.2.2-rc.4 --steps mount,function,type,gate`）：`同源=same`、
+     * 投递 `spliced=1 dispatch=Y`、已关闭会话同样、子会话(depth=1) 不该投=Y、
+     * `at 形状 5/5`、type 换线 19 处两 tsconfig 通过、gate 本代与最新都 pass。
+     * UI 面 `verify:ui -- --versions 0.2.2-rc.4`：按钮/dock/面板/badge 齐全、`错误=0 警告=0`。
+     *
+     * 代码零改动即可支持本代（peer 范围同段已覆盖），故**不需要发新插件版**；
+     * 但 `next` 通道要跟随 rc.4，须把本代登记进 `VERIFIED_ON['1.14.0']`（已真实验证）。
+     */
+    id: '0.2.2-rc.4',
+    sessionApi: 'own-events' as const,
+  },
 ] as const;
 
 /**

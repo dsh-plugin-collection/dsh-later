@@ -166,7 +166,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 - **Pending dock**: a list above the input box; each item can be **cancelled**, **edited inline**, **paused and resumed** (`after` items), or sent to the agent right away.
 - **`/later` delayed send**: deliver *the text you are typing right now* later, as yourself (see [the difference](#reminders-vs-delayed-sends-whats-the-difference)).
 - **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
-- **Works across thirteen kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.3`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
+- **Works across fourteen kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.4`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
   - **Browser closed, server running**: always true — reminders live server-side and arrive on time across devices.
   - **Server restarted, that session was never opened**: true now, but it only became real in **1.12.1**. The host-level expiry sweeper shipped in 1.12.0, yet that release carried a "wakes the session but never drives delivery" defect (`registry.mount()` returns the runtime, not `undefined`, so `if (mounted === undefined)` was always false) — on 1.12.0 a cold session still stayed silent at due time. Since 1.12.1 the drive is unconditional, so the sweeper wakes the session itself and delivers through the normal runtime path, without anybody happening to open it.
@@ -211,6 +211,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.2.2-rc.1` | Supported | — |
 | `0.2.2-rc.2` | Supported (primitives dropped `useAnchoredPosition`; `AgentRegistry.roots()` removed — both adapted, see below) | — |
 | `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
+| `0.2.2-rc.4` | Supported (`next` advanced to rc.4; zero runtime diff vs rc.3, covered via the `@next` channel) | — |
 
 **Install channel** (follows the kernel's dist-tag):
 
