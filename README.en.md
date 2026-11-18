@@ -238,34 +238,23 @@ mechanically from the `KERNEL_GENERATIONS` ledger by `npm run sync:tags`, never 
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
 
-From `0.2.2-alpha.3` on, `@deepseek-ai/dsh-schedule` removed `decodeScheduleChange`, `foldScheduleEvents`, `scheduleView` and `SCHEDULE_CHANGE_VERSION` (replaced by a domain / task model). This plugin no longer imports them by name: when present it uses the upstream export, when missing it falls back to an equivalent implementation here (`foldScheduleEventsCompat` / `scheduleViewCompat` in `src/user-tools.ts`). `resolveEveryOccurrence`, `renderReminderFraming` and friends are still there, so recurring advancement and reminder framing keep using upstream. (GitHub issue #12)
+From `0.2.2-alpha.3` on upstream `@deepseek-ai/dsh-schedule` removed four old exports (switching to a domain / task model). This plugin is adapted: it uses upstream when present and an equivalent local implementation when absent, so recurring tasks and reminder wording are unaffected.
 
 Starting with `0.2.2-rc.2` the host ships two breaking changes, both adapted here: first,
 `dsh-client-ui-primitives` dropped `useAnchoredPosition` (its replacements `useAnchoredMaxHeight` / `usePointerGrace`
 mean different things), so the schedule panel now uses **CSS anchor positioning** while older generations still
 pass the original hook through; second, `AgentRegistry.roots()` was removed (the registry keeps only `get()` /
 `list()`, and the owner relation is no longer observable), so the four "root only" checks fall back to the
-session header's `delegationDepth`. Both were verified face by face on real kernels (#158).
+session header's `delegationDepth`.
 
-Both this line and `peerDependencies` are derived from the generation table (`node scripts/sync-peer-matrix.mjs`) and shaped as **per-segment bounded ranges**, not a whitelist: later rcs within a segment and that segment's final release are admitted together (range syntax cannot express "only these verified versions"). Both sides have to be bounded because the enforcers differ: from 0.2.1 on the kernel reads only `engines.dsh`, while 0.1.7-rc.1 through 0.2.0-rc.2 read only the `dsh-*` peer ranges — and 0.1.2-rc.1 and 0.1.5-rc.3 have no compatibility gate at all, so on those two the lines are documentation, not enforcement.
+Both this line and `peerDependencies` are derived from the generation table as per-segment bounded ranges. Both sides must be bounded: kernels from `0.2.1` read only `engines.dsh`, older ones only the `dsh-*` peers.
 
-Each side leaked once, both measured rather than reasoned: `engines.dsh` was a hand-written wide string (`>=0.1.2-rc.1 <0.2.0-0` admitted `0.1.3-alpha.2`, `0.1.6-alpha.1`, `0.1.7-alpha.1`, `0.2.2-alpha.2`) — that last one has since been promoted into the table as a real generation, see below, while the peer side still used per-generation carets — and `^0.1.2-rc.1` expands to `>=0.1.2-rc.1 <0.2.0-0`, i.e. **the whole minor matches**. Tightening only `engines` would therefore have reinforced the door nobody walks through. Both are segment-bounded now.
+`0.2.2-alpha.2` brings **two contract changes** rather than cosmetic differences: `SessionProjectionStateMap` was removed upstream, and `register()` now returns `Promise<ProjectionHandle>` with an explicit "await registration before publishing consumers" requirement. See [docs/verification.md](./docs/verification.md) under "0.2.2-alpha.2".
 
-`0.2.1-rc.3` and `0.2.1-rc.4` were promoted into the table with all four faces measured: assembly and real delivery GREEN each **in its own process** and passing the same-source guard (which refuses to count a run where the plugin resolves kernel modules from a different tree than the one under test), cross-generation tsc green for both projects, and the gate green using **each generation's own** evaluator. Local development still pins `0.2.1-rc.2` (recorded as an explicit constant that must be updated deliberately); newer generations are covered per-generation via `--steps type` rather than by moving the local pin.
+Two boundaries:
 
-`0.2.2-alpha.2` is newly added, and it brings **two contract changes** rather than cosmetic differences: `SessionProjectionStateMap` was removed upstream, and `register()` now returns `Promise<ProjectionHandle>` with an explicit "await registration before publishing consumers" timing requirement instead of a synchronous disposer. Landing files and measurement method are in [docs/verification.md](./docs/verification.md) under "0.2.2-alpha.2：投影注册契约变更". This row says "Supported" **only because all four faces were measured**: nine generations each ran mount + function in its own process (same-source=same, `spliced=1 dispatch=Y`, `at` shapes 5/5), cross-generation tsc is clean for both projects, and the gate passes using **each generation's own** evaluator (`0.1.2-rc.1` / `0.1.5-rc.3` are a **structural "not judged"** — their app-boot does not export that function — and are not counted green), with a real-GUI screenshot for this generation in `docs/media/ui-matrix-2026-10-30-realgui/`. Per-item evidence is in [docs/verification.md](./docs/verification.md) under "0.2.2-alpha.2"; until all four were green the row said "Pending verification", because pre-declaring GREEN would have users install against a verdict nobody measured. `devDependencies` are likewise not moved for it (alphas stay out of the local compile baseline); the new generation is covered via `--steps type` plus the real-kernel four faces.
-
-Two boundaries are worth stating, otherwise they look like oversights:
-
-- **`0.1.1-rc.2` is not supported.** Not because the code fails there, but because its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict. Support is moot until upstream publishes it.
-- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3` (measured: 237 of 238 `@deepseek-ai/dsh*` entries were not `rc.1`). **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
-  This section used to claim that an "rc.1 launcher + rc.3 components" mix "does not start at all" — **that was a misjudgement and has been withdrawn**: the same mixed tree mounts and delivers once peers are backfilled. The failures came from two assembly quirks of our own verification script (a hard-coded launcher location, and skipping peer installation), not from a kernel limitation. `rc.1` stays outside the support range for one reason only: that shape has not been verified — not because it cannot work.
-
-Each generation is verified on four faces (baseline `main@28ca1dc`, i.e. 1.8.0, measured 2026-10-26): mount (a cold start on a real kernel loads the plugin), function (a due reminder really delivers, judged on event shapes, not on log text), type (the entire `@deepseek-ai/dsh*` line swapped to that generation, both tsconfig projects compile with zero errors), UI (a real GUI renders the timer button, the dock and the panel, screenshotted per generation). Rerun the first three with `npm run verify:kernels:all`, and the UI face with `npm run verify:ui`. The measurements, per-generation verdicts and method belong to [docs/verification.md](./docs/verification.md) and [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md); this table reports conclusions only.
-
-The paragraph above is the **1.8.0 baseline record — "six generations" is how many were actually run in that round** and is not rewritten as generations are added (the history is the evidence). A separate round added the four faces for `0.2.2-alpha.2`, so the generation table grew from 8 rows to 9; the conclusions are now backfilled in [docs/verification.md §0.2.2-alpha.2](./docs/verification.md) (all four faces green across 9 generations; per-generation UI results in [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md)), which is why the table above can say "Supported" rather than pre-spending a verdict.
-
-The bundled `SKILL.md` exposure point is not covered by that baseline. It depends on the **assembly**, not the generation (it silently disappears when the host assembly has no skills service, see above), and its cross-generation evidence lives in `tests/skill-provider.test.mjs`: the real `SkillRegistry` cases run `0.2.1-rc.2` by default, and other generations need `DSH_LATER_SKILL_PKG` pointed at that generation's `dsh-skill/lib/index.js`.
+- **`0.1.1-rc.2` is not supported.** Its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict.
+- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`. **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
 
 Which side enforces the version gate also depends on the generation: kernels up to `0.2.0` do **not** read `engines.dsh` (they check only the per-generation `@deepseek-ai/dsh-*` peer list), and from `0.2.1` on `engines.dsh` decides on its own. So "it got installed on this old kernel" does not mean "this kernel honours the range I declared".
 
@@ -345,103 +334,36 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | Scheduled message marker | Clock marker on bubbles delivered by `/later`: `left` always beside the bubble / `meta` a small line above / `hover` only on hover / `off` leaves rendering to the host. **Only effective on kernel 0.2.1+** | left |
 | **Advanced syntax** (Beta) | Master switch for multi-shot forms: `+1h*3`, `+1h+1h+0.5h`, `15:32+16:32`, `9:00+1d`. When off, those forms are rejected with a pointer back to settings | **On** |
 
-> Advanced syntax is marked Beta not because it is untested (the grammar and the expansion are covered case by case in `tests/occurrences.test.mjs`, with per-generation measurements in [docs/verification.md](./docs/verification.md)) but because **the expanded result still needs real-world observation**: whether 10 tasks flood the dock, and whether the 60-second floor and 10-task cap are the right sizes.
+> Advanced syntax is marked Beta because **the resulting presentation still needs watching**: whether ten reminders from one command flood the chat, and whether the 60-second floor and the 10-cap feel right. The grammar itself is covered case by case; see [docs/verification.md](./docs/verification.md).
 > Turning it off does **not** restore the old silent mis-parse (`+1h*3 x` creating one task whose content is `*3 x`) — that was a bug, not a fallback. The residual-token guard is independent of this switch and always on.
 
 > Advanced: defaults can also be overridden at startup via `cordis.patch.yml` (e.g. `maxSchedules`) — see `docs/` and the schema.
 
 ---
 
-## For plugin developers: the schedule summary API (cross-plugin)
+## For plugin developers
 
-dsh-later exposes a workspace-wide schedule summary as a public data face
-(issue #17), so other client
-plugins (e.g. dsh-group-status) can aggregate schedule state on folders/sidebar rows
-**without** parsing the `userSchedules` projection themselves — and without drifting
-from the inline row badge.
+Two contracts are exposed; full detail lives in [docs/technical/03-api-reference.md](./docs/technical/03-api-reference.md):
 
-Declare the external module in `package.json` first:
-
-```json
-{ "dsh": { "client": { "platform": "web", "external": ["dsh-later"] } } }
-```
-
-Then `require('dsh-later/client')` inside the client factory:
-
-```js
-const { getScheduleSummaryStore, summarizeScheduleGroup, useScheduleSummary } = require('dsh-later/client')
-
-// 1) Read the store directly: session id → { count, pausedCount, nextAt, state }
-const store = getScheduleSummaryStore() // undefined when dsh-later is not loaded
-const summary = store?.getSnapshot() ?? new Map()
-
-// 2) Aggregate per group (used by the folded-folder badge)
-const group = summarizeScheduleGroup(summary, groupSessionIds)
-// → { sessions, count, pausedCount, nextAt?, state? }
-
-// 3) Subscribe inside a React component (re-renders if the store arrives late)
-const live = useScheduleSummary()
-```
-
-| Field | Meaning |
-|---|---|
-| `count` | Number of schedules (**including** paused ones) |
-| `pausedCount` | Paused schedules (they count toward `count` but **not** toward `nextAt`) |
-| `nextAt` | Earliest fire time (epoch ms); `undefined` when everything is paused |
-| `state` | `scheduled` / `urgent` (≤5 min) / `overdue` (due but not dispatched), judged at snapshot time |
-
-Contract notes:
-
-- The summary contains **only sessions with schedules**; consumers look up their own `sessionIds`.
-- The store is the **single source of truth**: dsh-later's own sidebar badge reads it too, so the
-  two can never disagree. It owns the `sessions.list` subscription, the 30s state tick and the
-  60s `session.list` read RPC (visible-page only).
-- Consumers must tolerate `undefined` (dsh-later not installed/enabled) and degrade silently.
-
-### The folded-group badge: we register the facet ourselves (issue #36)
-
-"How many sessions in this group have scheduled reminders" is now owned end to end: dsh-later
-registers `dsh-later.schedule` inside its own client `apply`, following
-[the facet protocol v1](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md),
-and hands over fold / merge / label / renderIcon. The counting basis (sessions **with** schedules),
-the tone (purple scheduled / orange urgent / red overdue), the pulse (only urgent and overdue
-blink), the wording (`N 定时任务` / `N Scheduled`) and the glyph (the official outline clock at
-14px) are all decided here — the consumer only honours the protocol shape.
-
-- **dsh-group-status is an optional partner.** When it is not installed or not enabled,
-  `require('dsh-group-status/client')` throws; we catch it and skip registration. That is why it is
-  in **neither** `dsh.client.external` **nor** the module-level `inject` — the top-level `inject`
-  is an activation gate, and a hard dependency there would leave this plugin permanently pending
-  whenever the partner is absent (the issue #34 P0).
-- A protocol-version mismatch is skipped **visibly** (one `console.warn`): "I registered it, why is
-  nothing showing" has to be diagnosable.
-- **The visibility switch lives here** (issue #83): `showInGroupBadge`, on by default. Partner PR #37
-  deprecated `settingKey` in the protocol (v1 still accepts it but no longer reads it), leaving exactly
-  one rule: **registered means shown, unregistered means hidden**. So "turn scheduled reminders off"
-  can only be executed by us — off means we do not register. Saving in settings applies immediately (the
-  registration follows the subscription), no page refresh; with dsh-group-status absent the row has no
-  visible effect.
-- Every field matches the consumer's former stopgap adapter, and
-  `tests/group-status-facet.test.mjs` keeps a copy of that adapter's algorithm as the oracle.
-  Changing the display semantics now has to clear that baseline instead of drifting silently.
-
-The summary API above stays available for consumers that read numbers directly (session rows,
-hover cards); both paths read the same store.
+- **Schedule summary API (`dsh-later/client`, cross-plugin)**: `getScheduleSummaryStore()` / `summarizeScheduleGroup()` /
+  `useScheduleSummary()`. Other client plugins (e.g. dsh-group-status) aggregate schedule state from it instead of
+  parsing the `userSchedules` projection themselves, and cannot drift from the inline row badge. Consumers must
+  tolerate `undefined` (plugin not loaded) and degrade silently.
+- **Folded-group badge facet (`dsh-later.schedule`)**: registered per
+  [facet protocol v1](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md);
+  counting basis, tone, pulse, wording and glyph are all decided here. dsh-group-status is an **optional partner**:
+  when absent we skip registration and everything else keeps working. Visibility is the `showInGroupBadge`
+  switch here (off means no registration, so the partner no longer needs a switch of its own).
 
 ## Technical documentation
 
-Developer- and maintainer-oriented content has moved out of this README:
+- [Architecture and data flow](./docs/architecture.md)
+- [Key design decisions](./docs/design-decisions.md)
+- [Verification status](./docs/verification.md)
+- [UI cross-generation screenshot matrix](./docs/notes/ui-matrix.md)
+- [Plugin API reference](./docs/technical/03-api-reference.md)
 
-- [Architecture & data flow](./docs/architecture.md) — host/client layering, event flow, layout, scheduler rationale
-- [Key design decisions](./docs/design-decisions.md) — `source` field, slash channel, fork isolation, anti-spoofing tradeoffs
-- [Verification & acceptance criteria](./docs/verification.md) — tests, live E2E, cross-kernel compatibility, AC table
-- [Cross-kernel UI screenshot matrix](./docs/notes/ui-matrix.md) (how each generation boots a real GUI, what is judged, and the running verdicts)
-
-## References
-
-- PRD & design docs: `prd.md` and `docs/` in the project root (workspace-level, outside this package)
-- dsh-schedule source analysis: `../references/dsh-schedule-analysis.md`
-- dsh-sleep-send source analysis: `../references/dsh-sleep-send-analysis.md`
+Source-analysis notes live in [`references/`](./references) (`dsh-schedule-analysis.md`, `dsh-sleep-send-analysis.md`); the PRD is [`prd.md`](./prd.md).
 
 ## License
 
