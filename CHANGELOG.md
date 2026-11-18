@@ -4,6 +4,19 @@
 
 ## 未发布
 
+- **chore** 跟进内核 `next` 轨前进到 `0.2.2-rc.4`：验证并登记，**零代码改动**。
+
+  内核 `next` 从 rc.3 前进到 rc.4。逐包 diff（schedule / primitives / agent / commands /
+  session / settings）运行时产物零差异；对 1.14.0 跑 mount/function/type/gate/UI 五面全绿
+  （投递 `spliced=1 dispatch=Y`、type 换线 19 处通过、gate 双 pass、UI `错误=0 警告=0`）。
+
+  因代码零改动且 peer 同段已覆盖，**不需要发新插件版**；但把 rc.4 登记进
+  `KERNEL_GENERATIONS` 与 `VERIFIED_ON['1.14.0']`，使 `next` 通道继续指向 1.14.0。
+  `npm run sync:tags` 对账：`next → 1.14.0（kernel@next = 0.2.2-rc.4）`，已是目标状态。
+
+  顺带修正 `verified-on.ts` 的登记纪律：已发布版本在**真实验证通过**后可以追加新代次
+  （不必发版），禁止的只是「没验证就声称支持」。台账现为 14 代。
+
 - **feat** 发布通道 tag 跟随内核 dist-tag：`latest` / `next` / `alpha` 三条对齐。
 
   内核用三条轨分发（`latest`→0.2.2-rc.1、`next`→0.2.2-rc.3、`alpha`→0.2.2-alpha.3），
