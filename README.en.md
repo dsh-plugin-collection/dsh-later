@@ -40,9 +40,9 @@ All of these are accepted (`/schedule`, `/later`, and the panel's custom time sh
 
 | Kind | Examples |
 |---|---|
-| Relative duration | `+30m` · `+1h30m` · `+90s` · `+1w` · `30分钟后` · `半小时后` |
+| Relative duration | `+30m` · `+1h30m` · `+90s` · `+1w` · `30分钟后` · `半小时后` · `in 30 minutes` · `in 30 Minuten` · `dans 30 minutes` · `en 30 minutos` · `через 30 минут` · `em 30 minutos` |
 | Time today | `15:32` · `9点` · `9点半` · `1532` |
-| Relative day + time | `明天9点` · `后天 10:00` |
+| Relative day + time | `明天9点` · `明日9時` · `tomorrow 9am` · `morgen 9 Uhr` · `demain 9:00` · `mañana 9:00` · `завтра 9:00` · `amanhã 9:00` |
 | Date + time | `8月21日 15:32` · `2026-08-21 15:32` · `0821-1532` |
 | Repeat, fixed interval (*commands only*) | `+1h*3 drink water` · `+30m×2 check build` |
 | Repeat, chained sequence (*commands only*) | `+1h+1h+0.5h watch the rollout` · `+1h +30m submit report` |
@@ -178,7 +178,9 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
   - For 120s after you close a session it is not opened proactively — but a reminder that has **already come due** is exempt (it retries after a grace period, and anything suppressed is recorded as `undelivered` with a warning).
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
 - **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
-- **Multilingual**: follows the DSH UI language (Chinese / English), live without reload.
+- **Multilingual**: UI copy follows the DSH UI language across **8 locales** (中文 / English / 日本語 / Español / Français / Deutsch / Русский / Português), live without reload.
+  
+  > ⚠️ **Six** of them (ja / es / fr / de / ru / pt) are machine-translated and only passed mechanical checks (placeholders preserved verbatim, proper nouns untranslated, no zero-width characters) — **not reviewed by native speakers**. Please open an issue for bad translations.
 - **Reminders don't carry across sessions**: sessions forked from this one never inherit the parent's reminders.
 
 ---
@@ -340,6 +342,7 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | Interjection delivery | Which queue "Send interjection" uses: own turn (default, safe) / current turn (faster, can drop in an edge case) | Own turn |
 | Delivery confirmation / on unconfirmed | Whether to verify a reminder really landed, and what to do when it isn't confirmed | On / keep |
 | Clock icon style | `auto` (by kernel version) / `modern` / `classic` | auto |
+| Scheduled message marker | Clock marker on bubbles delivered by `/later`: `left` always beside the bubble / `meta` a small line above / `hover` only on hover / `off` leaves rendering to the host. **Only effective on kernel 0.2.1+** | left |
 | **Advanced syntax** (Beta) | Master switch for multi-shot forms: `+1h*3`, `+1h+1h+0.5h`, `15:32+16:32`, `9:00+1d`. When off, those forms are rejected with a pointer back to settings | **On** |
 
 > Advanced syntax is marked Beta not because it is untested (the grammar and the expansion are covered case by case in `tests/occurrences.test.mjs`, with per-generation measurements in [docs/verification.md](./docs/verification.md)) but because **the expanded result still needs real-world observation**: whether 10 tasks flood the dock, and whether the 60-second floor and 10-task cap are the right sizes.
