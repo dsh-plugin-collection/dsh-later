@@ -92,7 +92,7 @@
 /later +2h+1h+30m 催我交周报
 ```
 
-dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-list` `-delete` `-edit` `-pause` `-resume` `-steer-now` 这几条命令（参数是一段 JSON），手动敲也能用；只是它们按"被点"设计，不面向手打。手敲时**需要带载荷**：除 `-list`（无需参数，参数一律忽略）外都要跟一段 JSON，例如 `/user-schedule-delete {"id":"schedule-…"}`；`-delete` / `-pause` / `-resume` / `-steer-now` 也接受裸 id，`/user-schedule-pause schedule-…` 与 `{"id":"schedule-…"}` 等价。
+dock 上的按钮就是 `/user-schedule-create` `-list` `-delete` `-edit` `-pause` `-resume` `-steer-now` 这几条命令（参数一段 JSON），手敲也能用。手敲要带载荷：`-list` 之外都要跟 JSON，例如 `/user-schedule-delete {"id":"schedule-…"}`；`-delete` / `-pause` / `-resume` / `-steer-now` 也接受裸 id。
 
 手敲这些命令（连同 `/schedule`、`/later`）都是**两次回车**：第一次回车把整行认领成命令，第二次回车才执行。这是内核「带参数的命令」的统一顺序，不是本插件的额外步骤——内核的命令入参描述里没有「参数可选」这一面，所以一次回车就把整行交出去的话，带参手敲会当成普通聊天消息发给模型。副作用是 `/user-schedule-list` 从一次回车变成两次：点按钮和面板刷新不受影响，只有手敲这条会觉得多按一下。
 
@@ -168,14 +168,11 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 - **侧栏状态标识**：有活动提醒的会话，侧栏显示像素时钟（紫=定时中 · 琥珀=5 分钟内 · 红=已到期），悬停可见任务数与下次时间；全部暂停时改为「已暂停」。
 - **跨内核代次可用**：从 `0.1.2-rc.1` 到 `0.2.2-rc.4` 共十四个代次逐代表过，含真 GUI 截图矩阵，见[支持的 DSH 内核](#支持的-dsh-内核)。
 - **关网页也能触发，两档都成立**：
-  - **浏览器关掉、服务端在跑**：一直以来如此——提醒存在服务端，关网页、换设备都会准时到达。
-  - **服务端重启、那条会话从没被打开过**：现在也成立，但**兑现于 1.12.1**。宿主级的到期扫描器随 1.12.0 发布，那一版带着「唤醒会话却不驱动投递」的缺陷（`registry.mount()` 返回 runtime 而非 `undefined`，`if (mounted === undefined)` 恒假），所以 1.12.0 上冷会话到点仍不会响；1.12.1 起改为无条件驱动，到点自己把会话拉起来投递，不再依赖「恰好有人打开了那条会话」。
+  - **浏览器关掉、服务端在跑**：提醒存在服务端，关网页、换设备都会准时到达。
+  - **服务端重启、那条会话从没被打开过**：成立，但需要 **1.12.1 及以上的插件版本**。1.12.0 带着「唤醒会话却不驱动投递」的缺陷，那些提醒到点不会响。
 
-  边界（都写进了 [`docs/verification.md`](./docs/verification.md) 的「剩余边界」）：
-  - 需要宿主能重建会话：web（有 `sessionController`）走它，其余 profile 回退 `agents.resume`；两条都不通时那条提醒记 `undelivered` 并告警，不会反复重试。
-  - **被委托的子会话（`delegationDepth > 0`）不冷唤醒**：上游对子会话的提醒投递本来就拒绝，拉起来只会白跑。
-  - **冷唤醒会计一个 turn**：`agents.resume` 是真建 agent；宿主没配 provider 时那一轮会以 `no provider/model` 错误收尾。扫描器对「反复投不出去」有 1s→2s→4s→8s 的退避与上限，不会刷错误。
-  - 你刚关掉某个会话后的 120s 内不会主动去打开它；但**已经到点**的提醒不受这条限制（会在宽限后重试，被挡下的会记 `undelivered` 并告警）。
+  边界与退避策略见 [`docs/verification.md`](./docs/verification.md) 的「剩余边界」：宿主得能重建会话（两条路都不通时记 `undelivered` 并告警，不反复重试）；被委托的子会话不冷唤醒；冷唤醒会占用一个 turn；刚关掉的会话有 120s 宽限。
+
 - **不会冒充你本人**：到点后显示为「定时提醒」消息，而不是假装是你自己发的。
 - **模型会主动替你排**：随包分发的 `SKILL.md`（技能名 `later-reminders`）常驻模型的 skill catalog，用户没说「设个提醒」也会主动排程，并分清本插件与内核官方 `schedule_create` 的用途；宿主装配里没有 skills 服务时这一项自动缺席，不影响其余功能。
 - **多语言**：界面文案跟随 DSH 界面语言，覆盖全部 **8 门**（中文 / English / 日本語 / Español / Français / Deutsch / Русский / Português），切换即时生效。
@@ -235,32 +232,21 @@ dock 上的按钮不是私有通道，它们就是 `/user-schedule-create` `-lis
 
 声明在 `package.json` 的 `engines.dsh`：`>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`；Node 需要 `^22.19 || >=24`。
 
-`0.2.2-alpha.3` 起，`@deepseek-ai/dsh-schedule` 移除了 `decodeScheduleChange`、`foldScheduleEvents`、`scheduleView`、`SCHEDULE_CHANGE_VERSION` 四个旧导出（改为 domain / task 模型）。本插件从这一代起不再具名导入它们：存在时用上游，缺失时用本仓等价实现（语义与上游逐条对齐，见 `src/user-tools.ts` 的 `foldScheduleEventsCompat` / `scheduleViewCompat`）。`resolveEveryOccurrence`、`renderReminderFraming` 等仍在，周期任务推进与提醒文案继续用上游。（GitHub issue #12）
+`0.2.2-alpha.3` 起上游 `@deepseek-ai/dsh-schedule` 移除了四个旧导出（改用 domain / task 模型）。本插件已适配：上游有就用上游，缺了就用自己的等价实现，周期任务推进与提醒文案不受影响。
 
 `0.2.2-rc.2` 起有两处宿主侧破坏性变更，本插件都已适配：其一，`dsh-client-ui-primitives` 删掉了
 `useAnchoredPosition`（替代面 `useAnchoredMaxHeight` / `usePointerGrace` 语义不同），定时面板改走 **CSS 锚点定位**，
 老代次仍透传原 hook；其二，`AgentRegistry.roots()` 被移除（注册表只剩 `get()` / `list()`，owner 关系不可见），
-「只认 root」的 4 处判定改由会话头的 `delegationDepth` 补位。两处都在真内核上逐面验过（#158）。
+「只认 root」的判定改由会话头的 `delegationDepth` 补位。
 
-这行声明与 `peerDependencies` 都由代次表推导（`node scripts/sync-peer-matrix.mjs`），形状是**按版本段收口的范围**，不是白名单：同一版本段内更晚的 rc 与该段正式版会一并放行（range 语法写不出「只认已验证的那几个」）。**两侧都必须收**，因为执行者不同：0.2.1 起内核只看 `engines.dsh`，而 0.1.7-rc.1～0.2.0-rc.2 只看 `dsh-*` peer，0.1.2-rc.1 与 0.1.5-rc.3 两代根本没有兼容门禁（那两代上这两行是说明，不是拦截）。
+这行声明与 `peerDependencies` 都由代次表推导，两侧都按版本段收口。0.2.1 起内核只看 `engines.dsh`，更早的代次只看 `dsh-*` peer，所以两侧都得对。
 
-两处此前各漏过一次，都是实测出来的：`engines.dsh` 曾是手写宽串（`>=0.1.2-rc.1 <0.2.0-0` 放行 `0.1.3-alpha.2`、`0.1.6-alpha.1`、`0.1.7-alpha.1`、`0.2.2-alpha.2`；最后这个后来是作为**新代次正式入表**的，见下文）；而 peer 那侧当时仍是逐代 caret，`^0.1.2-rc.1` 展开为 `>=0.1.2-rc.1 <0.2.0-0`、**整条 minor 都命中**，所以只改 engines 等于把门修在了没人走的那一侧。现在两侧都是逐段收口。
+`0.2.2-alpha.2` 带来**两条契约变更**（不是外观差异）：`SessionProjectionStateMap` 从上游移除，以及 `register()` 的返回从同步 disposer 变成 `Promise<ProjectionHandle>`，并要求「注册完成前不得对外发布消费方」。落点见 [docs/verification.md](./docs/verification.md) 的「0.2.2-alpha.2：投影注册契约变更」。
 
-`0.2.1-rc.3` / `0.2.1-rc.4` 于本轮补齐四个面并正式入表：装配与真投递各自起**独立进程**实测 GREEN 且通过同源守卫（该守卫要求插件解析到的内核模块与被测树同源，否则结论不作数），跨代 tsc 两项目通过，门禁用**各代自己的**评估器判 pass。本地开发固定的代次仍停在 `0.2.1-rc.2`（`devDependencies` 由一条显式常量记录，升级时要同步改它），更新的代次靠 `--steps type` 逐代覆盖。
+两条边界：
 
-`0.2.2-alpha.2` 是新加的一代，它带来**两条契约变更**（不是外观差异）：`SessionProjectionStateMap` 从上游移除，以及 `register()` 的返回从同步 disposer 变成 `Promise<ProjectionHandle>` 并附带「注册完成前不得对外发布消费方」的 await 时序。落点与实测口径见 [docs/verification.md](./docs/verification.md) 的「0.2.2-alpha.2：投影注册契约变更」。这一代是**四面都实测过才写「支持」的**：9 个代次各自独立进程跑 mount + function（同源=same、`spliced=1 dispatch=Y`、`at 形状 5/5`）、跨代 tsc 两个项目 0 错误、门禁用**各代自己的**评估器判 pass（`0.1.2-rc.1` / `0.1.5-rc.3` 两代的 app-boot 不导出该函数，属**结构性未判定**，没记成绿），本代另有真 GUI 截图（`docs/media/ui-matrix-2026-10-30-realgui/`）。逐条证据见 [docs/verification.md](./docs/verification.md) 的「0.2.2-alpha.2」小节 —— 只有四面全绿之后这一行才会写「支持」，在那之前一律写「待验证」，因为预支一个 GREEN 等于让用户按没跑过的结论装插件。同样地，`devDependencies` 不为它挪动（alpha 不进本地编译基线），新代次靠 `--steps type` 与真内核四面覆盖。
-
-两条边界说明白，免得被当成「漏支持」：
-
-- **`0.1.1-rc.2` 不支持。** 不是代码跑不通，而是它那条依赖线在 registry 里装不出来（`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` 未发布），任何工具都给不出结论；上游补发之前谈不上支持。
-- **`0.1.5` 按 `rc.3` 验证，不覆盖 `rc.1`。** `dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，默认安装会把整条插件线解析到 `rc.3`（实测 238 个 `@deepseek-ai/dsh*` 里 237 个不是 `rc.1`），所以**你实际拿到的就是统一的 `rc.3`**，我们只按它验证。
-  早先这里写过「`rc.1` 启动器 + `rc.3` 组件根本起不来」——那是**误判并已撤回**：同一棵混装树在补齐 peer 之后能正常装配并投递；当时的失败来自验证脚本自己的两处装配口径（写死启动器位置、跳过 peer 安装），不是内核限制。把 `rc.1` 排除在支持范围外，理由始终是「未按该形态验证」，不是「它不能用」。
-
-六代逐代验过四个面（基线 `main@28ca1dc`，即 1.8.0，2026-10-26 实测）：装配（真内核冷启动挂上插件）、功能（到点真实投递的事件形状）、类型（整条 `@deepseek-ai/dsh*` 依赖线换成该代次后两个 tsconfig 零错误）、UI（真 GUI 里定时按钮 / dock / 面板逐代截图留档）。前三个面复跑 `npm run verify:kernels:all`，UI 面复跑 `npm run verify:ui`。实测口径、逐代结论与方法归 [docs/verification.md](./docs/verification.md) 和 [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md)，本表只报结论。
-
-上一段是 **1.8.0 那轮的基线记录，「六代」就是当时实际跑过的数量**，不随后来加代次改写（历史即证据）。本轮另为 `0.2.2-alpha.2` 补测四面，代次表因此从 8 条变 9 条；结论已回填进 [docs/verification.md 的 §0.2.2-alpha.2](./docs/verification.md)（9 代次 × 四面全绿，UI 面逐代结论见 [docs/notes/ui-matrix.md](./docs/notes/ui-matrix.md)），所以上面那张表现在给它写的是「支持」，不是预支。
-
-随包分发的 `SKILL.md` 那个曝光位不在这份基线里。它按**装配**而非代次决定有无（宿主装配里没有 skills 服务时静默缺席，见上文），跨代证据在 `tests/skill-provider.test.mjs`：真 `SkillRegistry` 的用例默认只跑 `0.2.1-rc.2`，其它代次要用 `DSH_LATER_SKILL_PKG` 指认该代的 `dsh-skill/lib/index.js`。
+- **`0.1.1-rc.2` 不支持。** 它那条依赖线在 registry 里装不出来（`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` 未发布），任何工具都给不出结论。
+- **`0.1.5` 按 `rc.3` 验证，不覆盖 `rc.1`。** `dsh@0.1.5-rc.1` 的内部依赖写的是 `^0.1.5-rc.1`，默认安装会把整条插件线解析到 `rc.3`，所以**你实际拿到的就是统一的 `rc.3`**，我们只按它验证。
 
 版本门禁在哪一侧生效也随代次不同：`0.2.0` 及更早的内核**不读** `engines.dsh`，只看 `@deepseek-ai/dsh-*` 的逐代 peer 枚举；`0.2.1` 起才由 `engines.dsh` 单独决定。所以「在这台老内核上被装进来了」不等于「这代内核认了你声明的范围」。
 
@@ -339,95 +325,34 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 | 定时消息标记 | `/later` 送达的气泡上挂时钟标记：`left` 左侧常显 / `meta` 上方一行小字 / `hover` 悬停才现 / `off` 不接管渲染。**仅 0.2.1 及以上内核生效** | left |
 | **高级语法** <span>实验性</span> | 多次写法总开关：`+1h*3`、`+1h+1h+0.5h`、`15:32+16:32`、`9:00+1d`。关闭后这些写法被明确拒绝并提示回设置开启 | **开启** |
 
-> 「高级语法」标实验性的原因不是没测（文法与展开由 `tests/occurrences.test.mjs` 逐条覆盖，逐代实测见 [docs/verification.md](./docs/verification.md)），而是**展开后的观感仍需观察**：一次命令写 10 条会不会刷屏、60 秒地板与 10 条上限是否合适。
+> 「高级语法」标实验性，是因为**展开后的观感仍需观察**：一次命令写 10 条会不会刷屏、60 秒地板与 10 条上限是否合适。文法本身有测试逐条覆盖，见 [docs/verification.md](./docs/verification.md)。
 > 关闭它**不会**退回旧版的静默误解析（`+1h*3 x` 建成一条内容为 `*3 x` 的任务）——那是 bug，不在可回退的功能面里；残片守卫与本开关无关，始终生效。
 
 > 进阶：也可以用 `cordis.patch.yml` 在启动期覆盖默认值（如 `maxSchedules`），见 `docs/` 与 schema。
 
 ---
 
-## 给插件开发者：定时摘要 API（跨插件）
+## 给插件开发者
 
-dsh-later 把「全会话定时任务摘要」作为公共数据面暴露出来
-（issue #17），其它客户端插件
-（如 dsh-group-status）据此在分组/侧栏聚合显示定时状态，**无需**自己解析
-`userSchedules` 投影，也不会与行内 badge 漂移。
+本插件对外有两处契约，细节都在 [docs/technical/03-api-reference.md](./docs/technical/03-api-reference.md)：
 
-消费方先在 `package.json` 声明外部模块：
-
-```json
-{ "dsh": { "client": { "platform": "web", "external": ["dsh-later"] } } }
-```
-
-然后在客户端 factory 里 `require('dsh-later/client')`：
-
-```js
-const { getScheduleSummaryStore, summarizeScheduleGroup, useScheduleSummary } = require('dsh-later/client')
-
-// 1) 直接读 store：会话 id → { count, pausedCount, nextAt, state }
-const store = getScheduleSummaryStore() // dsh-later 未加载时为 undefined
-const summary = store?.getSnapshot() ?? new Map()
-
-// 2) 按分组聚合（折叠分组徽标直接用它）
-const group = summarizeScheduleGroup(summary, groupSessionIds)
-// → { sessions, count, pausedCount, nextAt?, state? }
-
-// 3) React 组件内订阅（store 迟到也会自动重渲染）
-const live = useScheduleSummary()
-```
-
-| 字段 | 含义 |
-|---|---|
-| `count` | 任务数（**含**暂停项） |
-| `pausedCount` | 暂停项数量（暂停项计入 count，但**不参与** `nextAt`） |
-| `nextAt` | 最早触发时刻（epoch ms）；全部暂停时为 `undefined` |
-| `state` | `scheduled` / `urgent`（≤5 分钟）/ `overdue`（已到期未派发），按快照时刻判定 |
-
-契约要点：
-
-- 摘要**只包含有任务的会话**，无任务的会话不出现；消费方按自己的 `sessionIds` 查表即可。
-- store 是**唯一数据权威**：dsh-later 侧栏 badge 也读它，因此两边必然同源；它内部负责
-  `sessions.list` 订阅、30s 状态 tick 与 60s `session.list` 读 RPC（仅页面可见时）。
-- 消费方必须容忍 `undefined`（dsh-later 未安装/未启用时静默降级）。
-
-### 折叠分组徽标：由我们自己注册 facet（issue #36）
-
-「组内有几个会话挂着定时任务」这一格，**语义与实现现在同侧**：本插件按 dsh-group-status 的
-[facet 协议 v1](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md)
-在自己 client 的 `apply` 里登记 `dsh-later.schedule`，交出 fold / merge / label / renderIcon。
-徽标数字的口径（组内**有任务的会话数**）、色档（scheduled 紫 / urgent 橙 / overdue 红）、
-脉冲（只有 overdue 与 urgent 闪）、文案（`N 定时任务` / `N Scheduled`）与图标（官方描边时钟
-14px）都由本插件判定，对方只认协议形状、不再逐家适配。
-
-- **dsh-group-status 是可选搭档**：它未安装 / 未启用时 `require('dsh-group-status/client')` 会抛，
-  本插件兜住并跳过登记。因此它**既不进** `dsh.client.external`，**也不进** client 的模块级 `inject`
-  ——顶层 `inject` 是激活门控，写成硬依赖会让本插件在对方缺席时永不激活（issue #34 那次 P0）。
-- 对端协议版本对不上时**可见地跳过**（一条 `console.warn`）：「我注册了为什么没显示」必须查得出原因。
-- **显隐开关在本插件**（issue #83）：`showInGroupBadge`，默认开。对端 #37 把协议里的
-  `settingKey` 废弃了（v1 仍接受，但不再读取），规则收敛成一条——**登记即显示，不注册即不显示**。
-  于是「关掉定时任务提示」只能由本插件执行：关掉就是不登记。设置页保存即时生效，不必刷新页面
-  （登记跟着订阅走）；未安装 dsh-group-status 时这一项没有可见效果。
-- 数字 / 色档 / 脉冲 / 文案 / 图标与它此前的过渡适配器逐项一致，并由
-  `tests/group-status-facet.test.mjs` 把那份适配器算法照抄成 oracle 做对拍——以后谁想改口径，
-  得先过这条基线，改动不再能静默生效。
-
-上面的摘要 API 仍然保留：侧栏行、悬浮卡片这类直接读数的消费方照旧用 `getScheduleSummaryStore()`
-与 `summarizeScheduleGroup()`，两条路读同一份 store。
+- **定时摘要 API（`dsh-later/client`，跨插件）**：`getScheduleSummaryStore()` / `summarizeScheduleGroup()` /
+  `useScheduleSummary()`。其它客户端插件（如 dsh-group-status）据此聚合显示定时状态，不必自己解析
+  `userSchedules` 投影，也不会与行内 badge 漂移。消费方须容忍 `undefined`（本插件未加载时静默降级）。
+- **折叠分组徽标的 facet（`dsh-later.schedule`）**：按 dsh-group-status 的
+  [facet 协议 v1](https://github.com/dsh-plugin-collection/dsh-group-status/blob/main/docs/facet-protocol.md)
+  登记；口径、色档、脉冲、文案、图标都由本插件判定。dsh-group-status 是**可选搭档**，未安装时跳过登记、
+  其余功能不受影响；显隐由本插件的 `showInGroupBadge` 控制（关掉就是不登记，所以对方不再需要自己的开关）。
 
 ## 技术文档
 
-以下内容面向开发者与维护者，已移出本 README：
+- [架构与数据流](./docs/architecture.md)
+- [关键设计决策](./docs/design-decisions.md)
+- [验证状态与验收对照](./docs/verification.md)
+- [UI 面跨代次截图矩阵](./docs/notes/ui-matrix.md)
+- [插件开发接口参考](./docs/technical/03-api-reference.md)
 
-- [架构与数据流](./docs/architecture.md) — 宿主/客户端分层、事件流、目录结构、调度器原理
-- [关键设计决策](./docs/design-decisions.md) — source 字段、slash 通道、fork 隔离、注入防护等取舍
-- [验证状态与验收对照](./docs/verification.md) — 测试、线上 E2E、跨内核代次兼容、AC 对照表
-- [UI 面跨代次截图矩阵](./docs/notes/ui-matrix.md)（每代怎么起真 GUI、判什么、历次结论）
-
-## 参考
-
-- PRD 与设计文档：项目根目录 `prd.md`、`docs/`
-- dsh-schedule 源码分析：`../references/dsh-schedule-analysis.md`
-- dsh-sleep-send 源码分析：`../references/dsh-sleep-send-analysis.md`
+源码分析笔记在 [`references/`](./references)（`dsh-schedule-analysis.md`、`dsh-sleep-send-analysis.md`）；PRD 见 [`prd.md`](./prd.md)。
 
 ## 许可
 
