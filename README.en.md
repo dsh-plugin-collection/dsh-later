@@ -111,13 +111,17 @@ Pause is only open to "wait N more minutes" (`after`) reminders that have not fi
 
 ### Sidebar presence indicator
 
-Conversations with active reminders show a pixel clock in their sidebar row (alongside the "active" orb):
+Conversations with active reminders show a clock in their sidebar row (alongside the "active" orb). Two styles switch with the kernel generation and can also be pinned in settings:
 
-| Icon | Meaning |
-|---|---|
-| <img src="assets/icons/icon-presence-scheduled.svg?v=18" width="28" alt="scheduled"/> | Purple · has scheduled reminders |
-| <img src="assets/icons/icon-presence-urgent.svg?v=18" width="28" alt="urgent"/> | Amber · next fire within 5 minutes |
-| <img src="assets/icons/icon-presence-overdue.svg?v=18" width="28" alt="overdue"/> | Red · overdue (waiting for the session to become idle) |
+| Meaning | Classic (pixel grid) | Modern (stroke + progress arc) |
+|---|---|---|
+| Purple · has scheduled reminders | <img src="assets/icons/icon-presence-scheduled.svg?v=18" width="28" alt="scheduled"/> | <img src="assets/icons/icon-presence-modern-scheduled.svg?v=19" width="30" alt="scheduled"/> |
+| Amber · next fire within 5 minutes | <img src="assets/icons/icon-presence-urgent.svg?v=18" width="28" alt="urgent"/> | <img src="assets/icons/icon-presence-modern-urgent.svg?v=19" width="30" alt="urgent"/> |
+| Red · overdue (waiting for the session to become idle) | <img src="assets/icons/icon-presence-overdue.svg?v=18" width="28" alt="overdue"/> | <img src="assets/icons/icon-presence-modern-overdue.svg?v=19" width="30" alt="overdue"/> |
+
+The bright outer arc in the modern style is the **fraction of the wait already elapsed**, filling in as the countdown runs: almost empty when just scheduled, a full ring at due time. When progress cannot be computed (a paused item, for example) the arc is not drawn and only the base ring remains.
+
+With the "clock icon style" set to `auto` (the default) the style follows the kernel generation: `0.2.0` and above use the modern one, `0.1.x` the classic one. It can also be pinned to `modern` or `classic`.
 
 Hover shows "Next at 15:32 · 3 task(s)"; when overdue it shows "Due · 3 task(s) (sends when the session is idle)". When every reminder in the conversation is paused the icon stays purple and hover reads "Paused · 3 task(s)", because a paused item has no scheduled time to report.
 

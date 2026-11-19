@@ -12,7 +12,7 @@
 
 > 旧文档里提到的 `docs/logo.svg` / `docs/logo-transparent.svg` 已不存在。
 
-`assets/icons/` 现有：`icon-bubble` · `icon-clock` · `icon-delete` · `icon-edit` · `icon-send` · `icon-schedule-btn` · `icon-presence` · `icon-presence-scheduled` · `icon-presence-urgent` · `icon-presence-overdue`。README 首屏用的是 `assets/icons/icon-presence-scheduled.svg`。
+`assets/icons/` 现有：`icon-bubble` · `icon-clock` · `icon-delete` · `icon-edit` · `icon-send` · `icon-schedule-btn` · `icon-presence` · `icon-presence-scheduled` · `icon-presence-urgent` · `icon-presence-overdue`（以上为**经典点阵版**）· `icon-presence-modern-scheduled` · `icon-presence-modern-urgent` · `icon-presence-modern-overdue`（**新版描边版**）。README 首屏用的是经典版的 `icon-presence-scheduled.svg`。
 
 ---
 
@@ -38,7 +38,9 @@
 
 **文件**：`src/client/session-presence.ts`
 
-两个变体常量，按设置选择：`CLOCK_SVG_CLASSIC`（10×10 像素风）与 `CLOCK_SVG_MODERN`；取值来自 `getClockIconStyle?.()`，`'auto' | 'modern' | 'classic'`，仅 `classic` 走像素版，其余走 modern 版。
+两个变体常量，按设置选择：`CLOCK_SVG_CLASSIC`（10×10 像素风）与 `CLOCK_SVG_MODERN`（24×24 描边 + 进度弧）；取值来自 `getClockIconStyle?.()`，`'auto' | 'modern' | 'classic'`。`auto` 由内核代次决定：装上 `configForms` 服务（0.2.0+）时用 modern，只有 `settingsScope`（0.1.x）时用 classic，见 `src/client/index.tsx` 的 `detectedVersion`。
+
+`assets/icons/icon-presence-modern-*.svg` 是 README 展示用的**静态复刻**：结构与 `CLOCK_SVG_MODERN` 一致（`r=9.5`、`stroke-width: 2`、12 点起顺时针的进度弧），但 `stroke-dashoffset` 固定成一个代表值 —— 三态分别取 40% / 80% / 100% 已过时长，其中 overdue 必为整环（代码里 `ratio >= 1` 归一到 1）。运行时那道弧由 `applyProgress()` 按真实比例改写。
 
 结构（像素版）：外层 `<g class="ss-presence-ring">` 是 8 个 2×2 方点组成的环，内层 `<g class="ss-presence-hand">` 是两根指针方点；SVG 用 `shape-rendering="crispEdges"` 保持像素硬边，`aria-hidden="true"`。
 
