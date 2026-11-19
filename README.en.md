@@ -66,9 +66,8 @@ At most **10 tasks** per command, and multi-shot intervals must be **≥ 60 seco
 
 Chains allow exactly **one direction: an absolute anchor, then forward accumulation.** `+1h+15:32` (a clock time after a duration) is rejected rather than guessed.
 
-Anchor chains are stored as `at` (wall clock) and relative chains as `after` (elapsed seconds). That is why
-`15:32+16:32` cannot be paused while `+1h*3` can, and why an anchor keeps the wall clock across DST
-(`9:00+1d` stays 09:00) while a relative chain counts real seconds.
+Anchor chains are stored as `at` (wall clock) and relative chains as `after` (elapsed seconds); which of the two can be paused is covered in [Pending dock](#pending-dock).
+An anchor keeps the wall clock across DST (`9:00+1d` stays 09:00) while a relative chain counts real seconds.
 
 ### Commands
 
@@ -98,7 +97,7 @@ Typing takes two presses of Enter: the first claims the line as a command, the s
 - Multi-shot syntax (`+1h*3`) attaches **the same** files to each expanded task; each row is still independently cancellable, editable and sendable.
 - The dock row shows a **real thumbnail**; if this host does not persist attachments, it degrades into an "available after send + size" marker. That does **not** mean the attachment was lost.
 - Each task renders at most 8 thumbnails in the dock, with `+N` for the rest; non-image attachments become a "file name + size" chip.
-- On kernel `0.1.2` the host `ContentBlock` union has no `file` variant, so a non-image attachment ships as a `[附件] <file name>` text block instead. Image blocks pass through unchanged on every supported kernel. See [Supported DSH kernels](#supported-dsh-kernels).
+- Non-image attachments degrade on older kernels; see the degradation table under [Supported DSH kernels](#supported-dsh-kernels).
 
 The model can create, list and delete reminders for you (`user_schedule_create` / `_list` / `_delete`) and can create **open-ended recurring** tasks ("remind me every hour"). Editing, pausing, resuming and sending now are not exposed to the model; those are dock buttons you press yourself. A bundled `SKILL.md` (skill `later-reminders`) also stays in the model's skill catalog and covers *when* to schedule proactively; it is absent when the host assembly has no skills service, and everything else works.
 
@@ -146,15 +145,10 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 |---|---|
 | <img src="docs/media/docs-scheduler-create.webp" width="380" alt="Create reminder demo"/> | <img src="docs/media/docs-scheduler-fired.webp" width="380" alt="Due firing demo"/> |
 
-**`/later` shortcut** — skip the panel and type one line in the composer to send as yourself later:
-
-<img src="docs/media/docs-later.webp" width="760" alt="/later command demo: type /later +60m text, press Enter, dock shows the countdown"/>
-
 ---
 
 ## Feature overview
 
-- **Works across fourteen kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.4`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
   - **Browser closed, server running**: reminders live server-side and arrive on time across devices.
   - **Server restarted, that session was never opened**: true now, but needs **plugin 1.12.1 or newer**. 1.12.0 carried a "wakes the session but never drives delivery" defect, so those reminders stayed silent at due time.
@@ -162,7 +156,6 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
   Bounds and backoff are in [`docs/verification.md`](./docs/verification.md) under "remaining bounds": the host must be able to rebuild the session (when neither path works the reminder is marked `undelivered` and reported, without retrying forever); delegated child sessions are not cold-woken; a cold wake costs one turn; a just-closed session has a 120s grace period.
 
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
-- **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
 - **Multilingual**: UI copy follows the DSH UI language across **8 locales** (中文 / English / 日本語 / Español / Français / Deutsch / Русский / Português), live without reload.
   
   > ⚠️ **Six** of them (ja / es / fr / de / ru / pt) are machine-translated and only passed mechanical checks (placeholders preserved verbatim, proper nouns untranslated, no zero-width characters) — **not reviewed by native speakers**. Please open an issue for bad translations.
@@ -210,7 +203,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which generation the channel points at, then picks the **highest plugin version verified on that generation**. **An unverified channel is reported as undecided and the command exits non-zero; it never falls back to `latest`**.
 
-**Install handle**: a dist-tag pinned to one kernel generation, e.g. `npm i dsh-later@dsh-0-2-2-rc-3` gives the release verified on `0.2.2-rc.3`. With three tracks in play, "the newest rc" is no longer what plain `npm i dsh-later` installs, so the handle states the verification.
+**Install handle**: a dist-tag pinned to one kernel generation, e.g. `npm i dsh-later@dsh-0-2-2-rc-3` gives the release verified on `0.2.2-rc.3`.
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
 
@@ -251,16 +244,9 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 > Source-level tinkerers: see [`AGENTS.md`](./AGENTS.md) and the `package.json` scripts;
 > changes are not synced to the GUI copy automatically, run `npm run deploy`.
 
-### Your first reminder
-
-Open any conversation → click the "Schedule" button right of the input box → pick a slot, enter content → confirm.
-A dock countdown appears above the input box, and a `Reminder` message lands in the conversation when due.
-
----
-
 ## Long-text reminders
 
-Reminder content is limited to **1000 characters** by default. For longer content, enable `allowLongPrompts` in **DSH Settings → Plugins → Session Scheduler** and set `maxPromptChars`.
+Reminder content is limited to **1000 characters** by default. For longer content, enable `allowLongPrompts` and set `maxPromptChars` (both rows are in the [Configuration](#configuration) table).
 
 - **Good for**: code snippets, meeting notes, long quotes, cross-device notes/todos.
 - **Not recommended**: text that could read as instructions (the longer it is, the bigger the risk); a shared public profile (anyone could raise the limit).
@@ -285,7 +271,7 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | Scheduled message marker | Clock marker on bubbles delivered by `/later`: `left` always beside the bubble / `meta` a small line above / `hover` only on hover / `off` leaves rendering to the host. **Only effective on kernel 0.2.1+** | left |
 | **Advanced syntax** (Beta) | Master switch for multi-shot forms: `+1h*3`, `+1h+1h+0.5h`, `15:32+16:32`, `9:00+1d`. When off, those forms are rejected with a pointer back to settings | **On** |
 
-> Advanced syntax is marked Beta because **the resulting presentation still needs watching**: whether ten reminders from one command flood the chat, and whether the 60-second floor and the 10-cap feel right. The grammar itself is covered case by case; see [docs/verification.md](./docs/verification.md).
+> Advanced syntax is marked Beta because **the resulting presentation still needs watching**. The grammar itself is covered case by case; see [docs/verification.md](./docs/verification.md).
 
 ---
 

@@ -11,6 +11,7 @@
 | `docs/media/screenshot-fired.png` | 到点前后两态叠放（同一区域截两次：待发条+倒计时 / 待发条消失、注入行进对话） | 同一区域截两次后纵向拼接，不加任何标注文字 |
 | `docs/media/docs-scheduler-create.webp` | 输入 → 面板 → 加入 → dock | 7 帧分镜 + ffmpeg palette |
 | `docs/media/docs-scheduler-fired.webp` | 倒计时跳动 → 注入行 + toast → 定时提醒消息 | 1fps 连续采帧 + 变速合成 |
+| `docs/media/docs-later-full.webp` | 顶部 hero：三条 `/later` 命令连发、`+5s` 那条到点送达 | CDP 逐字输入 + 定时器逐秒采帧 |
 
 中英 README 共用同一组素材（`README.md` / `README.en.md`）。
 
