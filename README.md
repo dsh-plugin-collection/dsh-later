@@ -135,9 +135,9 @@ dock 上的按钮就是 `/user-schedule-*` 那几条命令，手敲也能用（�
 
 <img src="docs/media/screenshot-dock.png" width="700" alt="待发送 dock 与输入框"/>
 
-**到期真实触发** —— 到点后对话里出现一条带 ⏰ 的消息（措辞由模型即时生成，随提醒内容变化；关网页也照常触发）：
+**到期真实触发** —— 到点那一刻，待发条消失、提醒进入对话（关网页也照常触发）：
 
-<img src="docs/media/screenshot-fired.png" width="560" alt="到期提醒消息"/>
+<img src="docs/media/screenshot-fired.png" width="760" alt="到点前：输入框上方有待发条与倒计时；到点后：待发条消失，提醒进入对话"/>
 
 **动图演示**：
 
