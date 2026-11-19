@@ -92,9 +92,8 @@ One difference between anchor and relative chains (deliberate, not a bug):
 /later +2h+1h+30m 催我交周报
 ```
 
-The dock buttons are not a private channel: they run `/user-schedule-create`, `-list`, `-delete`, `-edit`, `-pause`, `-resume`, `-steer-now` (arguments are a JSON object). You can type them too, but they are designed to be clicked, not typed. When you do type one, it needs a payload: everything except `-list` (no payload needed — any arguments are ignored) takes a JSON object, e.g. `/user-schedule-delete {"id":"schedule-…"}`; `-delete` / `-pause` / `-resume` / `-steer-now` also accept a bare id, so `/user-schedule-pause schedule-…` is the same as `{"id":"schedule-…"}`.
-
-Typing any of these commands — `/schedule` and `/later` included — takes **two presses of Enter**: the first claims the line as a command, the second runs it. That is the kernel's uniform order for commands that take arguments, not an extra step this plugin adds: the kernel's input descriptor has no "arguments are optional" face, and if a single Enter dispatched the line instead, typing it with arguments would go to the model as an ordinary chat message. The side effect is that `/user-schedule-list` went from one Enter to two — buttons and panel refresh are untouched, only typing that one by hand feels like an extra press.
+The dock buttons just run the `/user-schedule-*` commands, so you can type them too (payload is JSON).
+Typing takes two presses of Enter: the first claims the line as a command, the second runs it.
 
 ### Images and files
 
@@ -102,13 +101,11 @@ Typing any of these commands — `/schedule` and `/later` included — takes **t
 
 - **Only `/later` carries them.** `/schedule`, the panel, and model-created tool schedules never do — a deliberate trust boundary: attachment blocks may only enter a sent-as-user message through the channel where you typed the command yourself, so an `attachments` field smuggled into tool arguments has no effect.
 - Multi-shot syntax (`+1h*3`) attaches **the same** files to each expanded task; each row is still independently cancellable, editable and sendable.
-- The dock row shows a **real thumbnail**. Before it fires, the Host's session-log-authorized image channel cannot read the attachment (it is not in the log yet — expected, not corruption), so the thumbnail comes from the Host's own local-file route `GET /api/file`; after it fires, both channels work. If this Host's attachment backend is not file-backed, the thumbnail degrades into a "Available after send + size" marker — that does **not** mean the attachment was lost; it still ships with the message.
+- The dock row shows a **real thumbnail**; if this host does not persist attachments, it degrades into an "available after send + size" marker. That does **not** mean the attachment was lost.
 - Each task renders at most 8 thumbnails in the dock, with `+N` for the rest; non-image attachments become a "file name + size" chip.
 - On kernel `0.1.2` the host `ContentBlock` union has no `file` variant, so a non-image attachment ships as a `[附件] <file name>` text block instead. Image blocks pass through unchanged on every supported kernel. See [Supported DSH kernels](#supported-dsh-kernels).
 
-The model can call three user tools on your behalf: create, inspect and delete (`user_schedule_create` / `user_schedule_list` / `user_schedule_delete`). Editing the text, pausing, resuming and send-now are **not** exposed to the model; they are dock buttons over the `/user-schedule-*` commands, meant to be clicked by you. **Endlessly recurring** reminders (every hour, forever) are only reachable through the model: ask it to remind you every hour and it creates an `every_seconds` schedule. Such a task has no end condition and must be deleted by hand.
-
-The model also ships with a `SKILL.md` (skill name `later-reminders`). It stays in the model's skill catalog and covers **when to offer a reminder** and **how it differs from the kernel's official `schedule_create`**; argument rules deliberately stay out of it, so they cannot drift from the tool schema. This entry is optional: a host assembly without the skills service simply never shows it, and everything else keeps working.
+The model can create, list and delete reminders for you (`user_schedule_create` / `_list` / `_delete`) and can create **open-ended recurring** tasks ("remind me every hour"). Editing, pausing, resuming and sending now are not exposed to the model; those are dock buttons you press yourself. A bundled `SKILL.md` (skill `later-reminders`) also stays in the model's skill catalog and covers *when* to schedule proactively; it is absent when the host assembly has no skills service, and everything else works.
 
 ### Pending dock
 
@@ -168,14 +165,11 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 - **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
 - **Works across fourteen kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.4`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
-  - **Browser closed, server running**: always true — reminders live server-side and arrive on time across devices.
-  - **Server restarted, that session was never opened**: true now, but it only became real in **1.12.1**. The host-level expiry sweeper shipped in 1.12.0, yet that release carried a "wakes the session but never drives delivery" defect (`registry.mount()` returns the runtime, not `undefined`, so `if (mounted === undefined)` was always false) — on 1.12.0 a cold session still stayed silent at due time. Since 1.12.1 the drive is unconditional, so the sweeper wakes the session itself and delivers through the normal runtime path, without anybody happening to open it.
+  - **Browser closed, server running**: reminders live server-side and arrive on time across devices.
+  - **Server restarted, that session was never opened**: true now, but needs **plugin 1.12.1 or newer**. 1.12.0 carried a "wakes the session but never drives delivery" defect, so those reminders stayed silent at due time.
 
-  Remaining bounds (all recorded under "remaining bounds" in [`docs/verification.md`](./docs/verification.md)):
-  - The host must be able to rebuild the session: web profiles go through `sessionController`, every other profile falls back to `agents.resume`. When neither works the reminder is recorded as `undelivered` with a warning instead of being retried forever.
-  - **Delegated child sessions (`delegationDepth > 0`) are never cold-woken** — upstream refuses reminder delivery to subagent sessions, so waking one would only burn a turn.
-  - **A cold wake costs one turn**: `agents.resume` really constructs an agent; on a host without a provider that turn ends with a `no provider/model` error. The sweeper backs off (1s→2s→4s→8s) and gives up after a bounded number of failures, so this never turns into an error storm.
-  - For 120s after you close a session it is not opened proactively — but a reminder that has **already come due** is exempt (it retries after a grace period, and anything suppressed is recorded as `undelivered` with a warning).
+  Bounds and backoff are in [`docs/verification.md`](./docs/verification.md) under "remaining bounds": the host must be able to rebuild the session (when neither path works the reminder is marked `undelivered` and reported, without retrying forever); delegated child sessions are not cold-woken; a cold wake costs one turn; a just-closed session has a 120s grace period.
+
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
 - **The model schedules on its own initiative**: the bundled `SKILL.md` (skill name `later-reminders`) sits in the model's skill catalog, so it offers a reminder even when nobody says "remind me", and it separates this plugin from the kernel's official `schedule_create`. A host assembly without the skills service simply never shows this entry, and everything else keeps working.
 - **Multilingual**: UI copy follows the DSH UI language across **8 locales** (中文 / English / 日本語 / Español / Français / Deutsch / Русский / Português), live without reload.
@@ -223,40 +217,26 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `next` (release candidate) | `npm i dsh-later@next` |
 | `alpha` (early development) | `npm i dsh-later@alpha` |
 
-Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which
-generation the kernel points at on that channel, then picks the highest plugin version verified on
-that generation from the ledger in `scripts/lib/verified-on.ts`. **When nothing is verified it reports
-"unresolved" and refuses to run — it never falls back to `latest`**, because that would make you
-believe you installed a matching build.
+Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which generation the channel points at, then picks the **highest plugin version verified on that generation**. **An unverified channel is reported as undecided and the command exits non-zero; it never falls back to `latest`**.
 
 **Install handle**: a dist-tag pinned to a specific kernel generation. `npm i dsh-later@dsh-0-2-2-rc-3`
-gives you the release verified on `0.2.2-rc.3`. Now that the kernel ships three tracks
-(`latest` / `next` / `alpha`), "the newest rc" is no longer what plain `npm i dsh-later` installs,
-so this handle states the verification explicitly. Only generations verified on the `next` track
-provide one; for everything else use `latest` (itself verified on `0.2.2-rc.1`). Handles are derived
-mechanically from the `KERNEL_GENERATIONS` ledger by `npm run sync:tags`, never hand-written.
+gives you the release verified on `0.2.2-rc.3`. Now that the kernel ships three tracks, "the newest rc"
+is no longer what plain `npm i dsh-later` installs, so this handle states the verification explicitly.
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
 
 From `0.2.2-alpha.3` on upstream `@deepseek-ai/dsh-schedule` removed four old exports (switching to a domain / task model). This plugin is adapted: it uses upstream when present and an equivalent local implementation when absent, so recurring tasks and reminder wording are unaffected.
 
-Starting with `0.2.2-rc.2` the host ships two breaking changes, both adapted here: first,
-`dsh-client-ui-primitives` dropped `useAnchoredPosition` (its replacements `useAnchoredMaxHeight` / `usePointerGrace`
-mean different things), so the schedule panel now uses **CSS anchor positioning** while older generations still
-pass the original hook through; second, `AgentRegistry.roots()` was removed (the registry keeps only `get()` /
-`list()`, and the owner relation is no longer observable), so the four "root only" checks fall back to the
-session header's `delegationDepth`.
+From `0.2.2-rc.2` the host ships two breaking changes (one in primitives, one in the registry); both are adapted here and nothing breaks.
 
 Both this line and `peerDependencies` are derived from the generation table as per-segment bounded ranges. Both sides must be bounded: kernels from `0.2.1` read only `engines.dsh`, older ones only the `dsh-*` peers.
 
-`0.2.2-alpha.2` brings **two contract changes** rather than cosmetic differences: `SessionProjectionStateMap` was removed upstream, and `register()` now returns `Promise<ProjectionHandle>` with an explicit "await registration before publishing consumers" requirement. See [docs/verification.md](./docs/verification.md) under "0.2.2-alpha.2".
+`0.2.2-alpha.2` brings two projection-registration contract changes; both are adapted. Detail: [docs/verification.md](./docs/verification.md) under "0.2.2-alpha.2".
 
 Two boundaries:
 
 - **`0.1.1-rc.2` is not supported.** Its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict.
 - **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`. **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
-
-Which side enforces the version gate also depends on the generation: kernels up to `0.2.0` do **not** read `engines.dsh` (they check only the per-generation `@deepseek-ai/dsh-*` peer list), and from `0.2.1` on `engines.dsh` decides on its own. So "it got installed on this old kernel" does not mean "this kernel honours the range I declared".
 
 Old kernels come with four visible degradations. Nothing is lost, but the looks and the wording change.
 
@@ -287,23 +267,13 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 # restart dsh web to activate
 ```
 
-> Dev tip: `npm run watch` rebuilds on `src/` changes and runs shape regression tests.
->
-> It no longer patches the copy the GUI is running (issue #46: the old behaviour
-> silently deployed unmerged code into every profile, and concurrent worktrees
-> overwrote each other through shared inodes). To see a change in the UI, either:
->
-> ```sh
-> npm run deploy                     # sync once, explicitly
-> DSH_LATER_RELINK=1 npm run watch   # restore the old deploy-on-every-change
-> ```
+> Source-level tinkerers: see [`AGENTS.md`](./AGENTS.md) and the `package.json` scripts;
+> changes are not synced to the GUI copy automatically, run `npm run deploy`.
 
 ### Your first reminder
 
-1. Open any conversation — a "Schedule" button appears right of the input box;
-2. Click it → pick a smart slot, or enter a custom time and content;
-3. Confirm → a countdown chip appears next to the button and the dock shows the pending item;
-4. When due, a `Reminder` message lands in the conversation — it fires even if you close the page, and after a server restart it will wake a session nobody has opened (see "Works with the page closed" below for the remaining bounds).
+Open any conversation → click the "Schedule" button right of the input box → pick a slot, enter content → confirm.
+A dock countdown appears above the input box, and a `Reminder` message lands in the conversation when due.
 
 ---
 
@@ -335,9 +305,6 @@ Works out of the box. Adjust in **DSH Settings → Plugins → Session Scheduler
 | **Advanced syntax** (Beta) | Master switch for multi-shot forms: `+1h*3`, `+1h+1h+0.5h`, `15:32+16:32`, `9:00+1d`. When off, those forms are rejected with a pointer back to settings | **On** |
 
 > Advanced syntax is marked Beta because **the resulting presentation still needs watching**: whether ten reminders from one command flood the chat, and whether the 60-second floor and the 10-cap feel right. The grammar itself is covered case by case; see [docs/verification.md](./docs/verification.md).
-> Turning it off does **not** restore the old silent mis-parse (`+1h*3 x` creating one task whose content is `*3 x`) — that was a bug, not a fallback. The residual-token guard is independent of this switch and always on.
-
-> Advanced: defaults can also be overridden at startup via `cordis.patch.yml` (e.g. `maxSchedules`) — see `docs/` and the schema.
 
 ---
 
@@ -368,13 +335,3 @@ Source-analysis notes live in [`references/`](./references) (`dsh-schedule-analy
 ## License
 
 MIT
-
----
-
-<div align="center">
-
-<img src="assets/icons/icon-presence-scheduled.svg?v=18" width="48" alt="scheduled"/>
-<img src="assets/icons/icon-presence-urgent.svg?v=18" width="48" alt="urgent"/>
-<img src="assets/icons/icon-presence-overdue.svg?v=18" width="48" alt="overdue"/>
-
-</div>
