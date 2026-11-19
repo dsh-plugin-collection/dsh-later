@@ -66,14 +66,9 @@ At most **10 tasks** per command, and multi-shot intervals must be **≥ 60 seco
 
 Chains allow exactly **one direction: an absolute anchor, then forward accumulation.** `+1h+15:32` (a clock time after a duration) is rejected rather than guessed.
 
-One difference between anchor and relative chains (deliberate, not a bug):
-
-| Form | Stored as | Pausable | Across DST |
-|---|---|---|---|
-| `+1h*3` / `+1h+30m` (relative) | `after` | ✅ | —— |
-| `15:32+16:32` / `9:00+1d` (anchor) | `at` | ❌ (button disabled with a reason) | ✅ wall clock holds: on a fall-back day `9:00+1d` is **25 h** later and still 09:00, whereas adding 86400 s would drift to 08:00 |
-
-`+1d` advances by **calendar day**, not 86400 seconds — which is why `+1d*3` and `9:00+1d+1d` differ in zones with DST (the former counts real seconds, the latter counts wall clock). A wall clock that does not exist (the hour skipped by the spring-forward) is an error, never a silently shifted time.
+Anchor chains are stored as `at` (wall clock) and relative chains as `after` (elapsed seconds). That is why
+`15:32+16:32` cannot be paused while `+1h*3` can, and why an anchor keeps the wall clock across DST
+(`9:00+1d` stays 09:00) while a relative chain counts real seconds.
 
 ### Commands
 
@@ -159,10 +154,6 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 ## Feature overview
 
-- **Input-bar timer button**: one click opens the schedule panel: smart time slots / custom time / this conversation's pending list / countdown.
-- **Pending dock**: a list above the input box; each item can be **cancelled**, **edited inline**, **paused and resumed** (`after` items), or sent to the agent right away.
-- **`/later` delayed send**: deliver *the text you are typing right now* later, as yourself (see [the difference](#reminders-vs-delayed-sends-whats-the-difference)).
-- **Sidebar presence indicator**: conversations with active reminders show a pixel clock in the sidebar (purple = scheduled · amber = fires within 5 min · red = overdue); hover shows count and next fire time, and shows "Paused" when everything is paused.
 - **Works across fourteen kernel generations**: verified from `0.1.2-rc.1` to `0.2.2-rc.4`, per-generation real GUI screenshots included, see [Supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
   - **Browser closed, server running**: reminders live server-side and arrive on time across devices.
@@ -203,9 +194,9 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 | `0.2.0-rc.2` / `0.2.1-rc.2` | Supported | — |
 | `0.2.1-rc.3` / `0.2.1-rc.4` | Supported | — |
 | `0.2.2-alpha.2` | Supported | — |
-| `0.2.2-alpha.3` | Supported (`dsh-schedule` dropped its legacy exports, see below) | — |
+| `0.2.2-alpha.3` | Supported (`dsh-schedule` switched models; adapted) | — |
 | `0.2.2-rc.1` | Supported | — |
-| `0.2.2-rc.2` | Supported (primitives dropped `useAnchoredPosition`; `AgentRegistry.roots()` removed — both adapted, see below) | — |
+| `0.2.2-rc.2` | Supported (one breaking change each in primitives / registry; adapted) | — |
 | `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
 | `0.2.2-rc.4` | Supported (`next` advanced to rc.4; zero runtime diff vs rc.3, covered via the `@next` channel) | — |
 
@@ -219,19 +210,9 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which generation the channel points at, then picks the **highest plugin version verified on that generation**. **An unverified channel is reported as undecided and the command exits non-zero; it never falls back to `latest`**.
 
-**Install handle**: a dist-tag pinned to a specific kernel generation. `npm i dsh-later@dsh-0-2-2-rc-3`
-gives you the release verified on `0.2.2-rc.3`. Now that the kernel ships three tracks, "the newest rc"
-is no longer what plain `npm i dsh-later` installs, so this handle states the verification explicitly.
+**Install handle**: a dist-tag pinned to one kernel generation, e.g. `npm i dsh-later@dsh-0-2-2-rc-3` gives the release verified on `0.2.2-rc.3`. With three tracks in play, "the newest rc" is no longer what plain `npm i dsh-later` installs, so the handle states the verification.
 
 The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
-
-From `0.2.2-alpha.3` on upstream `@deepseek-ai/dsh-schedule` removed four old exports (switching to a domain / task model). This plugin is adapted: it uses upstream when present and an equivalent local implementation when absent, so recurring tasks and reminder wording are unaffected.
-
-From `0.2.2-rc.2` the host ships two breaking changes (one in primitives, one in the registry); both are adapted here and nothing breaks.
-
-Both this line and `peerDependencies` are derived from the generation table as per-segment bounded ranges. Both sides must be bounded: kernels from `0.2.1` read only `engines.dsh`, older ones only the `dsh-*` peers.
-
-`0.2.2-alpha.2` brings two projection-registration contract changes; both are adapted. Detail: [docs/verification.md](./docs/verification.md) under "0.2.2-alpha.2".
 
 Two boundaries:
 
@@ -244,8 +225,8 @@ Old kernels come with four visible degradations. Nothing is lost, but the looks 
 |---|---|
 | `0.1.2` | Non-image attachments arrive as a `[附件] <file name>` text block (that generation's `ContentBlock` has no `file` variant); image blocks are unaffected |
 | `0.1.2` | Attachment icons are always a paperclip, and the size text is computed locally (base 1024, one decimal), not guaranteed to match the host's wording character for character |
-| `0.1.5` and older | `Tooltip` has no `portal`, so a long tooltip can be clipped by a scrollable ancestor |
-| `0.1.5` line | Settings are persisted into the profile (that schemastery has no `Schema.volatile()`); the affected fields are boolean switches, so writing them is harmless |
+| `0.1.5` and older | A long tooltip can be clipped by a scrollable ancestor (that Tooltip does not escape the flow) |
+| `0.1.5` line | Settings get written into the profile config; the affected fields are boolean switches, harmless |
 
 ### Install into DSH
 
