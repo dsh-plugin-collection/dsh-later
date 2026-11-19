@@ -8,8 +8,7 @@
 |---|---|---|
 | `docs/media/screenshot-panel.png` | 定时面板（快捷时段 / 自定义时间 / 已设定列表） | 元素截图（2x） |
 | `docs/media/screenshot-dock.png` | 待发送 dock + 输入框（倒计时中段，进度条可见） | 固定区域裁剪（2x） |
-| `docs/media/screenshot-fired.png` | 到点前后两态对照（中）：`①` 待发条+倒计时 / `②` 待发条消失、注入行进对话 | 同一区域截两次 + ImageMagick 拼标签 |
-| `docs/media/screenshot-fired.en.png` | 同上，英文标签（英文 README 用） | 同一组截图，换英文标签重拼 |
+| `docs/media/screenshot-fired.png` | 到点前后两态叠放（同一区域截两次：待发条+倒计时 / 待发条消失、注入行进对话） | 同一区域截两次后纵向拼接，不加任何标注文字 |
 | `docs/media/docs-scheduler-create.webp` | 输入 → 面板 → 加入 → dock | 7 帧分镜 + ffmpeg palette |
 | `docs/media/docs-scheduler-fired.webp` | 倒计时跳动 → 注入行 + toast → 定时提醒消息 | 1fps 连续采帧 + 变速合成 |
 
@@ -40,7 +39,7 @@ node capture-all.cjs --out /tmp/ss-out
 
 - **dock 行内四个按钮的语义**：编辑 ✎ / 暂停 ⏸ / 删除 🗑 / **插话发送 ↑**。清理任务只能点 `[aria-label="删除提醒"]`；点错「插话发送」会把提醒立刻 steer 进 agent 并唤醒模型（`aria-label`：`编辑提醒` / `暂停提醒` / `删除提醒` / `插话发送`）。暂停只对 `after` 且未到点的行开放，`at` / `every` 那行按钮置灰。
 - **contenteditable 输入框**不能用 `fill('')` 清空（受控组件会回填旧值导致文字翻倍），用 Ctrl/Cmd+A + Backspace 并校验 `innerText` 长度。
-- **到期检测**：注入行文案是「上下文注入 · 定时提醒 · HH:MM · 内容」；用户可见的那条消息**由模型自己措辞**（本次是「⏰ 周报提醒：…」，下次可能换说法），所以不要拿模型那句话当截图主体。`screenshot-fired.png` 因此改成**同一处区域的前后两态**：到点前只截待发条的倒计时，到点后截「`> schedule · 已设定提醒…` 注入行 + 自动化任务块」，把插件确实负责的状态变化摆在前面。
+- **到期检测**：注入行文案是「上下文注入 · 定时提醒 · HH:MM · 内容」；用户可见的那条消息**由模型自己措辞**（本次是「⏰ 周报提醒：…」，下次可能换说法），所以不要拿模型那句话当截图主体。`screenshot-fired.png` 因此改成**同一处区域的前后两态**：到点前只截待发条的倒计时，到点后截「`> schedule · 已设定提醒…` 注入行 + 自动化任务块」，把插件确实负责的状态变化摆在前面。**图里不要烧任何标注文字**——两态上下叠放本身就说明顺序，文字交给 README 正文，图片保持是截图本身。
 - **面板时间输入**默认带分段选中态（蓝色高亮），截图前点一下 `.ss-panel-title` 失焦。
 - **进度条**：dock 底部有倒计时进度条，任务刚创建时≈0（视觉上像残影），在倒计时中段（T-100s 左右）截 dock 最好看。
 - **共享 Playwright MCP 浏览器**别用——其它 DSH 会话可能同时在操控它（语言/页面会被切走）；本目录脚本每次自起独立 headless 实例。

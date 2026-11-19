@@ -136,9 +136,9 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 <img src="docs/media/screenshot-dock.png" width="700" alt="Pending dock and input box"/>
 
-**A real due-time firing** — the moment it is due, the pending bar disappears and the reminder enters the conversation (it fires even with the page closed):
+**A real due-time firing** — top: counting down with the pending bar above the input box; bottom: once due, the bar is gone and the reminder has entered the conversation (it fires even with the page closed):
 
-<img src="docs/media/screenshot-fired.en.png" width="760" alt="Before due: pending bar and countdown above the input box. After due: the bar is gone and the reminder has entered the conversation"/>
+<img src="docs/media/screenshot-fired.png" width="760" alt="Before due: pending bar and countdown above the input box. After due: the bar is gone and the reminder has entered the conversation"/>
 
 **Animated demos**:
 
