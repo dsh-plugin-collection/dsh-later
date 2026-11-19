@@ -312,3 +312,13 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 ## 许可
 
 MIT
+
+---
+
+<div align="center">
+
+<img src="assets/icons/icon-presence-scheduled.svg?v=18" width="48" alt="scheduled"/>
+<img src="assets/icons/icon-presence-urgent.svg?v=18" width="48" alt="urgent"/>
+<img src="assets/icons/icon-presence-overdue.svg?v=18" width="48" alt="overdue"/>
+
+</div>
