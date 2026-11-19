@@ -305,13 +305,13 @@ Two contracts are exposed; full detail lives in [docs/technical/03-api-reference
 
 ## Technical documentation
 
+**The full index is [`docs/README.md`](./docs/README.md)**. The most-used entries:
+
 - [Architecture and data flow](./docs/architecture.md)
 - [Key design decisions](./docs/design-decisions.md)
 - [Verification status](./docs/verification.md)
 - [UI cross-generation screenshot matrix](./docs/notes/ui-matrix.md)
 - [Plugin API reference](./docs/technical/03-api-reference.md)
-
-Source-analysis notes live in [`references/`](./references) (`dsh-schedule-analysis.md`, `dsh-sleep-send-analysis.md`); the PRD is [`prd.md`](./prd.md).
 
 ## License
 

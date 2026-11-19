@@ -301,13 +301,13 @@ dsh plugin --profile web add "file:/path/to/dsh-later"
 
 ## 技术文档
 
+**完整索引在 [`docs/README.md`](./docs/README.md)**。常用的几篇：
+
 - [架构与数据流](./docs/architecture.md)
 - [关键设计决策](./docs/design-decisions.md)
 - [验证状态与验收对照](./docs/verification.md)
 - [UI 面跨代次截图矩阵](./docs/notes/ui-matrix.md)
 - [插件开发接口参考](./docs/technical/03-api-reference.md)
-
-源码分析笔记在 [`references/`](./references)（`dsh-schedule-analysis.md`、`dsh-sleep-send-analysis.md`）；PRD 见 [`prd.md`](./prd.md)。
 
 ## 许可
 

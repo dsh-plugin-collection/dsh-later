@@ -211,5 +211,5 @@ type ScheduleErrorCode =
 
 - npm: https://www.npmjs.com/package/@deepseek-ai/dsh-schedule
 - 源码: `deepseek-harness/packages/schedule/schedule`
-- README（中文）: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
-- Invariant 模块: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/lib/invariant.js)
+- README（中文）: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
+- Invariant 模块: `@deepseek-ai/dsh-schedule` 的 `lib/invariant.js`（随该包分发）

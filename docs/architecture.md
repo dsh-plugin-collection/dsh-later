@@ -25,7 +25,7 @@ DSH Web Client
     └── SchedPanel    智能时段 / 自定义时间 / 预览 / 任务列表（TaskList）
 ```
 
-> 侧栏会话行的状态点由 `client/session-presence.ts` 注入，不走上面两个插槽。它**不直接读** `sessions.list`，而是消费 `src/schedule-summary-store.ts`（该 store 才去读宿主 `session.list` 基线里的 `projectionValues.userSchedules`）。
+> 侧栏会话行的状态点由 `client/session-presence.ts` 注入，不走上面两个插槽。它**不直接读** `sessions.list`，而是消费 `src/client/schedule-summary-store.ts`（该 store 才去读宿主 `session.list` 基线里的 `projectionValues.userSchedules`）。
 
 ## 数据流
 

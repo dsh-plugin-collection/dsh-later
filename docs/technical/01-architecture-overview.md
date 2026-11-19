@@ -76,13 +76,13 @@ dsh-later/
 │   ├── delivery.ts               # 投递方式分流（followup vs steer）
 │   ├── presence.ts               # Host 侧会话状态摘要（供侧栏状态点）
 │   ├── schedule-summary.ts       # 跨插件公共 API 的摘要形状
-│   ├── schedule-summary-store.ts # 摘要 store（sessions.list 基线 + 周期扫描）
+│   ├── client/schedule-summary-store.ts # 摘要 store（sessions.list 基线 + 周期扫描）
 │   ├── ownership-store.ts        # 所有权 sidecar（暂停项留档）
 │   ├── smart-window.ts           # 智能时段计算（纯函数，两侧共享）
 │   ├── time-utils.ts             # 时间格式化与相对时间（两侧共享）
-│   ├── bar-geometry.ts           # dock 进度条窗口/比例（两侧共享）
+│   ├── client/bar-geometry.ts           # dock 进度条窗口/比例（两侧共享）
 │   ├── strings.ts                # Host 侧用户可见文案（zh/en）
-│   ├── command-outcome.ts        # 命令受理语义（只回 matched）
+│   ├── client/command-outcome.ts        # 命令受理语义（只回 matched）
 │   ├── schedule-compat.ts / upstream-compat.ts   # 跨代兼容与内核代次（自有事件注册已随 #58 移除）
 │   └── client/
 │       ├── index.tsx             # 浏览器入口：conversation.input.right / input.dock 两个插槽注册 + 命令通道
@@ -232,10 +232,10 @@ export async function userScheduleCreate(input, ctx) {
 |---|---|
 | 两个插槽条目 | `src/client/index.tsx`：`conversation.input.right`（`id: 'later'`, `order: 50`）挂 `SchedButton`；`conversation.input.dock`（`id: 'later-dock'`, `order: 30`）挂 `ScheduleDock`，即排在宿主排队消息条之后 |
 | 读任务列表 | 宿主渲染器绑定的标准 hook：`useProjection('userSchedules')`（`ScheduleDock.tsx` 与 `hooks/useSchedules.ts` 各调一次）。投影单元由 Host 侧 `src/index.ts` 经 `sessionProjections.register(userSchedulesProjectionUnit)` 注册，`src/projection.ts` 负责 fold |
-| 写（创建/删除/改/暂停/恢复/插话） | `callCommand(sessionId, line)` → `sessions.scope(sessionId)` → `sessions.sessionOf(actx)` → `face.command(line)`；创建行由 `hooks/useSchedules.ts` 的 `createLine()` 拼成 `/user-schedule-create {json}`。命令通道**只回 `{matched}`**（受理语义，见 `src/command-outcome.ts`），业务结果一律以投影为准 |
+| 写（创建/删除/改/暂停/恢复/插话） | `callCommand(sessionId, line)` → `sessions.scope(sessionId)` → `sessions.sessionOf(actx)` → `face.command(line)`；创建行由 `hooks/useSchedules.ts` 的 `createLine()` 拼成 `/user-schedule-create {json}`。命令通道**只回 `{matched}`**（受理语义，见 `src/client/command-outcome.ts`），业务结果一律以投影为准 |
 | 面板浮层 | `SchedPanel.tsx` 用 `createPortal` 挂到 `document.body`；锚定走 `primitives-compat.ts` 的 `PANEL_ANCHOR_BACKEND` 三档分派（`hook` = 老的 `useAnchoredPosition`；`css-anchor` = 0.2.2-rc.2 起用 CSS 锚点定位 + `useAnchoredMaxHeight`；`static` = 静态 `bottom` + 遮罩）。后端在加载期一次算出，三档都无条件调用同一个 hook，序列恒定 |
 | dock 行内容 | 「`HH:MM` · 倒计时 · 正文」一行 + 进度条一行；动作为 编辑 / 暂停·恢复 / 删除 / 插话发送（`kind === 'every'` 不渲染插话） |
-| 倒计时与进度条 | `useCountdown.ts` 的 1s tick；条形的窗口/比例数学在 `src/bar-geometry.ts`（两侧共享），推进交给 CSS 动画，参数以 `--ss-bar-duration` / `--ss-bar-delay` 内联注入 |
+| 倒计时与进度条 | `useCountdown.ts` 的 1s tick；条形的窗口/比例数学在 `src/client/bar-geometry.ts`（两侧共享），推进交给 CSS 动画，参数以 `--ss-bar-duration` / `--ss-bar-delay` 内联注入 |
 
 呈现层与宿主 QueueDock 的对齐边界（可复用面 / 不可顶替的原因 / 逐项漂移）见 [设计决策 §8](../design-decisions.md) 与 [notes/dock-alignment.md](../notes/dock-alignment.md)。
 
@@ -255,6 +255,6 @@ export async function userScheduleCreate(input, ctx) {
 
 ## 参考链接
 
-- dsh-schedule 架构: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule 架构: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - Cordis 框架: https://www.npmjs.com/package/@deepseek-ai/cordis
 - DSH 插件开发指南: https://deepseek-harness.github.io/deepseek-harness/develop/basic/

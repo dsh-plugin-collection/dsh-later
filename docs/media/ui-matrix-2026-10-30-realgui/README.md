@@ -14,7 +14,7 @@
 |---|---|
 | 内核 | `0.2.2-alpha.2`（`~/dsh-versions/0.2.2-alpha.2`，`--no-install`，树未重装） |
 | 插件 | `dsh-later@1.10.0`，分支 `test/118-kernel-022`，HEAD `ffb322d` + 本轮 `instance.mjs` 修复（随后作为 `fix(ui-matrix)` 提交） |
-| playwright | `PLAYWRIGHT_MODULE=/home/wujue/.nvm/versions/node/v22.22.2/lib/node_modules/@playwright/mcp/node_modules/playwright` |
+| playwright | `PLAYWRIGHT_MODULE=<playwright 包目录>` |
 | node | v22.22.2 |
 | 命令 | `PLAYWRIGHT_MODULE=… npm run verify:ui -- --versions 0.2.2-alpha.2` |
 

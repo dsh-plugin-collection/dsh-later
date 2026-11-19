@@ -1,5 +1,7 @@
 # 会话定时状态显示（Session Schedule Presence）
 
+> 设计存档（2026-09）。当前实现见 `src/client/session-presence.ts` 与 `src/client/presence.ts`。
+
 ---
 
 ## 0. 背景与目标

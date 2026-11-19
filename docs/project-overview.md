@@ -1,5 +1,7 @@
 # Session Scheduler — 会话内定时消息插件
 
+> **目录索引请优先看 [`docs/README.md`](./README.md)。** 本文是立项期的项目总览，目录树与实际仓内布局可能已不完全一致。
+
 > 在 `dsh-schedule` 底层引擎之上，提供用户可直接操作的 GUI + 用户工具，实现"关网页也能准时触发的会话内定时消息"。
 
 ---
@@ -7,8 +9,9 @@
 ## 快速导航
 
 ```
-scheduler-plugin/                        ← 仓库根（gitea: dsh-plugins/dsh-later）
-├── README.md                            ← 本文档（总览 + 参考链接）
+dsh-later/                               ← 仓库根（gitea: dsh-plugins/dsh-later）
+├── README.md                            ← 用户向插件介绍（安装 / 用法 / 配置）
+├── docs/project-overview.md             ← 本文档（项目总览 + 目录索引）
 ├── prd.md                               ← PRD 单文件版（保留归档）
 ├── docs/
 │   ├── design/                          ← 设计文档
@@ -20,8 +23,7 @@ scheduler-plugin/                        ← 仓库根（gitea: dsh-plugins/dsh-
 │   │   ├── 06-error-strategy.md         ← 错误处理策略
 │   │   ├── 07-notification-strategy.md  ← 提醒策略
 │   │   ├── 08-accessibility.md          ← 无障碍与国际化
-│   │   ├── 09-privacy-and-security.md   ← 隐私与安全
-│   │   └── rpd-dsh-wakatime.md          ← （错放）wakatime 的 RPD，待归位
+│   │   └── 09-privacy-and-security.md   ← 隐私与安全
 │   ├── technical/                       ← 技术设计
 │   │   ├── 01-architecture-overview.md  ← 架构总览
 │   │   ├── 02-data-model.md             ← 数据模型（事件日志 Schema）
@@ -35,7 +37,7 @@ scheduler-plugin/                        ← 仓库根（gitea: dsh-plugins/dsh-
 ├── references/                          ← 依赖源码分析
 │   ├── dsh-schedule-analysis.md         ← dsh-schedule 源码分析
 │   └── dsh-sleep-send-analysis.md       ← dsh-sleep-send 源码分析
-└── dsh-later/               ← 插件包（安装、配置、架构与验收见其 README.md）
+└── src/, lib/, tests/      ← 插件实现、构建产物与测试（安装、配置、架构与验收见 README.md）
 ```
 
 ---
@@ -181,7 +183,7 @@ later（新增）
 | 用户易用性 | ⭐⭐ 只能模型调 |
 | 文档质量 | ⭐⭐⭐⭐ 详尽的 README 和 invariant |
 
-> 详细分析：[references/dsh-schedule-analysis.md](references/dsh-schedule-analysis.md)
+> 详细分析：[references/dsh-schedule-analysis.md](../references/dsh-schedule-analysis.md)
 
 ### 6.2 dsh-sleep-send（社区）
 
@@ -191,7 +193,7 @@ later（新增）
 | 用户易用性 | ⭐⭐⭐⭐ GUI 面板直观 |
 | 文档质量 | ⭐⭐⭐ 基础 README |
 
-> 详细分析：[references/dsh-sleep-send-analysis.md](references/dsh-sleep-send-analysis.md)
+> 详细分析：[references/dsh-sleep-send-analysis.md](../references/dsh-sleep-send-analysis.md)
 
 ---
 
@@ -213,8 +215,8 @@ later（新增）
 |---|---|
 | npm 包 | https://www.npmjs.com/package/@deepseek-ai/dsh-schedule |
 | 源码目录 | `deepseek-harness/packages/schedule/schedule` |
-| README（中文） | [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md) |
-| Invariant 模块 | [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/lib/invariant.js) |
+| README（中文） | [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule) |
+| Invariant 模块 | `@deepseek-ai/dsh-schedule` 的 `lib/invariant.js`（随该包分发） |
 
 ### 7.3 dsh-sleep-send
 
@@ -238,7 +240,7 @@ later（新增）
 |---|---|
 | 插件市场（在线） | https://awesome-dsh-plugin.com/ |
 | 插件市场（本地） | `dshmarket` → `~/.dsh/profiles/web/node_modules/dshmarket/` |
-| 本地 registry 快照 | [本地文件](/home/wujue/.dsh/profiles/web/node_modules/dshmarket/data/registry-snapshot.json) |
+| 本地 registry 快照 | 本地市场 registry 快照（`~/.dsh/profiles/web/node_modules/dshmarket/data/registry-snapshot.json`，仅本机存在） |
 
 ### 7.6 相关社区插件
 
@@ -254,13 +256,13 @@ later（新增）
 
 ### v1.0.0（MVP）
 
-- [x] `user_schedule_create/list/delete` 工具（`dsh-later/`）
+- [x] `user_schedule_create/list/delete` 工具（`src/user-tools.ts`）
 - [x] GUI 面板（智能时段 + 自定义时间）
 - [x] 工具行芯片（倒计时 + 任务数）
 - [x] 关网页恢复（事件日志 + 投影冷恢复）
 - [ ] 防覆盖逻辑（草稿变更自动取消）→ 有意取舍：`followup` 注入固化内容，不静默取消
 
-> v1.0.0 实现状态与取舍见 [`dsh-later/README.md`](dsh-later/README.md)。
+> v1.0.0 实现状态与取舍见 [`README.md`](../README.md)。
 
 ### v1.1.0（增强）
 

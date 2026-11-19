@@ -1,5 +1,7 @@
 # Design Tokens 现状
 
+> 设计存档（2026-10）。Token 现状以 `src/client/styles.ts` 与宿主主题变量为准。
+
 > 本文记录**运行时真实生效**的 token。
 >
 > **这是一次重写。** 旧版本文列了一整套自建 `--ss-*` token（主色/状态色/中性色/字号/字重/间距/圆角/阴影/时长/缓动/断点/z-index，共约 42 个变量，还带「浅色/深色模式」两列取值）。经逐项复核，**那些变量在代码里一个都没有定义**——`grep -o -- "--ss-[a-z-]*:" src/client/styles.ts` 只返回 `--ss-bar-divider:` 一条。同样不成立的是「`@media (prefers-reduced-motion)` 里有个全局 `*` 覆盖」和「响应式断点变量」：`styles.ts` 里的 `@media` **只有 4 条 `prefers-reduced-motion`**，没有任何宽度媒体查询。旧文档描述的是一版从未落地（或已删除）的自建层，留着只会误导新样式照着写。
@@ -82,7 +84,7 @@
 | `--ss-bar-duration` | **不在 CSS 里**：`ScheduleDock` 给 fill 内联注入（完整窗口时长） | `.ss-dock-bar-fill` 的 `animation-duration`，CSS 侧兜底默认 `3600s` | 必须固定；随 tick 变化会让浏览器重启动画 |
 | `--ss-bar-delay` | 同上，挂载时刻算出的负值 | `.ss-dock-bar-fill` 的 `animation-delay`，CSS 侧兜底 `0ms` | 负 delay 定位绝对相位，使重挂载（切会话回来）不归零 |
 
-进度条动画的数学在 `src/bar-geometry.ts`（两侧共享），语义另见 [设计决策](../design-decisions.md)。
+进度条动画的数学在 `src/client/bar-geometry.ts`（两侧共享），语义另见 [设计决策](../design-decisions.md)。
 
 ## 7. 响应式：靠宿主变量，不靠断点
 

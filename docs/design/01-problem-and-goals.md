@@ -1,5 +1,7 @@
 # 问题定义与目标
 
+> 设计阶段存档（2026-09）。本文描述立项时的计划，当前实现见 [`README.md`](../../README.md) 与 [`docs/verification.md`](../verification.md)。
+
 ---
 
 ## 1. 背景
@@ -124,6 +126,6 @@ DSH 现有的定时能力存在三个独立方案，但没有任何一个能满�
 
 ## 参考链接
 
-- dsh-schedule README: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule README: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - dsh-sleep-send 源码: https://github.com/Awu12277/dsh-sleep-send
 - DSH 官方文档: https://deepseek-harness.github.io/deepseek-harness/develop/basic/

@@ -15,13 +15,13 @@
 `.verify/…`）+ headless Chromium 真点击真回合。**没有**任何一张是复刻 DOM 的预览或示意图。
 
 基线：worktree 分支 `test/ui-face`，commit `d4a7895`，插件 1.9.0。
-playwright：`/home/wujue/.npm/_npx/86170c4cd1c5da32/node_modules`（1.62.0-alpha，chromium-1232）。
+playwright：`<npx 缓存>/node_modules`（1.62.0-alpha，chromium-1232）。
 
 ## 复跑命令
 
 ```bash
 # ① 结构性三面（按钮 / dock 行 / 面板 / 控制台错误）→ matrix.json + 本目录
-PLAYWRIGHT_MODULE=/home/wujue/.npm/_npx/86170c4cd1c5da32/node_modules \
+PLAYWRIGHT_MODULE=<playwright 包目录> \
   node scripts/ui-matrix/run.mjs \
     --out .verify/ui-matrix-all \
     --evidence docs/media/ui-matrix-2026-10-28-realgui \

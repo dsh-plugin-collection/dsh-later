@@ -1,5 +1,7 @@
 # 用户调研与场景
 
+> 设计阶段存档（2026-09）。本文描述立项时的计划，当前实现见 [`README.md`](../../README.md) 与 [`docs/verification.md`](../verification.md)。
+
 ---
 
 ## 1. 目标用户

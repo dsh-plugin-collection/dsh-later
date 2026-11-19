@@ -1,5 +1,7 @@
 # 交互流程
 
+> 设计阶段存档（2026-09）。当前交互以 [`README.md`](../../README.md) 与真 GUI 为准。
+
 ---
 
 ## 1. 核心流程
@@ -171,5 +173,5 @@ UI 更新，任务从列表移除
 
 ## 参考链接
 
-- dsh-schedule 错误码: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule 错误码: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - DSH 无障碍指南: https://deepseek-harness.github.io/deepseek-harness/

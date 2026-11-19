@@ -1,5 +1,7 @@
 # 微文案
 
+> 设计存档（2026-10）。当前文案以 `src/client/locales/ui*.ts` 为准。
+
 ---
 
 ## 1. 界面文案
@@ -121,7 +123,7 @@ reminders_json: [{"schedule_id":"schedule-2","occurrence_at":"2026-08-19T14:00:0
 
 ## 参考链接
 
-- dsh-schedule Framing: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule Framing: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - Intl API: https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Intl
 - 中文文案风格指南: https://github.com/Ruanyf/chinese-copywriting-guidelines
 

@@ -149,7 +149,7 @@ dsh-schedule 的 runtime 只在其自身工具变更 / agent 转 idle 时重驱�
 - 宿主条目模型是固定的 `content blocks`，**没有 `scheduledAt` / `status` / `paused_remaining_seconds` 可挂**；`QueueAction` 只有 `edit` / `remove` / `steer` 三个动作，没有暂停/恢复。
 - 宿主 `SlotMap` 里**没有任何行级插槽**（`conversation.*` 下只有 dock 级 list），所以「给宿主每一行加时间/倒计时/暂停」在现有 API 下只能靠 DOM 注水。
 - 宿主 dock 的动作受 `queueMutable`（子会话地址是否可续写）与 `running` 门控；把提醒挂进去会让可用性被会话态意外接管。
-- 因此**保留**插件自有的：时间显示、倒计时、`role="progressbar"` 的进度条（`bar-geometry.ts` 的窗口/冻结比与 CSS 动画相位）、暂停/恢复、投递未确认的观察窗对账。
+- 因此**保留**插件自有的：时间显示、倒计时、`role="progressbar"` 的进度条（`src/client/bar-geometry.ts` 的窗口/冻结比与 CSS 动画相位）、暂停/恢复、投递未确认的观察窗对账。
 - 同样**不**把 `locale` 绑到宿主 `conversation` NS 复用 `queue.*` 词条：那些串写着「排队消息」，语义不对，且属宿主私有 key 面（见 #28）。
 
 ### 8.4 差异核对表在哪
@@ -233,7 +233,7 @@ Gitea #32 原是一条混合 issue，按区域归属拆开执行：
    必须兜住；它**既不进** `dsh.client.external`，**也不进** client 的模块级 `inject`——顶层 inject 是
    fiber 激活门控（issue #34 那次 P0 就是 host 入口列了 client 服务导致整插件 pending），写死一个可选
    搭档等于用整个定时功能去换一只徽标。
-4. **逻辑与宿主图标集分层**。`src/schedule-facet.ts` 零 React、零 DOM，fold / merge / 文案 / 取色都在
+4. **逻辑与宿主图标集分层**。`src/client/schedule-facet.ts` 零 React、零 DOM，fold / merge / 文案 / 取色都在
    这里，`node --test` 直接跑；`src/client/group-status-facet.ts` 只负责容错 require 与画图标（宿主
    图标集的 `require` 图在本仓测试里解析不了）。分层的收益是可验证性：`tests/group-status-facet.test.mjs`
    把过渡适配器的算法**照抄成 oracle** 与实现对拍，对方删掉 `legacy/` 之后这条回归线仍留在本仓——

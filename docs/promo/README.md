@@ -13,7 +13,7 @@
 3. 把每张图的裁切矩形和按钮锚点（相对图片的百分比）写进 `assets/real/capture.json`。
 
 ```sh
-PLAYWRIGHT_MODULE=/home/wujue/.npm/_npx/86170c4cd1c5da32/node_modules \
+PLAYWRIGHT_MODULE=<playwright 包目录> \
   node scripts/capture-real.mjs --version 0.2.1-rc.4 --port 3621
 ```
 
