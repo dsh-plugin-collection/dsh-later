@@ -131,11 +131,11 @@ dock 上的按钮就是 `/user-schedule-*` 那几条命令，手敲也能用（�
 
 <img src="docs/media/screenshot-panel.png" width="340" alt="定时提醒面板"/>
 
-**待发送 dock** —— 输入框上方倒计时条（行内编辑 / 取消；下方即输入框）：
+**待发送 dock** —— 输入框上方倒计时条（行内编辑 / 暂停 / 删除 / 插话；下方即输入框）：
 
 <img src="docs/media/screenshot-dock.png" width="700" alt="待发送 dock 与输入框"/>
 
-**到期真实触发** —— 到点后对话里出现「⏰ 定时提醒」消息（关网页也照常触发）：
+**到期真实触发** —— 到点后对话里出现一条带 ⏰ 的消息（措辞由模型即时生成，随提醒内容变化；关网页也照常触发）：
 
 <img src="docs/media/screenshot-fired.png" width="560" alt="到期提醒消息"/>
 
