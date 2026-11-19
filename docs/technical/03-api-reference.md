@@ -400,6 +400,6 @@ if (store !== undefined) {
 
 ## 参考链接
 
-- dsh-schedule 工具 schema: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/lib/types/types.d.ts)
+- dsh-schedule 工具 schema: `@deepseek-ai/dsh-schedule` 的 `lib/types/types.d.ts`（随该包分发，路径为 `node_modules/@deepseek-ai/dsh-schedule/lib/types/types.d.ts`）
 - JSON Schema 规范: https://json-schema.org/
 - OpenAPI 规范: https://spec.openapis.org/oas/v3.1.0

@@ -1,5 +1,7 @@
 # 隐私与安全
 
+> 设计阶段存档（2026-09）。当前安全边界见 [`README.md`](../../README.md) 的附件一节与 [`docs/design-decisions.md`](../design-decisions.md)。
+
 ---
 
 ## 1. 数据安全
@@ -120,6 +122,6 @@ interface ModelScheduleCreateChange {
 
 ## 参考链接
 
-- dsh-schedule 注入防护: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule 注入防护: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - OWASP XSS 防护: https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html
 - React 安全: https://react.dev/reference/react-dom/components/common#dangerously-setting-the-inner-html

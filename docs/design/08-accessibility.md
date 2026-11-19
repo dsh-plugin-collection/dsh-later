@@ -1,5 +1,7 @@
 # 无障碍与国际化
 
+> 设计阶段存档（2026-09）。无障碍现状见 [`docs/ui/01-component-specs.md`](../ui/01-component-specs.md)。
+
 ---
 
 ## 1. 无障碍（Accessibility）

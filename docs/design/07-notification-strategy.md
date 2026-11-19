@@ -1,5 +1,7 @@
 # 提醒策略
 
+> 设计阶段存档（2026-09）。当前提醒策略见 [`docs/design-decisions.md`](../design-decisions.md)。
+
 ---
 
 ## 1. 默认行为
@@ -131,5 +133,5 @@ WebSocket 推送 / 轮询拉取最新状态
 
 ## 参考链接
 
-- dsh-schedule 智能时段: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule 智能时段: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - DSH Session 同步: https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session/

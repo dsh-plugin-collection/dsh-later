@@ -283,7 +283,7 @@ function foldScheduleEvents(
 
 ## 参考链接
 
-- dsh-schedule 数据模型: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/lib/types/types.d.ts)
+- dsh-schedule 数据模型: `@deepseek-ai/dsh-schedule` 的 `lib/types/types.d.ts`（随该包分发，路径为 `node_modules/@deepseek-ai/dsh-schedule/lib/types/types.d.ts`）
 - DSH Session 文档: https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session/
 - RFC 3339: https://datatracker.ietf.org/doc/html/rfc3339
 - IANA 时区数据库: https://www.iana.org/time-zones

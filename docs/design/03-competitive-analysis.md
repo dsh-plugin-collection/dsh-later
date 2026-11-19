@@ -1,5 +1,7 @@
 # 竞品深度分析
 
+> 设计阶段存档（2026-09）。竞品分析为立项时快照，未持续更新。
+
 > 本文件分析 DSH 生态中所有与"定时任务"相关的插件，作为 later 的设计参考。
 
 ---
@@ -32,7 +34,7 @@
 
 **评价**：底层引擎优秀，但用户接口缺失。
 
-详细分析：[dsh-schedule-analysis.md](dsh-schedule-analysis.md)
+详细分析：[dsh-schedule-analysis.md](../../references/dsh-schedule-analysis.md)
 
 ---
 
@@ -49,7 +51,7 @@
 
 **评价**：GUI 体验好，但底层不可靠。
 
-详细分析：[dsh-sleep-send-analysis.md](dsh-sleep-send-analysis.md)
+详细分析：[dsh-sleep-send-analysis.md](../../references/dsh-sleep-send-analysis.md)
 
 ---
 

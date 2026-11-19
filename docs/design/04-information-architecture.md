@@ -1,5 +1,7 @@
 # 信息架构
 
+> 设计阶段存档（2026-09）。当前信息架构见 [`docs/ui/01-component-specs.md`](../ui/01-component-specs.md)。
+
 ---
 
 ## 1. 整体架构
@@ -154,6 +156,6 @@ later
 
 ## 参考链接
 
-- dsh-schedule 事件日志: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule 事件日志: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - Cordis 框架: https://www.npmjs.com/package/@deepseek-ai/cordis
 - DSH Session 文档: https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session/

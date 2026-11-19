@@ -1,5 +1,7 @@
 # 错误处理策略
 
+> 设计阶段存档（2026-09）。当前错误策略见 `src/commands.ts` 与 [`docs/technical/03-api-reference.md`](../technical/03-api-reference.md)。
+
 ---
 
 ## 1. 错误分类
@@ -122,5 +124,5 @@ if (lastCreateTime && Date.now() - lastCreateTime < 1000) {
 
 ## 参考链接
 
-- dsh-schedule 错误码: [本地文件](/home/wujue/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-schedule/README.zh.md)
+- dsh-schedule 错误码: [`@deepseek-ai/dsh-schedule` 的 README](https://www.npmjs.com/package/@deepseek-ai/dsh-schedule)
 - DSH Session 恢复: https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session/

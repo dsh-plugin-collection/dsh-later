@@ -11,7 +11,7 @@
 >    同一套反查技术**，因此能把卡片关联回 sessionId，无需自绘浮层。
 >
 > 实现见 `src/client/session-presence.ts`（`findHoverCard` / `applyHoverCard`）
-> 与 `src/presence.ts`（`hoverScheduleStatus` 纯文案逻辑），单测见
+> 与 `src/client/presence.ts`（`hoverScheduleStatus` 纯文案逻辑），单测见
 > `tests/hover-card.test.mjs`。语义为**纯追加**，故验收标准 3 天然满足。
 >
 > 未处理：关联缺口 1（宿主 `hasActiveSchedule` 读 `projectionValues.schedule`，
