@@ -132,13 +132,13 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 <img src="docs/media/screenshot-panel.png" width="340" alt="Schedule panel"/>
 
-**Pending dock** — countdown rows above the input box (inline edit / cancel):
+**Pending dock** — countdown rows above the input box (inline edit / pause / delete / send now):
 
 <img src="docs/media/screenshot-dock.png" width="700" alt="Pending dock and input box"/>
 
-**A real due-time firing** — when the time comes, a `⏰ Scheduled reminder` message appears in the conversation (fires even with the page closed):
+**A real due-time firing** — top: counting down with the pending bar above the input box; bottom: once due, the bar is gone and the reminder has entered the conversation (it fires even with the page closed):
 
-<img src="docs/media/screenshot-fired.png" width="560" alt="Due-time reminder message"/>
+<img src="docs/media/screenshot-fired.png" width="760" alt="Before due: pending bar and countdown above the input box. After due: the bar is gone and the reminder has entered the conversation"/>
 
 **Animated demos**:
 
