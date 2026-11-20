@@ -1,0 +1,8 @@
+<svg width="512" height="512" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="#ec1313" stroke-width="2" stroke-linecap="round">
+    <circle cx="12" cy="12" r="9.5" opacity="0.25"/>
+    <circle cx="12" cy="12" r="9.5" stroke-dasharray="59.690" stroke-dashoffset="0.000" transform="rotate(-90 12 12)"/>
+    <line x1="12" y1="12" x2="12" y2="6.5"/>
+    <line x1="12" y1="12" x2="17" y2="12" opacity="0.85"/>
+  </g>
+</svg>

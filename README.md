@@ -111,13 +111,17 @@ dock 上的按钮就是 `/user-schedule-*` 那几条命令，手敲也能用（�
 
 ### 侧栏状态标识
 
-有活动提醒的会话，行内会出现像素时钟（与「进行中」orb 并存）：
+有活动提醒的会话，行内会出现一个时钟标识（与「进行中」orb 并存）。两种风格随内核代次自动切换，也可在设置里锁定：
 
-| 图标 | 含义 |
-|---|---|
-| <img src="assets/icons/icon-presence-scheduled.svg?v=18" width="28" alt="scheduled"/> | 紫 · 有定时中提醒 |
-| <img src="assets/icons/icon-presence-urgent.svg?v=18" width="28" alt="urgent"/> | 琥珀 · 下次触发 ≤ 5 分钟 |
-| <img src="assets/icons/icon-presence-overdue.svg?v=18" width="28" alt="overdue"/> | 红 · 已到期（等待会话空闲派发） |
+| 含义 | 经典（像素点阵） | 新版（描边 + 进度弧） |
+|---|---|---|
+| 紫 · 有定时中提醒 | <img src="assets/icons/icon-presence-scheduled.svg?v=18" width="28" alt="scheduled"/> | <img src="assets/icons/icon-presence-modern-scheduled.svg" width="30" alt="scheduled"/> |
+| 琥珀 · 下次触发 ≤ 5 分钟 | <img src="assets/icons/icon-presence-urgent.svg?v=18" width="28" alt="urgent"/> | <img src="assets/icons/icon-presence-modern-urgent.svg" width="30" alt="urgent"/> |
+| 红 · 已到期（等待会话空闲派发） | <img src="assets/icons/icon-presence-overdue.svg?v=18" width="28" alt="overdue"/> | <img src="assets/icons/icon-presence-modern-overdue.svg" width="30" alt="overdue"/> |
+
+新版外圈那道亮弧是**已过时长占比**，随着倒计时一点点填满：刚排上时几乎是空的，到点时绕成一整环。无从计算进度时（例如暂停中的条目）那道弧不画，只剩底环。
+
+「时钟图标风格」设 `auto`（默认）时按内核代次选：`0.2.0` 及以上用新版，`0.1.x` 用经典；也可以显式锁定 `modern` / `classic`。
 
 鼠标悬停可见「下次 15:32 · 3 条任务」；已到期时显示「已到期 · 3 条任务（等待会话空闲发送）」；全部提醒都暂停时图标仍是紫色，悬停显示「已暂停 · 3 条任务」（暂停项没有排定时刻，所以不报「下次」）。
 
