@@ -404,6 +404,28 @@ export const KERNEL_GENERATIONS = [
     id: '0.2.2-rc.4',
     sessionApi: 'own-events' as const,
   },
+  {
+    /**
+     * `0.2.2-rc.5` 代次：内核 `next` 轨再前进一代（rc.4 → rc.5），五面全绿。
+     *
+     * 逐包 diff 的口径比 rc.4 那次更硬：rc.4 是对比「运行时产物」，这次直接比对
+     * **tarball 解包后的全部文件**——8 个 kernel-scoped 包（agent / commands / llm /
+     * schedule / session / session-projection / settings / tools）除 `package.json`
+     * 的版本号与内部依赖指针外**零文件差异**；主包 `dsh` 的 `lib/` 也零差异，唯一
+     * 有实质内容的是文档（新增 `docs/upgrade-guide/v0.2.2-rc.4/` 一篇讲
+     * web 搜索默认提供方变更，与本插件无关）。
+     *
+     * 实证（`--versions 0.2.2-rc.5 --steps mount,function,type,gate`）：`同源=same`、
+     * 投递 `spliced=1 dispatch=Y`、已关闭会话同样、子会话(depth=1) 不该投=Y、
+     * `at 形状 5/5`、type 换线 19 处两 tsconfig 通过、gate 本代与最新都 pass。
+     * UI 面 `verify:ui -- --versions 0.2.2-rc.5`：按钮/dock/面板/badge 齐全、`错误=0 警告=0`。
+     *
+     * 代码零改动即可支持本代（peer 与 engines 同段已覆盖），故**不需要发新插件版**；
+     * 但 `next` 通道要跟随 rc.5，须把本代登记进 `VERIFIED_ON['1.14.0']`（已真实验证）。
+     */
+    id: '0.2.2-rc.5',
+    sessionApi: 'own-events' as const,
+  },
 ] as const;
 
 /**
