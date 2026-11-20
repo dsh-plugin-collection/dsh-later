@@ -54,7 +54,32 @@
  */
 export const VERIFIED_ON = {
   /**
-   * 1.14.0：当前发布版。
+   * 1.15.0：当前发布版。
+   *
+   * 在 v1.15.0（`685af2b`）上跑 `npm run verify:kernels --steps mount,function,type,gate
+   * --no-install`：**绿 15 / 红 0 / 未判定 0**，明细 `.verify/across-kernels-2026-11-20T07-53-07-275Z.json`。
+   * 逐代结论与 1.14.0 一致（含 rc.3 / rc.4 / rc.5：投递 `spliced=1 dispatch=Y`、已关闭会话同样、
+   * 子会话不该投=Y、at 形状 5/5、type 换线 19 处两 tsconfig 通过）。故三条通道与代际 handle 改指它。
+   */
+  '1.15.0': [
+    '0.1.2-rc.1',
+    '0.1.5-rc.3',
+    '0.1.7-rc.1',
+    '0.1.7-rc.2',
+    '0.2.0-rc.2',
+    '0.2.1-rc.2',
+    '0.2.1-rc.3',
+    '0.2.1-rc.4',
+    '0.2.2-alpha.2',
+    '0.2.2-alpha.3',
+    '0.2.2-rc.1',
+    '0.2.2-rc.2',
+    '0.2.2-rc.3',
+    '0.2.2-rc.4',
+    '0.2.2-rc.5',
+  ],
+  /**
+   * 1.14.0：上一版。：当前发布版。
    *
    * 全部 15 代都过（`npm run verify:kernels` 全量：绿 15 / 红 0 / 未判定 0，
    * 见 docs/verification.md）。所以三条通道现在都指它。

@@ -18,6 +18,7 @@
  * @module tests/channel-tags
  */
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   pickVersionForChannel,
@@ -29,6 +30,16 @@ import { KERNEL_GENERATIONS } from '../lib/upstream-compat.js';
 import { computeChannelTargets, computeDiff } from '../scripts/sync-generation-tags.mjs';
 
 const LEDGER_IDS = new Set(KERNEL_GENERATIONS.map((g) => g.id));
+
+/**
+ * 当前发布版：**从 package.json 读，不写死**。
+ *
+ * 写死的后果是每发一版就有一条测试红，而红的原因不是代码错了、是测试过期 ——
+ * 那种红会训练人「发版时顺手改测试」，于是护栏本身失效。
+ */
+const CURRENT = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+).version;
 
 test('通道 tag：三条通道与内核 dist-tag 一一对应', () => {
   assert.deepEqual([...KERNEL_CHANNELS], ['latest', 'next', 'alpha']);
@@ -48,11 +59,14 @@ test('通道 tag：VERIFIED_ON 里的每个代次都必须在 KERNEL_GENERATIONS
   }
 });
 
-test('通道 tag：当前版本 1.14.0 覆盖全部台账代次（这是它同时服务三条通道的前提）', () => {
-  const generations = VERIFIED_ON['1.14.0'];
-  assert.ok(Array.isArray(generations), 'VERIFIED_ON 应登记 1.14.0');
+test('通道 tag：当前版本覆盖全部台账代次（这是它同时服务三条通道的前提）', () => {
+  const generations = VERIFIED_ON[CURRENT];
+  assert.ok(
+    Array.isArray(generations),
+    `VERIFIED_ON 必须登记当前发布版 ${CURRENT} —— 否则 next/alpha 与代际 handle 会一直指向上一个版本`,
+  );
   for (const id of LEDGER_IDS) {
-    assert.ok(generations.includes(id), `1.14.0 应覆盖 ${id}`);
+    assert.ok(generations.includes(id), `${CURRENT} 应覆盖 ${id}`);
   }
 });
 
@@ -101,7 +115,7 @@ test('通道 tag：三条通道都跟随内核实时 dist-tag 推导', () => {
   });
   assert.deepEqual(unresolved, [], '三条通道都应能判定');
   for (const { channel, kernel, version } of targets) {
-    assert.equal(version, '1.14.0', `${channel}（kernel=${kernel}）应挑到 1.14.0`);
+    assert.equal(version, CURRENT, `${channel}（kernel=${kernel}）应挑到 ${CURRENT}`);
   }
 });
 
