@@ -20,6 +20,77 @@
 
 ---
 
+## Quick start
+
+### Supported DSH kernels
+
+| Kernel generation | Status | Install handle |
+|---|---|---|
+| `0.1.2-rc.1` | Supported | — |
+| `0.1.5-rc.3` | Supported | — |
+| `0.1.7-rc.1` / `0.1.7-rc.2` | Supported | — |
+| `0.2.0-rc.2` / `0.2.1-rc.2` | Supported | — |
+| `0.2.1-rc.3` / `0.2.1-rc.4` | Supported | — |
+| `0.2.2-alpha.2` | Supported | — |
+| `0.2.2-alpha.3` | Supported (`dsh-schedule` switched models; adapted) | — |
+| `0.2.2-rc.1` | Supported | — |
+| `0.2.2-rc.2` | Supported (one breaking change each in primitives / registry; adapted) | — |
+| `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
+| `0.2.2-rc.4` | Supported (`next` advanced to rc.4; zero runtime diff vs rc.3, covered via the `@next` channel) | — |
+
+**Install channel** (follows the kernel's dist-tag):
+
+| Your kernel track | Install |
+|---|---|
+| `latest` (stable) | `npm i dsh-later@latest` (same as no tag) |
+| `next` (release candidate) | `npm i dsh-later@next` |
+| `alpha` (early development) | `npm i dsh-later@alpha` |
+
+Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which generation the channel points at, then picks the **highest plugin version verified on that generation**. **An unverified channel is reported as undecided and the command exits non-zero; it never falls back to `latest`**.
+
+**Install handle**: a dist-tag pinned to one kernel generation, e.g. `npm i dsh-later@dsh-0-2-2-rc-3` gives the release verified on `0.2.2-rc.3`.
+
+The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
+
+Two boundaries:
+
+- **`0.1.1-rc.2` is not supported.** Its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict.
+- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`. **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
+
+Old kernels come with four visible degradations. Nothing is lost, but the looks and the wording change.
+
+| Kernel | What you see |
+|---|---|
+| `0.1.2` | Non-image attachments arrive as a `[附件] <file name>` text block (that generation's `ContentBlock` has no `file` variant); image blocks are unaffected |
+| `0.1.2` | Attachment icons are always a paperclip, and the size text is computed locally (base 1024, one decimal), not guaranteed to match the host's wording character for character |
+| `0.1.5` and older | A long tooltip can be clipped by a scrollable ancestor (that Tooltip does not escape the flow) |
+| `0.1.5` line | Settings get written into the profile config; the affected fields are boolean switches, harmless |
+
+### Install into DSH
+
+**From npm (recommended — prebuilt, no approval needed):**
+
+```sh
+dsh plugin --profile web add dsh-later
+# restart dsh web to activate
+```
+
+Or build from source and add it to your DSH Web profile:
+
+```sh
+cd dsh-later
+pnpm install                # the repo is a pnpm workspace (pnpm-lock.yaml + pnpm-workspace.yaml)
+pnpm run build
+
+dsh plugin --profile web add "file:/path/to/dsh-later"
+# restart dsh web to activate
+```
+
+> Source-level tinkerers: see [`AGENTS.md`](./AGENTS.md) and the `package.json` scripts;
+> changes are not synced to the GUI copy automatically, run `npm run deploy`.
+
+---
+
 ## How to use
 
 ### Schedule panel
@@ -178,75 +249,6 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 > **`/schedule` is not "delayed send"**: pressing Enter on `/schedule …` sends it *immediately* (as a user message); only the **reminder itself** is deferred. If you want "send the text I'm typing now, later, as if I said it", use **`/later`**.
 
 ---
-
-## Quick start
-
-### Supported DSH kernels
-
-| Kernel generation | Status | Install handle |
-|---|---|---|
-| `0.1.2-rc.1` | Supported | — |
-| `0.1.5-rc.3` | Supported | — |
-| `0.1.7-rc.1` / `0.1.7-rc.2` | Supported | — |
-| `0.2.0-rc.2` / `0.2.1-rc.2` | Supported | — |
-| `0.2.1-rc.3` / `0.2.1-rc.4` | Supported | — |
-| `0.2.2-alpha.2` | Supported | — |
-| `0.2.2-alpha.3` | Supported (`dsh-schedule` switched models; adapted) | — |
-| `0.2.2-rc.1` | Supported | — |
-| `0.2.2-rc.2` | Supported (one breaking change each in primitives / registry; adapted) | — |
-| `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
-| `0.2.2-rc.4` | Supported (`next` advanced to rc.4; zero runtime diff vs rc.3, covered via the `@next` channel) | — |
-
-**Install channel** (follows the kernel's dist-tag):
-
-| Your kernel track | Install |
-|---|---|
-| `latest` (stable) | `npm i dsh-later@latest` (same as no tag) |
-| `next` (release candidate) | `npm i dsh-later@next` |
-| `alpha` (early development) | `npm i dsh-later@alpha` |
-
-Channel tags are derived by `npm run sync:tags` from the kernel's live dist-tags: it looks up which generation the channel points at, then picks the **highest plugin version verified on that generation**. **An unverified channel is reported as undecided and the command exits non-zero; it never falls back to `latest`**.
-
-**Install handle**: a dist-tag pinned to one kernel generation, e.g. `npm i dsh-later@dsh-0-2-2-rc-3` gives the release verified on `0.2.2-rc.3`.
-
-The declaration lives in `package.json` under `engines.dsh`: `>=0.1.2-rc.1 <0.1.3-0 || >=0.1.5-rc.3 <0.1.6-0 || >=0.1.7-rc.1 <0.1.8-0 || >=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.2 <0.2.2-0 || >=0.2.2-alpha.2 <0.2.3-0`. Node `^22.19 || >=24`.
-
-Two boundaries:
-
-- **`0.1.1-rc.2` is not supported.** Its dependency line cannot be installed at all (`@deepseek-ai/dsh-util-workspace-path@0.1.1-rc.2` was never published), so no tool can produce a verdict.
-- **`0.1.5` is verified as `rc.3`, not `rc.1`.** `dsh@0.1.5-rc.1` depends on `^0.1.5-rc.1`, so a default install resolves the whole plugin line to `rc.3`. **What you actually get is a uniform `rc.3`**, so that is the only shape we verify.
-
-Old kernels come with four visible degradations. Nothing is lost, but the looks and the wording change.
-
-| Kernel | What you see |
-|---|---|
-| `0.1.2` | Non-image attachments arrive as a `[附件] <file name>` text block (that generation's `ContentBlock` has no `file` variant); image blocks are unaffected |
-| `0.1.2` | Attachment icons are always a paperclip, and the size text is computed locally (base 1024, one decimal), not guaranteed to match the host's wording character for character |
-| `0.1.5` and older | A long tooltip can be clipped by a scrollable ancestor (that Tooltip does not escape the flow) |
-| `0.1.5` line | Settings get written into the profile config; the affected fields are boolean switches, harmless |
-
-### Install into DSH
-
-**From npm (recommended — prebuilt, no approval needed):**
-
-```sh
-dsh plugin --profile web add dsh-later
-# restart dsh web to activate
-```
-
-Or build from source and add it to your DSH Web profile:
-
-```sh
-cd dsh-later
-pnpm install                # the repo is a pnpm workspace (pnpm-lock.yaml + pnpm-workspace.yaml)
-pnpm run build
-
-dsh plugin --profile web add "file:/path/to/dsh-later"
-# restart dsh web to activate
-```
-
-> Source-level tinkerers: see [`AGENTS.md`](./AGENTS.md) and the `package.json` scripts;
-> changes are not synced to the GUI copy automatically, run `npm run deploy`.
 
 ## Long-text reminders
 
