@@ -4,12 +4,17 @@
 
 ## 未发布
 
-- **chore** 发布包瘦身：排除仅开发用的 `lib/types`（.d.ts），**不影响功能**。
+- **chore** 发布包瘦身：排除 `lib/types` 的类型声明（.d.ts），**运行期功能与之前完全一致**。
 
   tarball 211.8→**196.4 KB**（-7%）、解包 759.9→699.9 KB（-60 KB）、73→41 文件。
   `lib/types` 是 TypeScript 声明，运行时与宿主都不读；跨代类型测试读的是本地构建产物，
   不受影响。`files` 用负向模式 `!lib/types`，并移除指向它的顶层 `types` 与
   `exports["."].types`（保留 `main`/`exports["."].import`/`./client` 运行时入口）。
+
+  取舍如实记：**这不影响运行期，但会断掉 TypeScript 使用者的类型解析** —— 包里不再有
+  `index.d.ts`，`import type {...} from 'dsh-later'` 会报 `TS2307`。判断依据是本仓没有任何
+  下游 TS 代码引用本包类型、README 也未承诺类型导出；若后续需要，把 `types` 字段与
+  `lib/types` 一起恢复即可（两者必须同时存在，只留一个反而更差）。
 
   另一条候选杠杆 **minify client.js** 被否决：本仓有 4 个「读 lib/client.js 文本」的守护
   测试，minify 会使其变红——可读产物是守护契约的一部分。故不 minify（build.mjs 有注释）。
