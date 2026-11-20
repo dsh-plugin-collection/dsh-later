@@ -9,13 +9,8 @@ export interface RelativePhrases {
     readonly relDays: string;
 }
 export declare function formatRelative(epoch: number, now?: number, phrases?: RelativePhrases): string;
-export declare const MINUTE_MS: number;
-export declare const HOUR_MS: number;
-export declare const DAY_MS: number;
 export declare function formatAbsolute(epoch: number, timeZone: string, locale?: TextLocale): string;
 export declare function formatHhmm(epoch: number, timeZone: string): string;
-export declare function formatCountdown(epoch: number, now?: number): string;
-export declare function remainingMs(epoch: number, now?: number): number;
 export interface LocalClockParts {
     readonly hour: number;
     readonly minute: number;

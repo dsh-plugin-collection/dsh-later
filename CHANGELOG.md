@@ -19,7 +19,8 @@
   `tests/package-slim.test.mjs` 反向锚点锁定该决定。
 
   验证：1007 测试全绿、typecheck 0 错、`check:release`/`check:lib-reach` 通过、
-  14 代矩阵绿 14、UI 面（rc.4）按钮/dock/面板/badge 齐全 `错误=0`。
+  当时的 14 代矩阵绿 14、UI 面（rc.4）按钮/dock/面板/badge 齐全 `错误=0`。
+  （「14 代」是那次提交时的事实；台账次日因 rc.5 前进到 15 代，见下一条。）
 
 - **chore** 跟进内核 `next` 轨前进到 `0.2.2-rc.5`：验证并登记，**零代码改动**。
 

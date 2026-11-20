@@ -45,6 +45,7 @@ import {
 } from './ownership-store.js';
 import type { ScheduledAttachment } from './ownership-store.js';
 import { appendAttachmentBlocks, contentWithAttachmentBlocks } from './attachment-blocks.js';
+import { MAX_TIMER_DELAY_MS } from './domain.js';
 import type { UserScheduleDelivery } from './domain.js';
 import { foldUserState } from './user-tools.js';
 import { confirmDelivery, messageIdOf } from './delivery.js';
@@ -61,9 +62,6 @@ export interface SteerDeliverySettings {
   readonly confirmDelivery: boolean;
   readonly onUnconfirmed: 'keep' | 'discard';
 }
-
-/** Node timers 能表示的最大延迟。 */
-const MAX_TIMER_DELAY_MS = 2147483647;
 
 /** 渲染未知错误（仅进程内诊断）。 */
 function renderThrown(value: unknown): string {
