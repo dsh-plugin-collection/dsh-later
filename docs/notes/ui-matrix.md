@@ -20,6 +20,17 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
 # 或者本机已装裸 playwright（node 能解析到）时直接跑
 ```
 
+**浏览器本体还要单独指一次**（`PLAYWRIGHT_CHROMIUM_PATH`）。playwright 的版本与
+`~/.cache/ms-playwright` 里现成的 revision 经常对不上：实测本机 playwright 1.54.2 期望
+chromium **1181**、缓存里只有 **1248**，不覆盖就报 `Executable doesn't exist`，
+**那条错误长得像"UI 面红了"，其实只是没下载对应浏览器**：
+
+```bash
+PLAYWRIGHT_MODULE=<playwright 包目录> \
+PLAYWRIGHT_CHROMIUM_PATH=$HOME/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell \
+npm run verify:ui -- --evidence docs/media/ui-matrix
+```
+
 ## 2. 每代拍什么、判什么
 
 | 截图 | 判据（结构性，不是像素） |
@@ -67,6 +78,8 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
 | 2026-10-28 | `test/ui-face@d4a7895`（插件 1.9.0） | 同上六代 | **结构性三面 6/6 通过**（按钮在、dock 各 1 行、面板打开、`consoleErrors`=0）；**但侧栏 badge 自 0.1.7 起四代全 FAIL**，且本轮新加的漂移自检**一条都没告**（假阴性，见 §7）。退出码按仓内约定应为 **1（有红）**，不是全绿 | [`docs/media/ui-matrix-2026-10-28-realgui/`](../media/ui-matrix-2026-10-28-realgui/README.md)：`matrix.json` + `badge-probe.json` + 每代 PASS/FAIL 图 |
 | 2026-10-30 | `test/118-kernel-022@ffb322d`（插件 1.10.0 + issue #118） | `0.2.2-alpha.2` | **1/1 通过**：按钮=Y · dock=1 行（正文含代次） · 面板=Y · badge=1 · `consoleErrors`=0 · 警告=0，官方入口 `npm run verify:ui -- --versions 0.2.2-alpha.2` exit **0**。**但这条绿是在修掉 §10 的副本缺陷之后才拿到的**：修之前同一代是「按钮=N dock=0 面板=N」，看着像插件坏了 | [`docs/media/ui-matrix-2026-10-30-realgui/0.2.2-alpha.2-dock.png`](../media/ui-matrix-2026-10-30-realgui/README.md) + `.verify/ui-matrix/matrix.json`（gitignore，可复跑） |
 | 2026-11-02 | `main@33c76b3`（#118 已合并，未发版） | `0.1.2-rc.1` / `0.1.7-rc.2` / `0.2.1-rc.2` | **3/3 通过**：按钮=Y · dock=1 · 面板=Y · badge=1 · `consoleErrors`=0 · 警告=0，`npm run verify:ui -- --versions 0.1.2-rc.1,0.1.7-rc.2,0.2.1-rc.2` exit **0**。这轮**不是新功能的 UI 验证**，而是回归确认：#118 改的是**所有代次共用**的投影注册路径，而上一轮六代 UI 矩阵跑在改动之前，所以挑最早 / 中间 / dev 基线三代重跑，确认注册改成 awaited effect 之后 dock 与面板照旧画得出来。`0.1.5-rc.3` / `0.1.7-rc.1` / `0.2.0-rc.2` / `0.2.1-rc.3` / `rc.4` **未重跑**，它们的 UI 结论仍是 10-28 那轮（改动前） | `.verify/ui-matrix/matrix.json`（gitignore，复跑上面那条命令即得）；副本缺陷见 §10 |
+
+| 2026-11-20 | `main@7a2df88` + `chore/kernel-0-2-2-rc-5@2adb027`（插件 1.14.0） | `KERNEL_GENERATIONS` **全 15 代** | **15/15 通过**：每代 按钮=Y · dock=1 行（正文含代次） · 面板=Y · badge=1 · `consoleErrors`=0 · 警告=0，`npm run verify:ui` exit **0**。这是首次把**全表**跑满的一轮（此前最多 6 代，且 `0.2.2-rc.3/rc.4` 各自单代跑过）。同时用 `--evidence docs/media/ui-matrix` 刷新了进仓证据：拼图 + 15 张 dock 缩略图 + 清单（`pluginVersion 1.14.0 / commit 2adb027`）。**来源是 real-gui**：真内核起 `dsh web`、真会话、真命令通道 | [`docs/media/ui-matrix/manifest.json`](../media/ui-matrix/manifest.json) + `matrix.png` + 每代 `-dock.png`；原始件在 `.verify/ui-matrix/`（gitignore，可复跑） |
 
 > 更早一次（2026-10-26 上午）的临时脚本只跑到 **5/6**：0.1.5 的 GUI 起不来（就是上面第 2 条
 > 模块回退清单那个 `ENOENT`，加上启动器形态那条）。那次结论没有进仓，因为脚本本身不可复跑；
@@ -122,6 +135,16 @@ PLAYWRIGHT_MODULE=<playwright 包目录> npm run verify:ui     # 指认一份现
    四代 × 10+ 次扫描，**一条 warn 都没有**。注释里那句「命中过行 = 结构探测仍然对得上」在
    这条路径上是错的。修法（本轮**未改**，只报）：判据改成排除后的可标注行数
    （`badgeable === 0 && index.size > 0` 才告），行选择器另需放宽或加 fiber 反查兜底。
+
+### 7.2b 2026-11-20 这轮补的第三条缺口：浏览器路径
+
+`chromium.launch({ headless: true })` 只认 playwright 自己期望的 revision。本机 playwright
+1.54.2 期望 **1181**、`~/.cache/ms-playwright` 里只有 **1208/1232/1237/1248**，于是六代全报
+`Executable doesn't exist … chromium_headless_shell-1181`。**那条错误与"插件在该代次画不出来"同形**
+（都是「失败：`<错误>`」一行），很容易被当成跨代回归。
+
+已补：`capture.mjs` 与 `run.mjs` 的**两个** `chromium.launch` 都支持
+`PLAYWRIGHT_CHROMIUM_PATH` 覆盖（第二个是 `--evidence` 生成拼图时用的，只补一个会只修一半）。
 
 ### 7.2 采集件自身的两个缺口（下轮值得补进 `scripts/ui-matrix/`）
 

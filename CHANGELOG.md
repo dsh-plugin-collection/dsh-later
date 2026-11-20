@@ -21,6 +21,27 @@
   验证：1007 测试全绿、typecheck 0 错、`check:release`/`check:lib-reach` 通过、
   14 代矩阵绿 14、UI 面（rc.4）按钮/dock/面板/badge 齐全 `错误=0`。
 
+- **chore** 跟进内核 `next` 轨前进到 `0.2.2-rc.5`：验证并登记，**零代码改动**。
+
+  内核 `latest` 与 `next` 双双前进到 `0.2.2-rc.5`。这次的 diff 口径比 rc.4 更硬：不只看
+  「运行时产物」，而是把 8 个 kernel-scoped 包（agent / commands / llm / schedule /
+  session / session-projection / settings / tools）的 tarball 解包后逐文件比对 ——
+  除 `package.json` 里的版本号与内部依赖指针外**零文件差异**。主包 `dsh` 的 `lib/`
+  同样零差异，唯一有实质内容的是文档（新增一篇讲 web 搜索默认提供方变更的
+  upgrade guide，与本插件无关）。
+
+  对 1.14.0 跑 mount/function/type/gate/UI 五面全绿（投递 `spliced=1 dispatch=Y`、
+  已关闭会话同样、子会话不该投、`at 形状 5/5`、type 换线 19 处通过、gate 双 pass、
+  UI `按钮=Y dock=1 面板=Y badge=1 错误=0 警告=0`）。
+
+  因代码零改动且 peer / engines 同段已覆盖，**不需要发新插件版**；把 rc.5 登记进
+  `KERNEL_GENERATIONS` 与 `VERIFIED_ON['1.14.0']` 后，`npm run sync:tags` 对账从
+  「latest / next 两条通道均未判定」回到「三条通道全指 1.14.0」——登记前那两条通道
+  是拒绝执行的（内核前进后没有任何插件版本在新代次上验证过），这正是该脚本设计上
+  「绝不回退到 latest」的意图。
+
+  台账现为 15 代。
+
 - **chore** 跟进内核 `next` 轨前进到 `0.2.2-rc.4`：验证并登记，**零代码改动**。
 
   内核 `next` 从 rc.3 前进到 rc.4。逐包 diff（schedule / primitives / agent / commands /
@@ -32,7 +53,7 @@
   `npm run sync:tags` 对账：`next → 1.14.0（kernel@next = 0.2.2-rc.4）`，已是目标状态。
 
   顺带修正 `verified-on.ts` 的登记纪律：已发布版本在**真实验证通过**后可以追加新代次
-  （不必发版），禁止的只是「没验证就声称支持」。台账现为 14 代。
+  （不必发版），禁止的只是「没验证就声称支持」。
 
 - **feat** 发布通道 tag 跟随内核 dist-tag：`latest` / `next` / `alpha` 三条对齐。
 

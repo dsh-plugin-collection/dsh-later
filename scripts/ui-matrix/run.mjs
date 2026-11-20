@@ -189,7 +189,14 @@ async function writeEvidence(rows, dir) {
   // ① 一页拼图（直接对 matrix.html 截图：结论与图同源，不会各写一套）
   const sheet = join(dir, 'matrix.png');
   const { chromium } = await loadPlaywright();
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    // 与 capture.mjs 同源的逃生口：playwright 版本与 ms-playwright 里现成的 revision
+    // 对不上时报 "Executable doesn't exist"，那条错误长得像"证据生成失败"。
+    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH === undefined
+      ? {}
+      : { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }),
+  });
   try {
     const page = await browser.newPage({ viewport: { width: 1500, height: 1000 }, deviceScaleFactor: 1 });
     await page.goto(`file://${join(OUT, 'matrix.html')}`, { waitUntil: 'load' });

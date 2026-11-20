@@ -56,9 +56,9 @@ export const VERIFIED_ON = {
   /**
    * 1.14.0：当前发布版。
    *
-   * 全部 14 代都过（`npm run verify:kernels` 全量：绿 14 / 红 0 / 未判定 0，
+   * 全部 15 代都过（`npm run verify:kernels` 全量：绿 15 / 红 0 / 未判定 0，
    * 见 docs/verification.md）。所以三条通道现在都指它。
-   * rc.4 为内核 `next` 前进后的跟进验证（五面全绿、零代码改动），见 upstream-compat。
+   * rc.4 / rc.5 为内核 `next` 前进后的跟进验证（五面全绿、零代码改动），见 upstream-compat。
    */
   '1.14.0': [
     '0.1.2-rc.1',
@@ -75,6 +75,7 @@ export const VERIFIED_ON = {
     '0.2.2-rc.2',
     '0.2.2-rc.3',
     '0.2.2-rc.4',
+    '0.2.2-rc.5',
   ],
 };
 

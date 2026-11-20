@@ -23,6 +23,19 @@
 [`media/ui-matrix/`](media/ui-matrix/)：一页拼图 `matrix.png` + 每代 `-dock.png` 缩略图 + `manifest.json`
 （把"哪次运行、什么结论、哪个文件、文件 sha256"钉在一起）。
 
+**跑之前要喂两个环境变量**，否则会以「UI 面红」的样子失败，其实只是环境没配好：
+
+| 变量 | 为什么需要 |
+|---|---|
+| `PLAYWRIGHT_MODULE` | 本仓 devDependencies 里没有 playwright（CI 不装）。指向任意已装的包目录即可 |
+| `PLAYWRIGHT_CHROMIUM_PATH` | playwright 的版本与 `~/.cache/ms-playwright` 里现成的 revision 常常对不上。这台机器上是 playwright 1.54.2 期望 revision 1181、缓存里只有 1248，不覆盖就报 `Executable doesn't exist` |
+
+```sh
+PLAYWRIGHT_MODULE=<playwright 目录> \
+PLAYWRIGHT_CHROMIUM_PATH=$HOME/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell \
+npm run verify:ui -- --versions 0.2.2-rc.5
+```
+
 实例引导自包含在 `scripts/ui-matrix/instance.mjs`，处理了三处实测出来的跨代次差异：
 `.bin/dsh` 可能是软链（npm 树）或 shell 脚本（pnpm 树，混用会 `SyntaxError`）；
 模块回退层要的 `<dsh 包>/node_modules/package.json` 占位；`cordis.patch.yml` 里 **hmr 必须开启**
@@ -1163,6 +1176,51 @@ so a resumed fork may still be a root"*。）
 重复保险，而这类实验**很容易看着成功、实际没测到**（本 skill 反复警告的失败类型）。
 
 若将来要合并两档判据，这里就是那块必须补的实验的挂点。
+
+## `0.2.2-rc.5`：`next` 轨第二次前进（2026-11-20）
+
+内核 `latest` 与 `next` 双双从 `0.2.2-rc.4` 前进到 `0.2.2-rc.5`。本代**零代码改动**即可支持。
+
+### 与 rc.4 的差异：比「运行时产物」更硬的口径
+
+rc.4 那次是对比「运行时产物」（sourcemap / 样式 / 文档不计）。这次直接比对 **tarball
+解包后的全部文件**，8 个 kernel-scoped 包逐个 `diff -rq` 并排除 `package.json`：
+
+| 包 | 除 `package.json` 外的文件差异 |
+|---|---|
+| `dsh-agent` / `dsh-commands` / `dsh-llm` / `dsh-schedule` | 0 |
+| `dsh-session` / `dsh-session-projection` / `dsh-settings` / `dsh-tools` | 0 |
+
+（8 个包 = `src/upstream-compat.ts` 的 `KERNEL_SCOPED_PACKAGES` 全量。主包 `dsh` 只是启动器，
+不随代次进 peer 枚举，所以单独列在上面那一行讲。）
+
+`package.json` 里变的是 `version` 与内部依赖指针（`@deepseek-ai/dsh-*` 全部 `rc.4`→`rc.5`），
+没有依赖增删、没有 `exports` 变化。主包 `dsh` 的 `lib/` 同样零差异，唯一新增的实质内容在
+`docs/upgrade-guide/v0.2.2-rc.4/web-search-deepseek-model-default/`（web 搜索默认提供方由
+`deepseek-search-api` 改为按模型路由选择），与本插件的调度面无关。
+
+### 五面实测（全绿）
+
+| 面 | 手段 | 结果 |
+|---|---|---|
+| mount / function | `verify-across-kernels.mjs --versions 0.2.2-rc.5 --steps mount,function` | `同源=same`、投递 `spliced=1 dispatch=Y`、已关闭会话同样、子会话(depth=1) 不该投=Y |
+| type | 同上 `--steps type` | 换线 19 处，两个 tsconfig 通过 |
+| gate | 同上 `--steps gate` | 本代 `pass`、最新 `pass` |
+| at 文法 | 随 function 面 | 5/5 |
+| **UI** | `npm run verify:ui -- --versions 0.2.2-rc.5` | 按钮=Y dock=1 面板=Y badge=1、`错误=0 警告=0`，截图 `.verify/ui-matrix/0.2.2-rc.5-*.png` |
+
+### 登记前 `sync:tags` 是拒绝执行的
+
+把内核前进到 rc.5 之后、把本代登记进台账之前，`npm run sync:tags --dry-run` 的输出是：
+
+```
+latest → **未判定**    （没有任何插件版本在 kernel@latest = 0.2.2-rc.5 上验证过）
+next   → **未判定**    （没有任何插件版本在 kernel@next = 0.2.2-rc.5 上验证过）
+❌ 拒绝执行：有通道无法判定目标版本
+```
+
+这正是该脚本刻意的行为：**绝不回退到 `latest`**——回退会让用户以为装上了配套版本，
+实际没有。登记 rc.5 后就回到三条通道全指 1.14.0。
 
 ## `0.2.2-rc.3`：内核三轨分轨后的首次验证（issue #168）
 

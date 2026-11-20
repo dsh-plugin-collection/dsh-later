@@ -23,6 +23,9 @@ import { join } from 'node:path';
  * 找 playwright：本仓 devDependencies 里没有它（那是 UI 采集件的既有约定 —— CI 不装、不进 CI）。
  *
  * 解析顺序：`PLAYWRIGHT_MODULE` 环境变量（指向包目录）→ 裸 `playwright`（全局/本地已装）。
+ * 浏览器本体另有一个 `PLAYWRIGHT_CHROMIUM_PATH` 覆盖（见下方 `captureUi` 里的注释）：
+ * playwright 版本与 `~/.cache/ms-playwright` 里现成的 revision 常常对不上，不覆盖就会
+ * 报 "Executable doesn't exist"，那种失败看起来像 UI 面红、其实只是没下载对应浏览器。
  * @returns {Promise<any>} playwright 模块。
  */
 export async function loadPlaywright() {
@@ -70,7 +73,15 @@ export async function captureUi({ port, outDir, version, prompt }) {
   const { chromium } = await loadPlaywright();
   mkdirSync(outDir, { recursive: true });
   const cookie = mintCookie(port);
-  const browser = await chromium.launch({ headless: true });
+  // 浏览器可执行文件可选覆盖：`PLAYWRIGHT_CHROMIUM_PATH` 指向已装的那份 headless shell。
+  // 为什么要这个：`npx playwright` 的版本与 `~/.cache/ms-playwright` 里现成的 revision
+  // 常常对不上（这台机器上是 1.54.2 对 revision 1181、缓存里只有 1248），
+  // 不覆盖就报 "Executable doesn't exist"，看起来像 UI 面失败、其实只是缺下载。
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath === undefined ? {} : { executablePath }),
+  });
   const result = {
     version,
     shots: {},

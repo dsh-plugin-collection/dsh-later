@@ -37,6 +37,7 @@
 | `0.2.2-rc.2` | Supported (one breaking change each in primitives / registry; adapted) | — |
 | `0.2.2-rc.3` | Supported (the `next` track of the kernel's three-track release; no new breaking change) | `dsh-later@dsh-0-2-2-rc-3` |
 | `0.2.2-rc.4` | Supported (`next` advanced to rc.4; zero runtime diff vs rc.3, covered via the `@next` channel) | — |
+| `0.2.2-rc.5` | Supported (`next` advanced once more; all 8 kernel-scoped packages are file-identical apart from versions, covered via the `@next` channel) | — |
 
 **Install channel** (follows the kernel's dist-tag):
 
