@@ -1,3 +1,4 @@
+export declare const MAX_TIMER_DELAY_MS = 2147483647;
 export declare const name = "dsh-later";
 export declare const SETTINGS_NAMESPACE = "dsh-later";
 export declare const PROJECTION_KEY = "userSchedules";

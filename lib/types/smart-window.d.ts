@@ -11,7 +11,6 @@ export declare function pickSmartWindowFields(raw: Partial<Record<keyof SmartWin
 export declare function sanitizeSmartWindowConfig(raw: Partial<Record<keyof SmartWindowConfig, unknown>> | undefined | null): SmartWindowConfig;
 export declare const SMART_MIN_DELAY_MS: number;
 export declare const MINUTE_MS: number;
-export declare const HOUR_MS: number;
 export declare const DAY_MS: number;
 export type DayMinutes = number;
 export interface LocalFields {

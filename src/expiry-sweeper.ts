@@ -64,6 +64,7 @@
  *
  * @module dsh-later/expiry-sweeper
  */
+import { MAX_TIMER_DELAY_MS } from './domain.js';
 import type { OwnedEntry } from './ownership-store.js';
 import { readDueIndex } from './due.js';
 
@@ -85,9 +86,6 @@ export const MAX_BACKOFF_MS = 10 * 60_000;
  * 判成失败，也能让"放弃"在十秒量级内收敛（实测 5 次失败 ≈ 11s）。
  */
 const WAKE_GRACE_MS = 250;
-
-/** Node timers 能表示的最大延迟（超过会立刻触发，必须夹住）。 */
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** 扫描器需要的最小 sidecar 面（`listOwnershipSnapshots` 的结构子集）。 */
 export interface SweepSnapshot {

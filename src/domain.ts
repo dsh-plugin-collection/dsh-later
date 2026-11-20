@@ -16,6 +16,14 @@
 import type {} from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-session-projection/types';
 
+/**
+ * Node `setTimeout` 能表示的最大延迟（毫秒）。超过它的值会被 Node 当成 1ms 立刻触发，
+ * 所以**所有**跨长时间的重排定时器都必须夹住它 —— 这条约束在两处生效（投递排期与
+ * 到期扫描），各自写过一遍字面量，且一处写成十进制、一处带下划线分组。合成一份，
+ * 免得哪天有人只改其中一处。
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /** 插件名（与 cordis 条目 id / manifest 一致）。 */
 export const name = 'dsh-later';
 

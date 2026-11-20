@@ -109,10 +109,9 @@ export function sanitizeSmartWindowConfig(
 /** 两次提醒之间至少等待的毫秒数（智能模式下）。 */
 export const SMART_MIN_DELAY_MS = 2 * 60 * 1000;
 
-/** 一小时/一天的毫秒数。 */
+/** 分钟/天的毫秒数（`floorToMinute` 与跨日探测用；本文件不需要小时那一档）。 */
 export const MINUTE_MS = 60 * 1000;
-export const HOUR_MS = 60 * MINUTE_MS;
-export const DAY_MS = 24 * HOUR_MS;
+export const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 当日第几分钟（0–1439）。 */
 export type DayMinutes = number;

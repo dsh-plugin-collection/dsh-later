@@ -105,10 +105,8 @@ export function formatRelative(
   return phrases.relDays.replace('{d}', String(Math.floor(hours / 24)));
 }
 
-/** 毫秒常量（避免依赖 smart-window 再复制）。 */
-export const MINUTE_MS = 60 * 1000;
-export const HOUR_MS = 60 * MINUTE_MS;
-export const DAY_MS = 24 * HOUR_MS;
+/** 一分钟的毫秒数（仅本文件的 `formatRelative` 使用，故不导出）。 */
+const MINUTE_MS = 60 * 1000;
 
 /**
  * 完整时间文案：zh "{M}月{d}日 {周X} HH:mm"、en "Wed, Aug 26, 14:45"（按指定时区）。
@@ -136,29 +134,6 @@ export function formatHhmm(epoch: number, timeZone: string): string {
   });
   return formatter.format(epoch);
 }
-
-/** 周期几第几天（与 formatAbsolute 里的 wkday 词对齐）。 */
-
-/**
- * 倒计时 "HH:MM:SS"（或剩余不足 1 小时时 "MM:SS"）。
- */
-export function formatCountdown(epoch: number, now: number = Date.now()): string {
-  const remain = Math.max(0, epoch - now);
-  const totalSeconds = Math.floor(remain / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const mm = String(minutes).padStart(2, '0');
-  const ss = String(seconds).padStart(2, '0');
-  if (hours > 0) return `${String(hours).padStart(2, '0')}:${mm}:${ss}`;
-  return `${mm}:${ss}`;
-}
-
-/** 未来距离（毫秒）；用于紧急度判断。 */
-export function remainingMs(epoch: number, now: number = Date.now()): number {
-  return Math.max(0, epoch - now);
-}
-
 
 // ── `at` 的文法：预览、守门人、面板三处共用同一份 ──────────────────────────────────
 
