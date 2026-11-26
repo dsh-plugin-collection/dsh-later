@@ -508,15 +508,6 @@ export function registerUserScheduleTools(
 interface UserWatch {
   /** sessionId → 最近一次「用户动作」的时刻（epoch ms）。 */
   readonly recent: Map<string, number>;
-  /**
-   * sessionId → 被静默期挡下的到期条目（issue #11b 的修正）。
-   *
-   * 静默期的语义是「别主动去**打开**一个用户刚碰过的会话」，**不是**「到期任务可以不发」。
-   * 把两者混在一起，就成了"有一条到期了，因为它刚被关过，所以谁都不知道它没发"——
-   * 正是本仓一直在清理的那类安静失败。所以挡下来的每一条都在这里留痕，由扫描器取走并
-   * 报成 `undelivered`（原因 `quiet-window`），下次到期重排时重试。
-   */
-  readonly suppressed: Map<string, Set<string>>;
 }
 
 /** 用户动作后的静默期：两个扫描周期（120s）内不**主动**冷唤醒。 */
@@ -533,7 +524,6 @@ const COLD_WAKE_QUIET_MS = 120_000;
 function createUserWatch(): UserWatch {
   return {
     recent: new Map<string, number>(),
-    suppressed: new Map<string, Set<string>>(),
   };
 }
 
@@ -576,7 +566,9 @@ function watchSessionLifecycle(ctx: Context, watch: UserWatch): () => void {
  *     `isRootAgent` 的深度判据回答——见 upstream-compat。）
  *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
  *     注意这是**优先级最低**的一条：前两条（子会话 / 非 root）是「叫醒了也投不出去」，
- *     这一条只是「现在别打开」。被它挡下的到期任务必须留痕（见 `UserWatch.suppressed`）。
+ *     这一条只是「现在别打开」，但被它挡下的到期任务**必须留痕**——留痕落在扫描器侧：
+ *     `refuseReason`（接线见 `expiry-sweeper` 的 `wakeable` 旁路）→ `noteRefused` →
+ *     `undeliveredReasons()`（原因 `quiet-window`），下一轮重试。这里没有第二处留痕点。
  * @param ctx - 宿主上下文。
  * @param sessionId - 候选会话。
  * @param watch - 用户动作表。
@@ -792,10 +784,7 @@ async function wakeColdSession(
   // 这里清掉静默标记是**有意的**：既然本次已经决定唤醒并真的叫起来了，那这条会话就不再是
   // 「用户刚关掉、先别碰」的状态——留着它只会让下一轮扫描继续把它当静默期内的条目挡住。
   // （反过来不成立：`agent/disposed` **不能**一律当成用户动作，见 `createUserWatch`。）
-  if (watch !== undefined) {
-    watch.recent.delete(sessionId);
-    watch.suppressed.delete(sessionId);
-  }
+  if (watch !== undefined) watch.recent.delete(sessionId);
   // 无条件重驱一次。
   //
   // 原实现写成 `if (mounted === undefined) registry.drive(agent)`——但 `mount()` 成功后

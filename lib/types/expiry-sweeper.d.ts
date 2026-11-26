@@ -31,7 +31,9 @@ export interface ExpirySweeper {
     readonly stopped: boolean;
     dispose(): Promise<void>;
     failuresOf(sessionId: string): number;
+    wakesOf(sessionId: string): number;
     undeliveredReasons(): ReadonlyMap<string, number>;
+    undeliveredTotal(): ReadonlyMap<string, number>;
 }
 export declare function backoffForFailures(failures: number): number;
 export declare function resolveScheduledAtFromLog(events: readonly ScheduleChangeEventLike[], scheduleId: string, createdAt: number): number | undefined;
