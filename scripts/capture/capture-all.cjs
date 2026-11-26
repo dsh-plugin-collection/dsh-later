@@ -14,6 +14,16 @@
  *   - playwright 库（复用 @playwright/mcp 内置的即可，见 PW 常量）；
  *   - 全程不发送真实消息给模型（仅「你好」一条用于建立对话布局）。
  *
+ * ## 为什么它不改为走 `scripts/lib/playwright-loader.mjs`（issue #208 卫生第 4 条）
+ *
+ * 那个 loader 是 ESM；本文件是 `.cjs`，`require()` 它需要一个 CJS 入口，而为了省这一处
+ * 就给它加 CJS 导出面，等于让「采集件的一个辅助模块」决定模块格式 —— 不值。
+ * 更要紧的是两边的**用途不同**：loader 服务的是「手工复核矩阵/接缝」那一批（要按代次、
+ * 按 DPR 反复跑，解析必须稳），而本文件是**一次性素材脚本**：路径直接写死成某台机器的
+ * 绝对路径（下面 `require` 与 `PW` 那两行），本来就不打算在别的机器上跑。
+ * 所以这里保留原样，只把差异说清 —— 结构断言（`tests/ui-matrix-harness.test.mjs`）
+ * 另外钉住「那四个 .mjs 不得再各写一份解析顺序」，本文件不在那条断言的名单里。
+ *
  * 用法: node capture-all.cjs [--out /tmp/ss-out] [--base http://127.0.0.1:3080]
  */
 const { chromium } = require('/home/wujue/.nvm/versions/node/v22.22.2/lib/node_modules/@playwright/mcp/node_modules/playwright');

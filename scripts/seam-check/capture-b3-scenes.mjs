@@ -47,8 +47,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { PlaywrightNotInstalledError, loadChromium as loadChromiumFromLibrary } from '../lib/playwright-loader.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
@@ -89,26 +89,20 @@ const ISOLATE_WIDTH = 720; // 整数宽：让两半落在同一设备像素相�
 
 /**
  * playwright **只在真要跑的时候加载**：CI 里没有它，判据测试不需要这个脚本可运行
- * （口径同 `capture.mjs`，也正是本脚本的像素 AE 不进 CI 的原因 —— AE 与 CI 是同一件事）。
- * 解析顺序：① 标准包名解析（本仓或上层 node_modules 装了就直接用）；② `PLAYWRIGHT_MODULE`
- * 指一份现成的副本。两条都不通就打印一句可执行的提示并以非 0 退出 ——
- * 不把某台机器的绝对路径写进仓内脚本（上一版就是这么写的，别人机器上是死路）。
+ * （也正是本脚本的像素 AE 不进 CI 的原因 —— AE 与 CI 是同一件事）。
+ *
+ * 解析顺序（env → 裸包名 → 统一提示）收在 `scripts/lib/playwright-loader.mjs`（issue #208
+ * 卫生第 4 条：四份手抄的解析顺序已经漂了，见该模块头注释）。这里只把「装不上」翻成退出码。
  */
 async function loadChromium() {
   try {
-    // eslint-disable-next-line import/no-unresolved
-    return (await import('playwright')).chromium;
-  } catch {
-    const override = process.env.PLAYWRIGHT_MODULE;
-    if (override) {
-      const req = createRequire(import.meta.url);
-      try { return req(override).chromium; } catch { /* 落到统一报错 */ }
+    return await loadChromiumFromLibrary({ scriptName: 'node scripts/seam-check/capture-b3-scenes.mjs' });
+  } catch (error) {
+    if (error instanceof PlaywrightNotInstalledError) {
+      console.error(error.message);
+      process.exit(1);
     }
-    console.error('✗ 找不到 playwright。二选一：\n'
-      + '  1) 装一份：npm i -D playwright && npx playwright install chromium\n'
-      + '  2) 指一份现成的：PLAYWRIGHT_MODULE=/绝对路径/playwright node scripts/seam-check/capture-b3-scenes.mjs\n'
-      + '（本仓运行时零依赖，playwright 只服务于手工采集，不参与 CI。）');
-    process.exit(1);
+    throw error;
   }
 }
 

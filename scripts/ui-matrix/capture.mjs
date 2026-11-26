@@ -16,25 +16,24 @@
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { loadPlaywrightModule } from '../lib/playwright-loader.mjs';
 
 /**
  * 找 playwright：本仓 devDependencies 里没有它（那是 UI 采集件的既有约定 —— CI 不装、不进 CI）。
  *
- * 解析顺序：`PLAYWRIGHT_MODULE` 环境变量（指向包目录）→ 裸 `playwright`（全局/本地已装）。
+ * 解析顺序（env → 裸包名 → 统一提示）收在 `scripts/lib/playwright-loader.mjs`，本函数只是
+ * 保住这个名字给 `run.mjs` / `verify-cold-attribution.mjs` 的既有 import 面（issue #208
+ * 卫生第 4 条：环境变量读取只允许发生在那个模块里，结构断言钉着这一点）。
+ *
  * 浏览器本体另有一个 `PLAYWRIGHT_CHROMIUM_PATH` 覆盖（见下方 `captureUi` 里的注释）：
  * playwright 版本与 `~/.cache/ms-playwright` 里现成的 revision 常常对不上，不覆盖就会
  * 报 "Executable doesn't exist"，那种失败看起来像 UI 面红、其实只是没下载对应浏览器。
  * @returns {Promise<any>} playwright 模块。
+ * @throws {PlaywrightNotInstalledError} 两条解析路径都不通时（调用方决定退出码）。
  */
 export async function loadPlaywright() {
-  const explicit = process.env.PLAYWRIGHT_MODULE;
-  if (explicit !== undefined && explicit.length > 0) {
-    const require = createRequire(`${explicit.replace(/\/+$/, '')}/`);
-    return require('playwright');
-  }
-  return import('playwright');
+  return loadPlaywrightModule({ scriptName: 'node scripts/ui-matrix/run.mjs' });
 }
 
 /**
