@@ -115,8 +115,87 @@ test('结构：badge 与 warning 必须进采集结论（否则"0 错误"会掩�
 test('结构：采集件不许静态依赖 playwright（CI 里没有它，静态 import 会让门禁直接红）', () => {
   const capture = readFileSync(join(root, 'scripts', 'ui-matrix', 'capture.mjs'), 'utf8');
   assert.doesNotMatch(capture, /^import .*from 'playwright'/m, 'playwright 必须是动态解析');
-  assert.match(capture, /import\('playwright'\)/, '保留裸解析这条路');
-  assert.match(capture, /PLAYWRIGHT_MODULE/, '并支持用环境变量指认（本机装在 @playwright/mcp 下）');
+  // issue #208 卫生第 4 条之后：裸解析与 PLAYWRIGHT_MODULE 都搬进了共享 loader，
+  // 这里断言的是「采集件仍然经由它加载」，而不是「每个文件各自写一份解析顺序」。
+  assert.match(capture, /loadPlaywrightModule/, '要走 scripts/lib/playwright-loader.mjs，不要再自己拼解析顺序');
+});
+
+/**
+ * playwright 解析只许有一个家（issue #208 卫生第 4 条）。
+ *
+ * 原先四处 .mjs 各抄一遍「env → 裸包名 → 提示」，而 `scripts/seam-check/capture.mjs`
+ * 那一份**连 env 兜底都没有**（本机上必然失败）。分叉的代价不是重复几行，是同一条排障
+ * 提示在各脚本里给出不同结论：按 A 的提示修好、跑 B 照样失败。这条断言把「读环境变量」
+ * 这件事限定在一个文件里 —— 谁再手抄一份解析顺序，这里直接红。
+ */
+test('结构：只许 playwright-loader 读 PLAYWRIGHT_MODULE（四处 .mjs 不得再各写一遍）', () => {
+  const files = [
+    'scripts/seam-check/capture.mjs',
+    'scripts/seam-check/capture-demo.mjs',
+    'scripts/seam-check/capture-b3-scenes.mjs',
+    'scripts/ui-matrix/capture.mjs',
+  ];
+  for (const rel of files) {
+    const body = readFileSync(join(root, rel), 'utf8');
+    assert.doesNotMatch(
+      body,
+      /process\.env\.PLAYWRIGHT_MODULE/,
+      `${rel} 里又出现了 process.env.PLAYWRIGHT_MODULE：解析顺序只允许在 scripts/lib/playwright-loader.mjs 里`,
+    );
+    assert.match(body, /playwright-loader\.mjs/, `${rel} 必须经由共享 loader 加载 playwright`);
+  }
+  // 反向锚点：那个模块自己当然要读，否则上面几条会把它也判红却没有替代实现。
+  const loader = readFileSync(join(root, 'scripts', 'lib', 'playwright-loader.mjs'), 'utf8');
+  assert.match(loader, /PLAYWRIGHT_MODULE/, 'loader 必须自己读环境变量');
+  assert.match(loader, /import\('playwright'\)/, '裸包名这条路要留在 loader 里');
+  assert.match(loader, /npm i -D playwright/, '统一提示要给出装法（别只说「找不到」');
+});
+
+/**
+ * loader 的行为：env 指认优先于裸解析，两条都不通抛 PlaywrightNotInstalledError。
+ *
+ * 用**假包**（临时目录里一个 `playwright/index.js`）验证，不装真 playwright、不起浏览器 ——
+ * 这也是 issue #208 卫生第 8 条的要求：采集面只做结构/纯逻辑断言。
+ */
+test('行为：loader 按 env → 裸包名解析，env 指错了要报出原因而不是悄悄退回', async () => {
+  const { loadPlaywrightModule, loadChromium, PlaywrightNotInstalledError } = await import('../scripts/lib/playwright-loader.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'pw-loader-'));
+  try {
+    const fake = join(dir, 'playwright');
+    mkdirSync(fake);
+    writeFileSync(join(fake, 'package.json'), '{"name":"playwright","version":"0.0.0","main":"index.js"}\n');
+    writeFileSync(join(fake, 'index.js'), 'module.exports = { chromium: { fake: true }, tag: "fake" };\n');
+
+    const viaEnv = await loadPlaywrightModule({ envValue: fake, scriptName: 'node x.mjs' });
+    assert.equal(viaEnv.tag, 'fake', 'env 指认的副本必须被用上（本机 playwright 就装在 @playwright/mcp 下面）');
+    assert.equal((await loadChromium({ envValue: fake })).fake, true, 'loadChromium 只管取 chromium');
+
+    // env 指到不存在的目录：**不许**悄悄退回裸解析并假装成功 —— 那样「指错了」永远看不见。
+    await assert.rejects(
+      () => loadPlaywrightModule({ envValue: join(dir, 'nope'), scriptName: 'node scripts/seam-check/capture-demo.mjs' }),
+      (error) => {
+        assert.ok(error instanceof PlaywrightNotInstalledError, '必须是这个类型：CLI 靠 instanceof 翻退出码');
+        assert.match(error.message, /capture-demo\.mjs/, '提示里要带上调用方脚本名，读者才知道改哪条命令');
+        assert.match(error.message, /nope/, '要说清 env 指向的那个路径加载失败了');
+        return true;
+      },
+    );
+
+    // 显式指认是**只认这一份**：指一个「目录存在但里面没有 playwright」的路径，
+    // 不许沿着 node_modules 链向上摸到别处的 playwright（实测踩过：指 /tmp 下的假包，
+    // 结果向上撞到 /tmp/node_modules/playwright 真包，于是「指了 A、跑的是 B」不可见）。
+    mkdirSync(join(dir, 'empty'), { recursive: true });
+    await assert.rejects(
+      () => loadPlaywrightModule({ envValue: join(dir, 'empty'), scriptName: 'node x.mjs' }),
+      (error) => {
+        assert.ok(error instanceof PlaywrightNotInstalledError, '指错了必须报错，不能猜');
+        assert.match(error.message, /empty/, '要说清是哪个路径');
+        return true;
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('结构：实例引导必须处理两处跨代次差异（否则老代次起不来）', () => {

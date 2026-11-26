@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { detectSeamLine } from './criteria.mjs';
+import { PlaywrightNotInstalledError, loadChromium as loadChromiumFromLibrary } from '../lib/playwright-loader.mjs';
 
 const PRODUCTION_URL_HINT = ':3080';
 
@@ -109,9 +110,20 @@ function seamViewportY(geo) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   guard(opts);
-  // playwright 只在真要跑的时候加载：CI 里没有它，判据测试不需要这个脚本可运行
-  // eslint-disable-next-line import/no-unresolved
-  const { chromium } = await import('playwright');
+  // playwright 只在真要跑的时候加载：CI 里没有它，判据测试不需要这个脚本可运行。
+  // 解析顺序（env → 裸包名 → 统一提示）收在 `scripts/lib/playwright-loader.mjs`（issue #208
+  // 卫生第 4 条）：这一版原先**没有** `PLAYWRIGHT_MODULE` 兜底，本机（playwright 装在
+  // `@playwright/mcp` 下面）必然失败 —— 四份手抄的解析顺序已经漂了，统一收口。
+  let chromium;
+  try {
+    chromium = await loadChromiumFromLibrary({ scriptName: 'node scripts/seam-check/capture.mjs' });
+  } catch (error) {
+    if (error instanceof PlaywrightNotInstalledError) {
+      console.error(error.message);
+      process.exit(1);
+    }
+    throw error;
+  }
   const browser = await chromium.connectOverCDP(process.env.CDP_URL || 'http://127.0.0.1:9222')
     .catch(async () => chromium.launch());
   const context = browser.contexts()[0] || await browser.newContext();

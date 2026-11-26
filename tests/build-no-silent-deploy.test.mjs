@@ -12,11 +12,11 @@
  */
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { shouldRelink, RELINK_SKIP_NOTICE } from '../scripts/relink-policy.mjs';
+import { canBuild, runBuildIn } from './helpers/staged-build.mjs';
 
 const repoRoot = realpathSync(new URL('..', import.meta.url).pathname);
 const read = (rel) => readFileSync(join(repoRoot, rel), 'utf8');
@@ -99,17 +99,17 @@ function fakeProfile() {
   return { home, lib };
 }
 
-const canBuild = existsSync(join(repoRoot, 'node_modules/esbuild'));
+const buildable = canBuild(repoRoot);
 
-test('端到端：默认 npm run build 不改写 profile；--deploy 才改', { skip: !canBuild }, () => {
-  // 默认：哨兵文件必须原样留着
+test('端到端：默认 npm run build 不改写 profile；--deploy 才改', { skip: !buildable }, () => {
+  // 这里要在**仓库根**跑真构建（它测的是「默认 build 会不会改写 profile」，
+  // 路径必须是真仓库那份），所以用 helper 的 `runBuildIn` 而不是暂存树：
+  // 环境清空的口径（HOME / DSH_LATER_RELINK / DSH_LATER_BUILD_FALLBACK / PATH）必须与
+  // 其余 build 门禁完全一致 —— 那种一致性只能有一处实现（issue #208 卫生第 5 条）。
+  //
+  // `DSH_LATER_RELINK: ''` 现在是 helper 的默认值；显式传 `--deploy` 只是改 argv。
   const a = fakeProfile();
-  execFileSync('node', ['build.mjs'], {
-    cwd: repoRoot,
-    env: { ...process.env, HOME: a.home, DSH_LATER_RELINK: '' },
-    stdio: 'pipe',
-    timeout: 300_000,
-  });
+  runBuildIn(repoRoot, repoRoot, { env: { HOME: a.home } });
   assert.equal(
     readFileSync(join(a.lib, 'index.js'), 'utf8').includes('SENTINEL'),
     true,
@@ -118,12 +118,7 @@ test('端到端：默认 npm run build 不改写 profile；--deploy 才改', { s
 
   // 显式 --deploy：哨兵应被替换
   const b = fakeProfile();
-  execFileSync('node', ['build.mjs', '--deploy'], {
-    cwd: repoRoot,
-    env: { ...process.env, HOME: b.home },
-    stdio: 'pipe',
-    timeout: 300_000,
-  });
+  runBuildIn(repoRoot, repoRoot, { argv: ['--deploy'], env: { HOME: b.home } });
   assert.equal(
     readFileSync(join(b.lib, 'index.js'), 'utf8').includes('SENTINEL'),
     false,

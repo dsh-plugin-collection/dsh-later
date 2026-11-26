@@ -12,13 +12,24 @@
  *  1. **展开**（纯函数，零子进程）：默认 pattern 得到全部测试文件；零匹配 throw；
  *     helpers/ 与别的 worktree 不可能被收进来。
  *  2. **计数解析**：tap / spec / 带 ANSI 三种输出都取到 pass，取不到时返回 undefined（由调用方判红）。
- *  3. **接线**：package.json 的 test 与 CI 的测试步骤都必须走这一个入口，防有人顺手改回 glob。
- *  4. **端到端**（真起子进程）：零匹配非零退出、显式列表真跑得通、node --test 的退出码被传播。
+ *     **skipped 同口径**（issue #208）：两种 reporter 都要取到，0 要如实返回 0，末尾汇总优先。
+ *  3. **接线**：package.json 的 test 与 CI 的测试步骤都必须走这一个入口，防有人顺手改回 glob；
+ *     而严格档 `--require-no-skip` **不得**出现在 CI（那会让 CI 首次必红，理由见 run-tests.mjs 文件头）。
+ *  4. **端到端**（真起子进程）：零匹配非零退出、显式列表真跑得通、node --test 的退出码被传播、
+ *     结论行永远带 skipped、严格档在 skipped>0 时真红而在 skipped 0 时放行。
+ *
+ * ## issue #208 补进来的那段（2026-11）
+ * 前三层都只管「跑没跑」。跳过的用例在 node --test 里退出码仍是 0，于是
+ * `pass 1007 / skipped 137` 与 `pass 1007 / skipped 0` 在日志里完全同形 —— 一批面被环境
+ * 静默掉而门禁照样绿，这就是 #208 说的「失明」。第 2 层补 skipped 解析，第 4 层钉住
+ * 结论行与严格档的真实行为，第 3 层钉住「严格档默认不进 CI」。
  *
  * ## 已知边界（别让后人以为 pass 计数无所不能）
  * 一个「文件被收进列表但里面一条 test 都没注册」的情况，node 会把**文件本身**记成
  * `# tests 1 / # pass 1`（实测），pass 计数抓不到它。挡住它的是第 1 层（列表只收 `*.test.mjs`
- * 的真实文件）加用例自己的 `test()` 声明，不是 pass 数。
+ * 的真实文件）加用例自己的 `test()` 声明，不是 pass 数。同理，**skipped 也抓不到**「文件被
+ * 整份跳过」（node 对 `--test-skip-pattern` 命中整个文件时同样只记账不报警）——严格档只
+ * 回答「本轮的汇总里有没有跳过」，不回答「跳过该不该发生」。
  * @module tests/run-tests-gate
  */
 import { test, after } from 'node:test';
@@ -31,8 +42,10 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_PATTERN,
   NoTestFilesError,
+  checkNoSkip,
   expandTestFiles,
   parseSummary,
+  shouldRequireNoSkip,
 } from '../scripts/run-tests.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -89,10 +102,11 @@ test('`**` 形式覆盖默认形式，且从根下钻不会跑到 node_modules /
 /* ---------------- 2. 计数解析 ---------------- */
 
 test('parseSummary 认得 tap、spec、带 ANSI 三种汇总，取不到时给 undefined', () => {
-  assert.deepEqual(parseSummary('# tests 620\n# pass 620\n# fail 0\n'), {
+  assert.deepEqual(parseSummary('# tests 620\n# pass 620\n# fail 0\n# skipped 0\n'), {
     tests: 620,
     pass: 620,
     fail: 0,
+    skipped: 0,
   });
   assert.equal(parseSummary('ℹ tests 16\nℹ pass 16\nℹ fail 0\n').pass, 16, 'spec reporter 的汇总行');
   assert.equal(
@@ -101,8 +115,49 @@ test('parseSummary 认得 tap、spec、带 ANSI 三种汇总，取不到时给 u
     '带色输出也要取得到：按行首锚定就把解析挂在「有没有颜色」上',
   );
   assert.equal(parseSummary('# tests 0\n# pass 0\n').pass, 0, '0 要如实返回 0，交由调用方判红');
-  assert.deepEqual(parseSummary('no summary here'), { tests: undefined, pass: undefined, fail: undefined });
+  assert.deepEqual(parseSummary('no summary here'), {
+    tests: undefined,
+    pass: undefined,
+    fail: undefined,
+    skipped: undefined,
+  });
   assert.equal(parseSummary('').pass, undefined, '空输出解析不出 pass（调用方要判红，不能当 0 放行）');
+});
+
+test('parseSummary 认得 skipped（issue #208）：tap 与 spec 两种 reporter 都要取到', () => {
+  // 跳过的用例在两种 reporter 里都只出现在汇总块：`# skipped 3` / `ℹ skipped 3`。
+  // 不加这一条，`pass 1007 / skipped 137` 与 `pass 1007 / skipped 0` 在日志里完全同形。
+  assert.equal(parseSummary('# tests 10\n# pass 7\n# fail 0\n# skipped 3\n').skipped, 3);
+  assert.equal(parseSummary('ℹ tests 10\nℹ pass 7\nℹ fail 0\nℹ skipped 3\n').skipped, 3);
+  assert.equal(parseSummary('\u001b[2mℹ skipped 3\u001b[22m\n').skipped, 3, '带色输出也要取到');
+  assert.equal(parseSummary('# skipped 0\n').skipped, 0, '0 要如实返回 0（那是「一条都没跳」这个事实）');
+  // 末尾汇总优先：中途的字面量（失败用例源码里可能带着）不该被当成结论
+  assert.equal(parseSummary('# skipped 99\n# skipped 4\n').skipped, 4);
+  assert.equal(parseSummary('no summary here').skipped, undefined, '读不到不等于 0');
+});
+
+test('严格档开关默认关：参数/环境变量任一为真才开（宽松读取，与 fallback 策略同构）', () => {
+  assert.equal(shouldRequireNoSkip([], {}), false, '默认必须关：CI 不开它（理由见 run-tests.mjs 文件头）');
+  assert.equal(shouldRequireNoSkip(['--pattern', 'tests/*.test.mjs'], {}), false);
+  assert.equal(shouldRequireNoSkip(['--require-no-skip'], {}), true);
+  for (const v of ['1', 'true', 'TRUE', ' yes ', 'on']) {
+    assert.equal(shouldRequireNoSkip([], { DSH_REQUIRE_FULL_SUITE: v }), true, `${v} 应视为开`);
+  }
+  for (const v of ['0', 'false', 'no', '', 'banana']) {
+    assert.equal(shouldRequireNoSkip([], { DSH_REQUIRE_FULL_SUITE: v }), false, `${v} 应视为关`);
+  }
+});
+
+test('严格档判据：skipped>0 与「读不到」都给出拒绝理由，skipped 0 才放行', () => {
+  assert.equal(checkNoSkip({ skipped: 0, pass: 1007 }), null, '一条都没跳才该放行');
+  const dirty = checkNoSkip({ skipped: 7, pass: 1000 });
+  assert.match(dirty, /7 条用例被跳过/, '说清跳了几条，别只说「失败」');
+  assert.match(dirty, /--require-no-skip/, '报错要指回开关本身，读日志的人才知道是档位问题');
+  assert.match(
+    checkNoSkip({ skipped: undefined, pass: 1007 }),
+    /解析不到 skipped/,
+    '读数缺失必须判红：这正是前三层断言防的那种假绿',
+  );
 });
 
 test('parseSummary 取的是末尾那份汇总，不是中途撞见的字面量', () => {
@@ -166,6 +221,20 @@ test('CI 在测试之前先 build：lib/ 是已提交产物，不重编就测的
   );
 });
 
+test('严格档默认不进 CI（开了就是一条「首次必红」或「永远要私有环境」的门禁）', () => {
+  // 这条钉的是取舍本身：`--require-no-skip` 是好东西，但 CI 里那几个面（build 门禁要
+  // node_modules、真版本树、对端 checkout）在 runner 上必然缺席，打开它只会让每次 run
+  // 红一片，然后被人注释掉 —— 比不开更坏。要开必须先把环境补齐并改这条断言。
+  assert.doesNotMatch(ciRuns, /--require-no-skip/, 'CI 里不许开严格档：见 scripts/run-tests.mjs 文件头的启用条件');
+  assert.doesNotMatch(ciRuns, /DSH_REQUIRE_FULL_SUITE/, '环境变量形态同样不许进 CI');
+  const pkg = JSON.parse(read('package.json'));
+  assert.doesNotMatch(
+    pkg.scripts.test,
+    /--require-no-skip|DSH_REQUIRE_FULL_SUITE/,
+    '`npm test` 必须保持默认档（本地环境不齐时它不该红）',
+  );
+});
+
 /* ---------------- 4. 端到端 ---------------- */
 
 /**
@@ -212,6 +281,69 @@ test('端到端：node --test 的退出码被传播，不会被「本地判定�
   const run = runScript(dir, ['--pattern', 't/*.test.mjs']);
   assert.notEqual(run.status, 0, '用例失败必须让 npm test 失败');
   assert.match(run.stdout, /fail\s+1/, '失败计数应原样出现在转发出来的 node --test 输出里');
+});
+
+test('端到端：结论行永远打出 skipped N（issue #208：不统计就等于失明）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-run-tests-skip-'));
+  tmpDirs.push(dir);
+  mkdirSync(join(dir, 't'));
+  writeFileSync(
+    join(dir, 't', 'mix.test.mjs'),
+    "import { test } from 'node:test';\n" +
+      "test('runs', () => {});\n" +
+      "test('skipped one', { skip: 'reason' }, () => {});\n" +
+      "test('skipped two', { skip: 'reason' }, () => {});\n",
+  );
+  const run = runScript(dir, ['--pattern', 't/*.test.mjs']);
+  assert.equal(run.status, 0, `默认档下跳过不影响绿，实际 stderr:\n${run.stderr}`);
+  assert.match(
+    run.stderr,
+    /run-tests: 1 个文件，pass 1 \/ fail 0 \/ skipped 2/,
+    '结论行必须带 skipped：少了它，pass 数与 skipped 数在日志里各自孤立，读不出「有面被环境吃掉」',
+  );
+  // 转发出来的 node --test 输出里当然也有；但门禁的读数必须是 run-tests 自己的结论行。
+  assert.match(run.stdout, /# skipped 2/, '子进程汇总要原样转发');
+});
+
+test('端到端：skipped>0 时 --require-no-skip 判红（默认档仍绿）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-run-tests-noskip-'));
+  tmpDirs.push(dir);
+  mkdirSync(join(dir, 't'));
+  writeFileSync(
+    join(dir, 't', 'mix.test.mjs'),
+    "import { test } from 'node:test';\n" +
+      "test('runs', () => {});\n" +
+      "test('skipped one', { skip: 'reason' }, () => {});\n",
+  );
+  // ① 默认档：绿 + 结论行报 skipped 1
+  const lax = runScript(dir, ['--pattern', 't/*.test.mjs']);
+  assert.equal(lax.status, 0, `默认档不该因为这 1 条跳过而红：\n${lax.stderr}`);
+  assert.match(lax.stderr, /skipped 1/);
+
+  // ② 严格档（参数形态）：同一份文件必须红，且说清是档位判的、跳了几条
+  const strict = runScript(dir, ['--pattern', 't/*.test.mjs', '--require-no-skip']);
+  assert.notEqual(strict.status, 0, '严格档下 skipped>0 必须判红，否则这个开关等于没有');
+  assert.match(strict.stderr, /--require-no-skip/);
+  assert.match(strict.stderr, /1 条用例被跳过/, '要说清跳了几条');
+
+  // ③ 严格档（环境变量形态）：与参数等价
+  const viaEnv = spawnSync(process.execPath, [scriptPath, '--pattern', 't/*.test.mjs'], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, DSH_REQUIRE_FULL_SUITE: '1' },
+  });
+  assert.notEqual(viaEnv.status, 0, 'DSH_REQUIRE_FULL_SUITE=1 必须与参数形态等价');
+  assert.match(viaEnv.stderr ?? '', /1 条用例被跳过/);
+});
+
+test('端到端：严格档下「一条都没跳」照常放行（别把它做成永远红的门禁）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-run-tests-clean-'));
+  tmpDirs.push(dir);
+  mkdirSync(join(dir, 't'));
+  writeFileSync(join(dir, 't', 'clean.test.mjs'), "import { test } from 'node:test';\ntest('runs', () => {});\n");
+  const run = runScript(dir, ['--pattern', 't/*.test.mjs', '--require-no-skip']);
+  assert.equal(run.status, 0, `skipped 0 时严格档必须放行，实际 stderr:\n${run.stderr}`);
+  assert.match(run.stderr, /skipped 0/);
 });
 
 test('端到端：认不出的参数不被静默吞掉（转交 node --test 后由它判红）', () => {

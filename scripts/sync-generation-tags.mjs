@@ -52,7 +52,7 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const { KERNEL_GENERATIONS } = await import(join(root, 'lib', 'upstream-compat.js'));
-const { pickVersionForChannel, KERNEL_CHANNELS } = await import(join(root, 'scripts', 'lib', 'verified-on.ts'));
+const { pickVersionForChannel, KERNEL_CHANNELS } = await import(join(root, 'scripts', 'lib', 'verified-on.mjs'));
 
 const argv = new Set(process.argv.slice(2));
 const APPLY = argv.has('--apply');
@@ -211,7 +211,7 @@ function render(diff, remote, channelTargets = [], kernelChannels = {}) {
     lines.push('   原因通常是内核在该通道上的版本还没有被任何插件版本验证过。');
     lines.push('   ⚠️ 刻意**不**回退到 latest —— 那会让用户以为装上了配套版本，实际没有。');
     lines.push('   做法：跑 node scripts/verify-across-kernels.mjs --versions <该内核版本> --steps mount,function,type,gate');
-    lines.push('   过之后发一个新版本，并在 src/verified-on.ts 的 VERIFIED_ON 里登记。');
+    lines.push('   过之后发一个新版本，并在 scripts/lib/verified-on.mjs 的 VERIFIED_ON 里登记。');
     lines.push('');
   }
 

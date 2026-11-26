@@ -1307,3 +1307,52 @@ authentication may not perform this action`）。添加可以，删除不行。�
 
 ⚠️ `npm run sync:tags` 只看 `dsh-*` 前缀（避免误删别人的 tag），所以它**不会**把
 `probe-test-tag` 列为应回收——这一条只能人工盯，脚本管不到。
+
+## 门禁的覆盖面：哪些是 CI 契约，哪些是本地契约（issue #208，2026-11-26）
+
+`npm test` 的前三层断言（零匹配判红、传播退出码、解析 pass 计数）只管「跑没跑」。
+**跳过的用例**在 `node --test` 里退出码仍是 0，于是 `pass N / skipped 137` 与
+`pass N / skipped 0` 在 CI 日志里完全同形 —— 一批面被环境静默掉而门禁照样绿。修法是两件：
+
+1. `scripts/run-tests.mjs` 的结论行**永远**打 `skipped N`：
+   `run-tests: 97 个文件，pass N / fail 0 / skipped N（node --test 退出码 0）`。
+2. 可选严格档 `--require-no-skip`（等价于 `DSH_REQUIRE_FULL_SUITE=1`）：有跳过即判红，
+   读不到 `skipped` 也判红（读数缺失时「没看见跳过」与「没有跳过」不可区分）。
+
+### 严格档的启用条件（默认关，CI 里也别开）
+
+默认关闭是有意的，不是偷懒：本仓有一批用例的跳过条件是**环境具备与否**，不是代码对不对。
+
+| 文件 | 跳过条件 | 谁满足不了 |
+|---|---|---|
+| `build-artifact-shape` / `build-client-typecheck-gate` / `build-no-silent-deploy` | 没装 esbuild/typescript | 干净 checkout、只跑单测的环境 |
+| `build-emit-slimming` / `panel-anchor-backends` / `client-tick-count` | `lib/` 产物不在 | 没先 build |
+| `peer-facet-integration` | 找不到对端 `dsh-group-status/lib/client.js` | CI 没有那份 checkout（对端不是 npm 依赖） |
+| `kernel-version-source-kind` | 本机没有 DSH 版本树 | CI 明确不装多代内核 |
+| `peer-range-fold` | 依赖树里解析不到 `node-semver` | 裁剪过依赖的环境 |
+| `dock-tube-seam` | `docs/dock-stacking-demo.html` 不在 | 只有被裁剪的 checkout |
+
+在 CI 里打开它就等于要求 CI 自带私有内核树与对端 checkout —— 那会把门禁改成「首次必红」
+或「永远要私有环境才能绿」，最后一定被注释掉，比没有更坏。所以：
+
+- **CI**（`.gitea/workflows/ci.yml`）只跑默认档；
+- **要开会话**：本机/runner 已 `pnpm install`（有 esbuild/typescript）、已 `npm run build`、
+  且装了多代内核树与对端 checkout ⇒ 此时**全量套件应当 skipped 0**，开它才有意义：
+
+```sh
+npm run build && node scripts/run-tests.mjs --require-no-skip
+```
+
+- **查「某个面是不是被环境静默掉了」**：临时开一次看结论行的 `skipped N` 即可，不必改档位。
+
+### 跨内核矩阵：`red` 与「未判定」必须分开
+
+`scripts/verify-across-kernels.mjs` 按设计用三个退出码（`0` 绿 / `1` 真回归红 / `2` 未判定：
+代次装不出来或组合漂移）。CI 只有两格，所以 `.gitea/workflows/kernels.yml` 不让那一步的退出码
+直接决定作业结论：退出码先落盘到 `.verify/kernels-exit-code`，再由
+`scripts/triage-kernels.mjs` 翻成结论 —— `2` 保持作业绿但打 `::warning::` 并写明
+「不是插件回归」；`1` 打 `::error::` 并判红；**没拿到可解释的退出码同样判红**
+（「这一轮没产出结论」不是「未判定」，当绿就是又开一条空跑门禁）。
+明细 `.verify/across-kernels-*.json` 无论绿/红/未判定都上传 artifact（`if: always()` +
+`include-hidden-files`，因为 `.verify` 是点目录）。前置条件（真起内核要装包、要磁盘、
+要 registry 网络；`--steps type` 要临时 worktree + `pnpm install`）写在该 yml 的注释里。

@@ -18,14 +18,14 @@
  * @module tests/channel-tags
  */
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   pickVersionForChannel,
   compareVersions,
   VERIFIED_ON,
   KERNEL_CHANNELS,
-} from '../scripts/lib/verified-on.ts';
+} from '../scripts/lib/verified-on.mjs';
 import { KERNEL_GENERATIONS } from '../lib/upstream-compat.js';
 import { computeChannelTargets, computeDiff } from '../scripts/sync-generation-tags.mjs';
 
@@ -40,6 +40,28 @@ const LEDGER_IDS = new Set(KERNEL_GENERATIONS.map((g) => g.id));
 const CURRENT = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).version;
+
+test('台账模块不得回退成 .ts：两个 tsconfig 都只 include src/**，scripts/ 从未被类型检查过', () => {
+  // issue #208：(c) 那一面的病灶。`scripts/lib/verified-on.ts` 写着 `type` 与 `satisfies`，
+  // 看起来有类型保障，但 `tsconfig.json` / `tsconfig.client.json` 的 include 都只有 `src/**`，
+  // 于是这个模块的类型从没被 tsc 看过一眼 —— 把参数收紧、把联合写错，两个消费者照样绿。
+  // 而它又是靠「Node 直连 .ts」加载的，而 engines.node 允许 ^22.19（CI 跑 node:22），
+  // 直连 .ts 在 22 上是赌 flag 行为。两道风险一起绕开：改成 .mjs + JSDoc。
+  const ledgerDir = new URL('../scripts/lib/', import.meta.url);
+  assert.ok(
+    existsSync(new URL('verified-on.mjs', ledgerDir)),
+    '台账必须是 .mjs：.ts 既不在 tsconfig 面内，又要求 Node 直连类型剥离',
+  );
+  assert.equal(
+    existsSync(new URL('verified-on.ts', ledgerDir)),
+    false,
+    '.ts 版本必须删掉，别留两份台账（两份迟早一份过期）',
+  );
+  // 两个消费者都指向 .mjs（下面那条 import 断言已经把测试侧钉住，这里钉脚本侧）
+  const sync = readFileSync(new URL('../scripts/sync-generation-tags.mjs', import.meta.url), 'utf8');
+  assert.match(sync, /'verified-on\.mjs'/, 'sync:tags 必须 import .mjs 台账');
+  assert.doesNotMatch(sync, /'verified-on\.ts'/, '脚本里不许再直连 .ts');
+});
 
 test('通道 tag：三条通道与内核 dist-tag 一一对应', () => {
   assert.deepEqual([...KERNEL_CHANNELS], ['latest', 'next', 'alpha']);
