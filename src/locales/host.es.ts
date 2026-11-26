@@ -31,7 +31,6 @@ const dict: { [K in keyof typeof zh]: string } = {
   presentList: 'Listar recordatorios programados',
   presentDelete: 'Eliminar recordatorio programado',
   cmdLaterDesc: 'Crea un recordatorio programado dentro de la sesión (canal interno de la GUI).',
-  cmdScheduleDesc: 'Crea un recordatorio programado dentro de la sesión (canal interno de la GUI).',
   cmdListDesc: 'Lista los recordatorios programados creados por el usuario en la sesión actual (canal interno de la GUI).',
   cmdDeleteDesc: 'Elimina un recordatorio programado dentro de la sesión (canal interno de la GUI).',
   cmdEditDesc: 'Modifica el contenido de un recordatorio programado dentro de la sesión (conserva la hora original; canal interno de la GUI).',

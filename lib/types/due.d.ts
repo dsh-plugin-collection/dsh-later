@@ -1,4 +1,5 @@
 export declare const MAX_AFTER_SECONDS: number;
+export declare const MIN_EVERY_SECONDS = 300;
 export interface DueComparable {
     readonly scheduledAt?: unknown;
 }

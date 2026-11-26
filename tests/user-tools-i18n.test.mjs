@@ -24,6 +24,8 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_MAX_SCHEDULES,
   enterHostLocale,
+  hostTextFor,
+  toInputError,
   resetHostLocaleForTest,
   userScheduleCreate,
   userScheduleDelete,
@@ -35,6 +37,7 @@ import {
   validatePrompt,
 } from '../lib/user-tools.js';
 import { hostDicts, hostDictFor, hostFormat } from '../lib/locales/host.js';
+import { ScheduleInputError } from '@deepseek-ai/dsh-schedule';
 import { LOCALE_IDS } from '../lib/locales/locale-id.js';
 import { freshOwnershipDir } from './helpers/ownership-state.mjs';
 
@@ -272,6 +275,145 @@ test('userScheduleEditPrompt：en 作用域下的 id 校验回执是英文', asy
   const edit = await userScheduleEditPrompt('  ', 'x', fakeAgent(), fakeCtx, undefined, 'en');
   assert.equal(edit.ok, false);
   assert.ok(!looksChinese(edit.message), `edit 回执仍有中文：${edit.message}`);
+});
+
+// ── 6. 跨事务边界（issue #197）────────────────────────────────────────────
+//
+// 写路径不短：`runUserScheduleTransaction` 把操作排在 `tails.get(agent).then(operation)`
+// ——**微任务**里。入口的 `try` 里 `return` 那个 promise 之后，`finally { leaveLocale() }`
+// 立刻把栈弹空，事务体那时还没起跑。于是事务体内的回执读到的永远是空栈 ⇒ zh。
+//
+// 这一组用例全部**在事务体内部**触发回执，所以它们在修复前必然红；改完之后语言来自
+// 入口钉住的那份字典，与「此刻栈里是什么」解耦。
+
+/**
+ * 让 fold 读路径抛出的假 Session。
+ *
+ * 为什么不用「一条 delete 指向 inactive id」那种历史日志：上游 0.1.7 及更早会抛
+ * `delete targets inactive id`，但 0.2.2-alpha.3 起本仓走自己的容错 fold，
+ * 对不自洽的序列是**跳过**而不是抛——同一份日志在两代上一条抛一条不抛，用例会
+ * 只在部分代次上真的走到那个分支。把 `ownEvents()` 本身弄坏则跨代一致：读日志
+ * 那一步就没有返回值，`foldUserState` 必然抛。
+ */
+function unreadableSession() {
+  const session = new FakeSession();
+  session.ownEvents = () => {
+    throw new Error('log unreadable');
+  };
+  return session;
+}
+
+test('#197 跨事务边界：locale:"en" + maxSchedules:0 的回执是英文', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent();
+  const result = await userScheduleCreate(
+    { prompt: 'quota', after_seconds: 600 },
+    agent,
+    fakeCtx,
+    0,
+    { locale: 'en' },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'quota_exceeded');
+  assert.ok(
+    !looksChinese(result.message),
+    `事务体内回执仍有中文（locale 栈已被 finally 弹空）：${result.message}`,
+  );
+  assert.equal(result.message, hostDictFor('en').errToolQuotaFull.replace('{maxSchedules}', '0'));
+});
+
+test('#197 跨事务边界：edit 不存在的 id 回执随 locale（不是「未找到定时任务」）', async () => {
+  freshOwnershipDir();
+  const edit = await userScheduleEditPrompt('schedule-missing', 'new text', fakeAgent(), fakeCtx, undefined, 'en');
+  assert.equal(edit.ok, false);
+  assert.equal(edit.code, 'schedule_not_found');
+  // ⚠️ 这里不能用 `looksChinese` 判：那条判据把「含拉丁字母」当作已翻译的信号，
+  // 而这条文案里带着 id（`schedule-missing`），于是中文原文也会被判「不是中文」。
+  // 事务体路径必须与字典**逐字**对齐，顺带钉住占位符来自本次调用。
+  assert.equal(
+    edit.message,
+    hostDictFor('en').errToolScheduleNotFoundById.replace('{id}', 'schedule-missing'),
+  );
+  assert.ok(!/\p{Script=Han}/u.test(edit.message), `edit 事务体内回执仍有汉字：${edit.message}`);
+});
+
+test('#197 跨事务边界：delete 折读失败的回执随 locale', async () => {
+  freshOwnershipDir();
+  // `ownEvents()` 抛 ⇒ `foldUserState` 抛出 ⇒ 删除路径的读失败分支（事务体内部）。
+  const agent = fakeAgent();
+  agent.session = unreadableSession();
+  const result = await userScheduleDelete('schedule-ghost', agent, fakeCtx, 'en');
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'internal_error');
+  assert.ok(!looksChinese(result.message), `delete 事务体内回执仍有中文：${result.message}`);
+  assert.equal(result.message, hostDictFor('en').errToolLogUnreadable);
+});
+
+// ── 7. every_seconds 地板与 toInputError 本地化（issue #198）─────────────
+
+test('#198 every_seconds=90 被拒，且回执是本地语言（不是上游英文）', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent();
+  const result = await userScheduleCreate(
+    { prompt: 'x', every_seconds: 90 },
+    agent,
+    fakeCtx,
+    DEFAULT_MAX_SCHEDULES,
+    { locale: 'en' },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'frequency_too_high');
+  // 修复前这里要么放行（上游 0.2.x 地板是 60），要么透出上游英文
+  // `every_seconds must be at least 60.`；两种都不该出现。
+  assert.equal(result.message, hostDictFor('en').errFrequencyTooHigh);
+});
+
+test('#198 every_seconds=30 的 code 是 frequency_too_high（不是 invalid_rule）', async () => {
+  freshOwnershipDir();
+  // code 与文案是两件事：形状错一律 invalid_rule，而「间隔太短」有专属码，
+  // 调用方（GUI 高亮哪个字段）与模型（要不要改大一点）都靠它区分。
+  const api = await userScheduleCreate({ prompt: 'x', every_seconds: 30 }, fakeAgent(), fakeCtx);
+  assert.equal(api.ok, false, 'every_seconds=30 必须被拒');
+  assert.equal(api.code, 'frequency_too_high');
+  assert.equal(api.message, hostDictFor('zh').errFrequencyTooHigh, 'zh 回执走字典');
+});
+
+test('#198 toInputError 对 ScheduleInputError 走本地字典，code 原样透出', async () => {
+  const en = hostDictFor('en');
+  const cases = [
+    { code: 'not_future', key: 'errNotFuture' },
+    { code: 'time_out_of_range', key: 'errTimeOutOfRange' },
+    { code: 'frequency_too_high', key: 'errFrequencyTooHigh' },
+    { code: 'invalid_rule', key: 'errInvalidRule' },
+    { code: 'subagent_session', key: 'errSubagentSession' },
+    { code: 'invalid_prompt', key: 'errEmptyPrompt' },
+    { code: 'invalid_selector', key: 'errInvalidSelector' },
+    { code: 'invalid_time_zone', key: 'errToolTimeZoneInvalid' },
+  ];
+  for (const { code, key } of cases) {
+    const upstream = new ScheduleInputError(code, `upstream english for ${code}`);
+    const result = toInputError(upstream, hostTextFor('en'));
+    assert.equal(result.ok, false);
+    assert.equal(result.code, code, `${code}: code 必须原样透出（翻译器不吞码）`);
+    assert.equal(result.message, en[key], `${code}: 回执必须走本地字典（不是上游英文）`);
+  }
+  // 表里没有的码回落上游文案（宁可英文，也不要一条对不上号的本地文案）。
+  const unknown = new ScheduleInputError('brand_new_code', 'upstream english for brand_new_code');
+  const fallback = toInputError(unknown, hostTextFor('en'));
+  assert.equal(fallback.code, 'brand_new_code');
+  assert.equal(fallback.message, 'upstream english for brand_new_code', '未知码必须回落上游原文');
+});
+
+test('#198 死的 cmdScheduleDesc 已从 8 门键集里删除（/schedule 用 quickScheduleDesc）', () => {
+  // 键在字典里但零引用，是比死码更坏的「假现状」：读代码的人会以为还有一条命令面文案
+  // 挂在它上面。`/schedule` 的注册用的是 `quickScheduleDesc`（见 src/commands.ts）。
+  for (const locale of LOCALE_IDS) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(hostDicts[locale], 'cmdScheduleDesc'),
+      false,
+      `${locale}.cmdScheduleDesc 应已删除（该键零引用）`,
+    );
+  }
 });
 
 test('未收录的 locale id 回退 zh（不是回退 en，也不是抛）', () => {

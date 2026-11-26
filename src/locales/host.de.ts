@@ -31,7 +31,6 @@ const dict: { [K in keyof typeof zh]: string } = {
   presentList: 'Geplante Erinnerungen auflisten',
   presentDelete: 'Geplante Erinnerung löschen',
   cmdLaterDesc: 'Legt eine sitzungsinterne geplante Erinnerung an (interner GUI-Kanal).',
-  cmdScheduleDesc: 'Legt eine sitzungsinterne geplante Erinnerung an (interner GUI-Kanal).',
   cmdListDesc: 'Listet die vom Benutzer in der aktuellen Sitzung angelegten geplanten Erinnerungen auf (interner GUI-Kanal).',
   cmdDeleteDesc: 'Löscht eine sitzungsinterne geplante Erinnerung (interner GUI-Kanal).',
   cmdEditDesc: 'Ändert den Inhalt einer sitzungsinternen geplanten Erinnerung (die ursprüngliche Zeit bleibt erhalten; interner GUI-Kanal).',

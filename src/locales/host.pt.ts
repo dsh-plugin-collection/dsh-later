@@ -31,7 +31,6 @@ const dict: { [K in keyof typeof zh]: string } = {
   presentList: 'Listar lembretes agendados',
   presentDelete: 'Excluir lembrete agendado',
   cmdLaterDesc: 'Cria um lembrete agendado dentro da sessão (canal interno da GUI).',
-  cmdScheduleDesc: 'Cria um lembrete agendado dentro da sessão (canal interno da GUI).',
   cmdListDesc: 'Lista os lembretes agendados criados pelo usuário na sessão atual (canal interno da GUI).',
   cmdDeleteDesc: 'Exclui um lembrete agendado dentro da sessão (canal interno da GUI).',
   cmdEditDesc: 'Altera o conteúdo de um lembrete agendado dentro da sessão (mantém a hora original; canal interno da GUI).',

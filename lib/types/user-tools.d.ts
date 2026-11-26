@@ -24,12 +24,20 @@ export declare function foldScheduleEventsLikeUpstream(events: readonly SessionE
     readonly seenIds: readonly string[];
 };
 import type { UserScheduleDelivery } from './domain.js';
+import { hostDictFor } from './locales/host.js';
+import type { HostUIKey } from './locales/host.js';
 import type { ScheduledAttachment } from './ownership-store.js';
 export declare const DEFAULT_MAX_SCHEDULES = 100;
 export declare const DEFAULT_MAX_PROMPT_CHARS = 1000;
 export declare function currentHostLocale(): string | undefined;
 export declare function enterHostLocale(locale: string | undefined): () => void;
 export declare function resetHostLocaleForTest(): void;
+export interface HostText {
+    readonly dict: ReturnType<typeof hostDictFor>;
+    readonly t: (key: HostUIKey) => string;
+    readonly tf: (key: HostUIKey, params: Record<string, string | number>) => string;
+}
+export declare function hostTextFor(locale: string | undefined): HostText;
 export interface PromptLimits {
     readonly allowLong: boolean;
     readonly maxChars: number;
@@ -107,9 +115,9 @@ export interface FoldedUserSchedules {
     readonly seenIds: ReadonlySet<string>;
 }
 export declare function foldUserState(session: Session): UserFoldState;
-export declare function internalError(): UserScheduleError;
-export declare function persistenceError(): UserScheduleError;
-export declare function toInputError(error: unknown): UserScheduleError;
+export declare function internalError(text?: HostText): UserScheduleError;
+export declare function persistenceError(text?: HostText): UserScheduleError;
+export declare function toInputError(error: unknown, text?: HostText): UserScheduleError;
 export type ScheduleRecordView = {
     readonly id: string;
     readonly kind: ScheduleRecord['kind'];

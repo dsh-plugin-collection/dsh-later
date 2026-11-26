@@ -31,7 +31,6 @@ const dict: { [K in keyof typeof zh]: string } = {
   presentList: '予約リマインダーを一覧',
   presentDelete: '予約リマインダーを削除',
   cmdLaterDesc: 'セッション内に予約リマインダーを 1 件作成します（GUI 内部チャンネル）。',
-  cmdScheduleDesc: 'セッション内に予約リマインダーを 1 件作成します（GUI 内部チャンネル）。',
   cmdListDesc: '現在のセッションでユーザーが作成した予約リマインダーを一覧します（GUI 内部チャンネル）。',
   cmdDeleteDesc: 'セッション内の予約リマインダーを 1 件削除します（GUI 内部チャンネル）。',
   cmdEditDesc: 'セッション内の予約リマインダーの本文を変更します（元の時刻は保ちます。GUI 内部チャンネル）。',

@@ -20,7 +20,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import type { Session, SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session';
 import * as schedNs from '@deepseek-ai/dsh-schedule';
 import { resolveEveryOccurrence } from '@deepseek-ai/dsh-schedule';
 import { ScheduleId, ScheduleInputError } from '@deepseek-ai/dsh-schedule';
@@ -242,7 +242,7 @@ import {
   asLegacySchedules,
 } from './schedule-compat.js';
 import { OWNED_EVENT } from './domain.js';
-import { MAX_AFTER_SECONDS } from './due.js';
+import { MAX_AFTER_SECONDS, MIN_EVERY_SECONDS } from './due.js';
 import type { UserScheduleOwnedChange, UserScheduleDelivery } from './domain.js';
 import { hostDictFor, hostFormat } from './locales/host.js';
 import type { HostUIKey } from './locales/host.js';
@@ -303,7 +303,26 @@ export const DEFAULT_MAX_PROMPT_CHARS = 1000;
  * 同一事件循环里，工具执行（已进入 en 作用域）可能同步调用另一个导出函数，
  * 或者测试想临时切语言再嵌套切回。单变量 + 保存/恢复在**同步**路径上其实够用，
  * 但栈让「异常打断」的恢复点仍然明确（`finally` 里弹出的是自己压的那一层）。
- * 注意本模块所有路径都是同步的（不 await 跨作用域），所以不需要 AsyncLocalStorage。
+ *
+ * ## 但栈只覆盖**同步窗口**，跨事务边界必须靠入口钉住的局部字典（issue #197）
+ *
+ * 写路径不短：所有读改写都排在 `runUserScheduleTransaction` 的微任务里
+ * （`tails.get(agent).then(operation)`）。入口的 `try` 里 `return` 那个 promise 之后，
+ * `finally { leaveLocale() }` 立刻把栈弹空——那一刻事务体**还没起跑**。于是事务体内
+ * `hostT()` 取到的是空栈 ⇒ zh，`locale:'en'` 只对外层同步校验生效，回执永远中文。
+ *
+ * 旧注释曾写「本模块所有路径都是同步的（不 await 跨作用域），所以不需要
+ * AsyncLocalStorage」。路径确实是同步的，但事务体不在**同一个**同步窗口里——
+ * 这句话是错的，它把「代码里没有跨作用域 await」误当成「栈的生命周期覆盖整次调用」。
+ *
+ * 现在两类位置各用各的来源，判据只有一条「此刻在不在入口的同步窗口内」：
+ *  - **纯函数**（`validatePrompt` / `validateCreateInput` / `validateUpdateInput`）
+ *    仍在同步窗口内，走栈即可；测试也是独立调用它们，靠 `enterHostLocale` 指定语言。
+ *  - **导出函数的读改写事务体**在入口用 {@link hostTextFor} 钉一份局部字典，闭包
+ *    带着它进微任务，语言不再依赖「此刻栈里是什么」。
+ *
+ * 仍然不引入 AsyncLocalStorage：它救的是「忘了传语言」，而这里要的恰恰是**显式**
+ * 一份随闭包走的值——事务体是唯一读者，多一层隐式传递只会让漏传更难发现。
  */
 let hostLocaleStack: string[] = [];
 
@@ -341,7 +360,37 @@ export function resetHostLocaleForTest(): void {
 }
 
 /**
+ * 入口钉住的一份文案来源：字典 + 渲染器都取自**进调用那一刻**的语言。
+ *
+ * 为什么不是「再读一次栈」：读改写事务体排在微任务里（见 `runUserScheduleTransaction`），
+ * 那时入口的 `finally` 已经弹栈。闭包带着这份值走，语言就不再是「此刻栈里是什么」的
+ * 函数（issue #197 的根因）。纯函数不需要它——它们本就在同步窗口内，走栈更省。
+ */
+export interface HostText {
+  readonly dict: ReturnType<typeof hostDictFor>;
+  /** 无参键的回执文案。 */
+  readonly t: (key: HostUIKey) => string;
+  /** 带 `{name}` 占位符的回执文案。 */
+  readonly tf: (key: HostUIKey, params: Record<string, string | number>) => string;
+}
+
+/**
+ * 在入口处钉一份文案来源（`undefined` 同样回退 zh，与 `hostDictFor` 同规则）。
+ */
+export function hostTextFor(locale: string | undefined): HostText {
+  const dict = hostDictFor(locale);
+  return {
+    dict,
+    t: (key) => dict[key],
+    tf: (key, params) => hostFormat(dict[key], params),
+  };
+}
+
+/**
  * 取当前作用域的宿主字典。
+ *
+ * 只给**同步窗口内**的纯函数用；事务体一律读入口钉住的 {@link HostText}
+ * （理由见上面「栈只覆盖同步窗口」那段）。
  *
  * `hostDictFor(undefined)` 会回退 zh（`isLocaleId` 判假），与本模块的历史行为一致。
  */
@@ -350,7 +399,7 @@ function hostT(): ReturnType<typeof hostDictFor> {
 }
 
 /**
- * 按当前作用域语言格式化一条带占位符的回执。
+ * 按当前作用域语言格式化一条带占位符的回执（同样只给同步窗口内的纯函数用）。
  *
  * 占位符走 `hostFormat` 的 `{name}` 语法而**不是**模板字符串拼接：拼接会把「语序」
  * 固化进代码（中文「{date} {time} 在 {tz} 里…」与德语「Zur Zeit … in {tz}」语序不同），
@@ -636,6 +685,21 @@ export function validateCreateInput(
     }
     if (raw > MAX_AFTER_SECONDS) return tooLong();
   }
+  /**
+   * `every_seconds` 的**地板**单独判：`after_seconds` 没有下限（「10 秒后提醒我」是
+   * 合理用例，也是 README 演示），而固定间隔是**持续成本**，必须有准入下限。
+   *
+   * 为什么不交给上游的 `createEveryScheduleRecord`：上游那条地板在 0.1.7-rc.2 前后
+   * 从 300 掉到 60（见 `MIN_EVERY_SECONDS` 的注释），跟它走 = 同一次调用在不同内核上
+   * 结论不同，而 8 门字典早写着 ≥300。取严一侧，本仓自己兜。
+   *
+   * 与上一条用**两个** code/键：`frequency_too_high`（`errFrequencyTooHigh`）说的正是
+   * 「频率太高」，而复用 `invalid_rule` 会让用户以为形状写错了。
+   */
+  const everyRaw = args['every_seconds'];
+  if (typeof everyRaw === 'number' && Number.isInteger(everyRaw) && everyRaw < MIN_EVERY_SECONDS) {
+    return { ok: false, code: 'frequency_too_high', message: hostT().errFrequencyTooHigh };
+  }
 
   return { ok: true, value: { prompt: trimmed, time_zone, ...remainingSelectors(args, atNormalized) } };
 }
@@ -808,25 +872,70 @@ export function foldUserState(session: Session): UserFoldState {
 }
 
 /** 稳定内部错误（不透出异常细节）。 */
-export function internalError(): UserScheduleError {
-  return { ok: false, code: 'internal_error', message: hostT().errToolInternalFailed };
+export function internalError(text?: HostText): UserScheduleError {
+  return { ok: false, code: 'internal_error', message: (text?.dict ?? hostT()).errToolInternalFailed };
 }
 
 /** 稳定持久化不确定错误。 */
-export function persistenceError(): UserScheduleError {
+export function persistenceError(text?: HostText): UserScheduleError {
   return {
     ok: false,
     code: 'persistence_uncertain',
-    message: hostT().errToolPersistenceUnconfirmed,
+    message: (text?.dict ?? hostT()).errToolPersistenceUnconfirmed,
   };
 }
 
-/** 把 dsh-schedule 的 ScheduleInputError 翻译为闭包错误值。 */
-export function toInputError(error: unknown): UserScheduleError {
+/**
+ * `ScheduleInputError.code` → 宿主字典键（issue #198）。
+ *
+ * ## 为什么必须接这一层
+ *
+ * 上游那些 message 是**英文**且**只给模型/开发者看**的（`The scheduled time must be
+ * strictly in the future.` 之类）。它们会经 `toInputError` 原样进工具回执——
+ * 于是德语用户提交一个过去的时刻，看到一句英文。8 门字典早就有这批 `err*` 键，
+ * 只是从来没人接上，「键在、引用 0」看起来像没用的死键。
+ *
+ * ## 为什么用一张表而不是 switch
+ *
+ * 表是可以被测试枚举的：`tests/error-code-superset.test.mjs` 从上游声明里取全部
+ * `ScheduleInputErrorCode`，缺一行就在这里少一个本地化分支。switch 只能靠人读。
+ *
+ * ## 哪些码**不**走本地化（取舍，别顺手补）
+ *
+ * - `quota_exceeded` → `errQuotaExceeded` 带 `{max}` 占位符，而上游 `ScheduleInputError`
+ *   的 message 里没有「上限是多少」这个数（那是 `ScheduleService` 才知道的额度）。
+ *   填一个猜来的数比英文原文更误导，所以这一条**保留上游文案**。本插件自己判额度时
+ *   走的是 `errToolQuotaFull`（带 `{maxSchedules}`），那条是真数。
+ * - 表里没有的码（上游将来新增，且本仓还没写文案）一律回落上游 message：宁可英文，
+ *   也不要一条对不上号的本地文案。表里**没有** `internal_error` 的兜底意义在此——
+ *   它由 {@link internalError} 自己渲染。
+ */
+const INPUT_ERROR_KEY: Partial<Record<UserScheduleErrorCode, HostUIKey>> = {
+  invalid_prompt: 'errEmptyPrompt',
+  invalid_selector: 'errInvalidSelector',
+  invalid_time_zone: 'errToolTimeZoneInvalid',
+  not_future: 'errNotFuture',
+  time_out_of_range: 'errTimeOutOfRange',
+  frequency_too_high: 'errFrequencyTooHigh',
+  invalid_rule: 'errInvalidRule',
+  subagent_session: 'errSubagentSession',
+  schedule_not_found: 'errScheduleNotFound',
+  already_overdue: 'errAlreadyOverdue',
+  unsupported_kind: 'errUnsupportedKind',
+  not_paused: 'errNotPaused',
+};
+
+/** 把 dsh-schedule 的 ScheduleInputError 翻译为闭包错误值（文案走本地字典）。 */
+export function toInputError(error: unknown, text?: HostText): UserScheduleError {
   if (error instanceof ScheduleInputError) {
+    // `code` 原样透出（`tests/upstream-compat.test.mjs` 钉着「翻译器不吞码」）。
+    const key = INPUT_ERROR_KEY[error.code];
+    if (key !== undefined) {
+      return { ok: false, code: error.code, message: (text?.dict ?? hostT())[key] };
+    }
     return { ok: false, code: error.code, message: error.message };
   }
-  return internalError();
+  return internalError(text);
 }
 
 /** 记录视图的 snake_case 序列化。 */
@@ -902,6 +1011,90 @@ async function flushSession(ctx: Context, session: Session): Promise<boolean> {
   }
 }
 
+/**
+ * 补偿事件里 `schedule/change` 的荷载类型。
+ *
+ * 直接取宿主 `SessionEventMap` 里的那一项，而不是本文件头那个同名的读视图
+ * `ScheduleChange`：读视图被本仓收窄过（`{operation, schedule?}` 一组，不含 `version`），
+ * 拿它当写载荷 tsc 会如实报不可赋值。这里让「写进日志的荷载」跟着宿主声明走，
+ * 跨代时由宿主自己变更形状。
+ */
+type SessionChangePayload = SessionEventMap['schedule/change'];
+
+/**
+ * 一次写事务的日志侧补偿入口：**补偿本身失败只告警，绝不改写本次返回值**。
+ *
+ * 为什么补偿要单独成形：`append` 之后 `flush` 返回 false，说明内存里的日志可能没
+ * 落盘（也可能只落了前半段）。那一刻唯一还能表达「这件事没成」的地方就是日志本身，
+ * 而已经 append 的 create 无法撤销（上游 fold 对 id 复用与「删已 dispatch 的 id」
+ * 都抛错——见 runtime.ts 的 `rearmOneShot` 那段）。于是补一笔**反向事件**把端态压回去。
+ *
+ * 为什么失败只 warn：此刻用户拿到的必须是「持久化未确认」这条真话。把补偿失败
+ * 升级成另一种错误码，会让「日志侧到底有没有这笔」更难判断，而补偿其实并不保证
+ * 成功（flush 已经不可用）。返回值不变是本函数的契约。
+ *
+ * 注意补偿事件**不再 flush**：刚失败的就是持久化 barrier，再调一次只会得到同样的
+ * 结论；内存里的补偿事件已经进了日志，宿主下一次 flush（下一次成功事务）会带上它。
+ */
+function compensateAppend(
+  ctx: Context,
+  session: Session,
+  agent: Agent,
+  events: readonly { readonly type: 'schedule/change'; readonly data: SessionChangePayload }[],
+  reason: string,
+): void {
+  for (const event of events) {
+    try {
+      session.append(event.type, event.data);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      ctx.logger?.warn(`later: ${reason}补偿追加失败 agent "${agent.id}": ${detail}`);
+    }
+  }
+}
+
+/**
+ * 把一条**因 flush 失败而从日志里消失**的旧记录重新立起来（edit 路径的日志侧补偿）。
+ *
+ * 为什么不按直觉写「create(旧 id)」：`dsh-schedule` 的严格 fold（0.1.5 / 0.1.7 / 0.2.1
+ * 都导出版本）对**复用已见过的 id** 直接抛 `schedule id … was reused`，本仓在那些
+ * 代次上取到的正是那条严格 fold（`upstreamFold` 存在就用它）。补一笔旧 id 会把整条
+ * schedule 折叠路径打成永久抛错——下一次 `user_schedule_list` 直接回「日志读取失败」，
+ * 比丢掉一条提醒更糟。0.2.2-alpha.3 起本仓自己的容错 fold 对复用 id 是静默跳过，
+ * 于是同一份补偿在那一侧又会变成**什么都不做**。
+ *
+ * 所以走本仓已有的既有做法（`runtime.ts` 的 `rearmOneShot` 同一个理由）：**换新 id、
+ * 保住内容与时刻**，uid 不变。三件事各有代价，都写着：
+ *  - `after` 用「剩余秒数」重建，目标时刻按秒取整，最多漂 <1s；
+ *  - `at` 原样保留 ISO 时刻；
+ *  - `every` 只能按原间隔从「现在」重排，下一次时刻可能比原来晚不到一个间隔
+ *    （周期提醒本来就没有「第几次」的概念，能够晚一点、不会早发）。
+ *
+ * @returns 重建后的日志 id；连事件都构造不出来时返回 undefined（调用方只告警）。
+ */
+function restoreEditedRecord(
+  folded: ReturnType<typeof foldUserState>['folded'],
+  existing: ScheduleRecord,
+  now: number,
+): ScheduleRecord | undefined {
+  const id = allocateScheduleId(folded);
+  try {
+    if (existing.kind === 'after') {
+      const target = Date.parse(existing.scheduledAt);
+      const remaining = Number.isFinite(target) ? Math.max(1, Math.ceil((target - now) / 1000)) : existing.afterSeconds;
+      return createAfterScheduleRecord(id, existing.prompt, remaining, now);
+    }
+    if (existing.kind === 'at') {
+      return createAtScheduleRecord(id, existing.prompt, existing.scheduledAt, now);
+    }
+    const everySeconds =
+      existing.kind === 'every' && typeof existing.everySeconds === 'number' ? existing.everySeconds : 300;
+    return createEveryScheduleRecord(id, existing.prompt, everySeconds, now);
+  } catch {
+    return undefined;
+  }
+}
+
 /** 构造一条通过与 dsh-schedule 完全兼容的 `schedule/change` 记录。 */
 function buildScheduleRecord(input: UserScheduleCreateInput, id: ReturnType<typeof ScheduleId>, now: number): ScheduleRecord {
   if (input.at !== undefined) {
@@ -953,9 +1146,10 @@ export async function userScheduleCreate(
   options?: UserScheduleCreateOptions,
   limits?: PromptLimits,
 ): Promise<UserScheduleCreateResult> {
-  // 语言的取值必须包住整次调用（含 `validateCreateInput` 这层纯函数），见
-  // `enterHostLocale` 的注释：纯函数的回执不走形参，走这里压栈的作用域。
+  // 语言的取值必须包住整次调用：同步窗口内的 `validateCreateInput` 走栈，
+  // 事务体（微任务）走下面钉住的 `text`，见 `enterHostLocale` 与 `HostText` 的注释。
   const leaveLocale = enterHostLocale(options?.locale);
+  const text = hostTextFor(options?.locale);
   try {
     const validated = validateCreateInput(input, limits);
     if (!validated.ok) return validated;
@@ -973,14 +1167,14 @@ export async function userScheduleCreate(
         folded = state.folded;
         owned = state.owned;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const activeCount = folded.active.filter((record) => owned.has(record.id)).length;
       if (activeCount >= maxSchedules) {
         return {
           ok: false,
           code: 'quota_exceeded',
-          message: hostTf('errToolQuotaFull', { maxSchedules }),
+          message: text.tf('errToolQuotaFull', { maxSchedules }),
         };
       }
       const id = allocateScheduleId(folded);
@@ -988,7 +1182,7 @@ export async function userScheduleCreate(
       try {
         record = buildScheduleRecord(validated.value, id, now);
       } catch (error) {
-        return toInputError(error);
+        return toInputError(error, text);
       }
       // 所有权写 sidecar（append 之前：投影 fold 在事件到达时按 sidecar 判定归属）。
       // flush 失败则回滚，避免 sidecar 与日志漂移。
@@ -1012,11 +1206,26 @@ export async function userScheduleCreate(
         });
       } catch {
         removeOwnership(sessionId, id);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
+        // 日志侧补一笔反向事件：内存里那条 create 已经进日志（可能落盘也可能只落一半），
+        // 而 sidecar 马上要被撤。不补的话，一次「没落根」的 create 会在下次冷恢复的
+        // fold 里复活成一条无人认领、且扫描器再也看不见的提醒（issue #205）。
+        compensateAppend(
+          ctx,
+          agent.session,
+          agent,
+          [
+            {
+              type: 'schedule/change',
+              data: { version: 1, operation: 'delete', id: ScheduleId(id) },
+            },
+          ],
+          'create 失败回滚',
+        );
         removeOwnership(sessionId, id);
-        return persistenceError();
+        return persistenceError(text);
       }
       const view = scheduleViewCompat(record, Date.now());
       return {
@@ -1035,6 +1244,7 @@ export async function userScheduleList(
   locale?: string,
 ): Promise<UserScheduleListResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     return runUserScheduleTransaction(agent, async () => {
       let folded;
@@ -1044,7 +1254,7 @@ export async function userScheduleList(
         folded = state.folded;
         owned = state.owned;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const now = Date.now();
       const schedules = folded.active
@@ -1065,9 +1275,10 @@ export async function userScheduleDelete(
   locale?: string,
 ): Promise<UserScheduleDeleteResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof id !== 'string' || id.length === 0 || id.trim() !== id) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolScheduleIdInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolScheduleIdInvalid') };
     }
     return runUserScheduleTransaction(agent, async () => {
       const sessionId = agent.session.header?.id;
@@ -1075,7 +1286,7 @@ export async function userScheduleDelete(
       try {
         folded = foldUserState(agent.session).folded;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       // 1) 活动任务：uid → scheduleId
       const activeId = resolveActiveScheduleId(sessionId, id);
@@ -1087,9 +1298,9 @@ export async function userScheduleDelete(
             id: ScheduleId(activeId),
           });
         } catch {
-          return internalError();
+          return internalError(text);
         }
-        if (!(await flushSession(ctx, agent.session))) return persistenceError();
+        if (!(await flushSession(ctx, agent.session))) return persistenceError(text);
         removeOwnership(sessionId, activeId);
         return { ok: true, id, deleted: true };
       }
@@ -1125,9 +1336,10 @@ export async function userScheduleEditPrompt(
   locale?: string,
 ): Promise<UserScheduleCreateResult | UserScheduleError> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof id !== 'string' || id.length === 0 || id.trim() !== id) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolScheduleIdInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolScheduleIdInvalid') };
     }
     const promptResult = validatePrompt(newPrompt, limits);
     if (!promptResult.ok) return promptResult;
@@ -1153,7 +1365,7 @@ export async function userScheduleEditPrompt(
         folded = state.folded;
         deliveries = state.delivery;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const existing = folded.active.find((record) => record.id === scheduleId);
       if (existing === undefined) {
@@ -1197,7 +1409,7 @@ export async function userScheduleEditPrompt(
         return {
           ok: false,
           code: 'schedule_not_found',
-          message: hostTf('errToolScheduleNotFoundById', { id }),
+          message: text.tf('errToolScheduleNotFoundById', { id }),
         };
       }
       // P0-4：已过期（overdue）的 at 任务禁止改内容——「保留原时刻」会让新记录
@@ -1210,7 +1422,7 @@ export async function userScheduleEditPrompt(
         return {
           ok: false,
           code: 'already_overdue',
-          message: hostTf('errToolEditOverdue', { id: scheduleId }),
+          message: text.tf('errToolEditOverdue', { id: scheduleId }),
         };
       }
       const now = Date.now();
@@ -1247,7 +1459,7 @@ export async function userScheduleEditPrompt(
           );
         }
       } catch (error) {
-        return toInputError(error);
+        return toInputError(error, text);
       }
       const delivery = deliveries.get(scheduleId) ?? 'context';
       // 新所有权先写 sidecar（create 事件到达投影 fold 时按 sidecar 判定归属）；
@@ -1272,24 +1484,70 @@ export async function userScheduleEditPrompt(
         agent.session.append('schedule/change', { version: 1, operation: 'create', schedule: toChangePayload(record) });
       } catch {
         removeOwnership(sessionId, record.id);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
+        /**
+         * 日志侧**成对**压回旧记录（issue #205）。
+         *
+         * 编辑是「删旧 + 建新」两笔。flush 失败时只撤 sidecar 的话，内存日志里的端态是
+         * 「旧的没了、新的在」：用户以为改失败了（拿到 persistence_uncertain），面板上
+         * 却多出一条改过的提醒，而且它的 sidecar 已被撤——那正是「日志与 sidecar 漂移」。
+         *
+         * 旧注释曾写「旧记录此刻仍是 active 的（日志里的 create 没被撤销）」，这句话是
+         * **错的**：旧记录在上一行就被 `delete` 事件摘掉了，无论 flush 成没成，fold 端态
+         * 里它都不再 active。所以必须真补两笔：先 `delete` 新记录，再「重建」旧记录。
+         * 重建为什么换新 id 而不是复用旧 id，见 {@link restoreEditedRecord}。
+         */
+        compensateAppend(
+          ctx,
+          agent.session,
+          agent,
+          [
+            {
+              type: 'schedule/change',
+              data: { version: 1, operation: 'delete', id: ScheduleId(record.id) },
+            },
+          ],
+          'edit 失败回滚（删新记录）',
+        );
+        // 日志侧的重建与 sidecar 无关：`previousEntry` 缺席只说明这条不是用户建的
+        // （别的插件写进来的记录也可能被编辑），日志的端态照样必须压回去。
+        const restored = restoreEditedRecord(folded, existing, Date.now());
+        if (restored !== undefined) {
+          compensateAppend(
+            ctx,
+            agent.session,
+            agent,
+            [
+              {
+                type: 'schedule/change',
+                data: { version: 1, operation: 'create', schedule: toChangePayload(restored) },
+              },
+            ],
+            'edit 失败回滚（重建旧记录）',
+          );
+        } else {
+          ctx.logger?.warn(`later: 编辑回滚重建失败 agent "${agent.id}"，日志侧只剩 delete，面板可能少一条提醒`);
+        }
+        // sidecar 跟着日志的端态走：**两个**旧 id 都要撤（旧 id 已被 delete 事件摘掉，
+        // 新 id 已被上面的补偿删掉），旧内容只挂在重建后的 id 上（uid 不变，于是 dock
+        // 与命令面看到的仍是同一条提醒）。漏撤旧 id 的后果是两行 sidecar 共用同一个
+        // uid —— `findScheduleIdByUid` 只能命中其中一行，dock 与删除按钮会指向错的那条。
         removeOwnership(sessionId, record.id);
-        // 回滚同样要把 `scheduledAt` 带回去：只恢复 delivery 会让扫描器看不见这条提醒，
-        // 而它此刻仍是 active 的（日志里的 create 没被撤销，flush 失败的只有新写入）。
-        if (previousEntry !== undefined) {
+        removeOwnership(sessionId, scheduleId);
+        if (restored !== undefined && previousEntry !== undefined) {
           recordOwnership(
             sessionId,
-            scheduleId,
+            restored.id,
             previousEntry.delivery,
             previousEntry.uid,
             previousEntry.windowSeconds,
             previousEntry.attachments,
-            previousEntry.scheduledAt,
+            Date.parse(restored.scheduledAt),
           );
         }
-        return persistenceError();
+        return persistenceError(text);
       }
       removeOwnership(sessionId, scheduleId);
       const view = scheduleViewCompat(record, Date.now());
@@ -1318,9 +1576,10 @@ export async function userSchedulePause(
   locale?: string,
 ): Promise<UserSchedulePauseResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof id !== 'string' || id.length === 0 || id.trim() !== id) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolScheduleIdInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolScheduleIdInvalid') };
     }
     return runUserScheduleTransaction(agent, async () => {
       const sessionId = agent.session.header?.id;
@@ -1333,7 +1592,7 @@ export async function userSchedulePause(
         owned = state.owned;
         deliveryMap = state.delivery;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const scheduleId = resolveActiveScheduleId(sessionId, id);
       const existing = folded.active.find((record) => record.id === scheduleId);
@@ -1341,11 +1600,11 @@ export async function userSchedulePause(
         return {
           ok: false,
           code: 'schedule_not_found',
-          message: hostTf('errToolPauseNotFoundById', { id }),
+          message: text.tf('errToolPauseNotFoundById', { id }),
         };
       }
       if (existing.kind !== 'after') {
-        return { ok: false, code: 'unsupported_kind', message: hostT().errToolPauseUnsupportedKind };
+        return { ok: false, code: 'unsupported_kind', message: text.t('errToolPauseUnsupportedKind') };
       }
       const now = Date.now();
       const target = Date.parse(existing.scheduledAt);
@@ -1353,7 +1612,7 @@ export async function userSchedulePause(
         return {
           ok: false,
           code: 'already_overdue',
-          message: hostT().errToolPauseOverdue,
+          message: text.t('errToolPauseOverdue'),
         };
       }
       const remainingSeconds = Math.max(1, Math.ceil((target - now) / 1000));
@@ -1407,11 +1666,11 @@ export async function userSchedulePause(
         });
       } catch {
         removePaused(sessionId, uid);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
         removePaused(sessionId, uid);
-        return persistenceError();
+        return persistenceError(text);
       }
       removeOwnership(sessionId, scheduleId);
       return {
@@ -1436,9 +1695,10 @@ export async function userScheduleResume(
   locale?: string,
 ): Promise<UserScheduleResumeResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof uid !== 'string' || uid.length === 0 || uid.trim() !== uid) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolUidInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolUidInvalid') };
     }
     return runUserScheduleTransaction(agent, async () => {
       const sessionId = agent.session.header?.id;
@@ -1447,7 +1707,7 @@ export async function userScheduleResume(
         return {
           ok: false,
           code: 'not_paused',
-          message: hostTf('errToolResumeNotFound', { uid }),
+          message: text.tf('errToolResumeNotFound', { uid }),
         };
       }
       let folded;
@@ -1457,14 +1717,14 @@ export async function userScheduleResume(
         folded = state.folded;
         owned = state.owned;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const activeCount = folded.active.filter((record) => owned.has(record.id)).length;
       if (activeCount >= maxSchedules) {
         return {
           ok: false,
           code: 'quota_exceeded',
-          message: hostTf('errToolQuotaFull', { maxSchedules }),
+          message: text.tf('errToolQuotaFull', { maxSchedules }),
         };
       }
       const now = Date.now();
@@ -1477,7 +1737,7 @@ export async function userScheduleResume(
           now,
         );
       } catch (error) {
-        return toInputError(error);
+        return toInputError(error, text);
       }
       // 先清 paused：投影 fold 在 append(create) 时读 sidecar；若 create 落地后才
       // removePaused，视图会短暂同时出现「已暂停」+ 新活动行（实测重复行根因）。
@@ -1501,12 +1761,12 @@ export async function userScheduleResume(
       } catch {
         removeOwnership(sessionId, record.id);
         recordPaused(sessionId, paused);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
         removeOwnership(sessionId, record.id);
         recordPaused(sessionId, paused);
-        return persistenceError();
+        return persistenceError(text);
       }
       return {
         ok: true,

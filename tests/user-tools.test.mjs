@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 // `foldScheduleEvents` 自 dsh-schedule@0.2.2-alpha.3 起被移除，从上游具名 import 是
 // 链接期硬失败（整个文件一条用例都跑不起来）。这里取本仓的同义实现：有上游走上游，
 // 没有走 `foldScheduleEventsCompat`——正是要在跨代上都核对本插件写入的事件能被折出来。
-import { MIN_EVERY_INTERVAL_SECONDS } from '@deepseek-ai/dsh-schedule';
+import { MIN_EVERY_SECONDS } from '../lib/due.js';
 import {
   DEFAULT_MAX_SCHEDULES,
   foldScheduleEventsLikeUpstream as foldScheduleEvents,
@@ -19,7 +19,7 @@ import {
 } from '../lib/user-tools.js';
 import { OWNED_EVENT } from '../lib/domain.js';
 import { freshOwnershipDir, markOwnership } from './helpers/ownership-state.mjs';
-import { getOwnership, hasOwnership } from '../lib/ownership-store.js';
+import { allOwnership, findScheduleIdByUid, getOwnership, hasOwnership } from '../lib/ownership-store.js';
 
 /** 极简假 Session：支持 events/header/append。 */
 let fakeSessionSeq = 0;
@@ -120,14 +120,21 @@ test('create 校验：空 prompt / 多选 / 非法时区 / 过低频次', async 
   );
   assert.ok(!badTz.ok && badTz.code === 'invalid_time_zone');
 
-  // 最小周期随内核代次变化（0.1.5 = 300s，0.1.7 = 60s），故按内核实际常量
-  // 取「刚好低于下限」的值，避免把某代的阈值写死进测试。
+  // 地板是**本仓自己的** 300（不是随内核漂的 MIN_EVERY_INTERVAL_SECONDS：0.1.7-rc.1
+  // 及更早是 300、rc.2 起是 60），见 src/due.ts 的 MIN_EVERY_SECONDS 与 issue #198。
   const tooFast = await userScheduleCreate(
-    { prompt: 'x', every_seconds: MIN_EVERY_INTERVAL_SECONDS - 1, time_zone: 'Asia/Shanghai' },
+    { prompt: 'x', every_seconds: MIN_EVERY_SECONDS - 1, time_zone: 'Asia/Shanghai' },
     fakeAgent(),
     fakeCtx,
   );
   assert.ok(!tooFast.ok && tooFast.code === 'frequency_too_high');
+  // 恰在地板上必须放行：把 300 写成 `< 300` 还是 `<= 300` 只差一次边界，别靠人眼读。
+  const atFloor = await userScheduleCreate(
+    { prompt: 'x', every_seconds: MIN_EVERY_SECONDS, time_zone: 'Asia/Shanghai' },
+    fakeAgent(),
+    fakeCtx,
+  );
+  assert.ok(atFloor.ok, `every_seconds=${MIN_EVERY_SECONDS} 必须被接受：${JSON.stringify(atFloor)}`);
 });
 
 test('create 过去时间 → not_future', async () => {
@@ -320,4 +327,69 @@ test('P0-4：编辑已过期的 at 任务返回 already_overdue，不产生新�
   const edited = await userScheduleEditPrompt('schedule-past', '新内容', agent, fakeCtx);
   assert.ok(!edited.ok && edited.code === 'already_overdue');
   assert.equal(agent.session.events.length, before); // 无任何写入
+});
+
+// ─── #205：flush 失败时日志侧也要回滚，两侧成对 ───────────────────────────
+
+/**
+ * 折叠后的「日志端态」——与 dsh-schedule 自己的 fold 同一条实现
+ * （`foldScheduleEventsLikeUpstream` 有上游就走上游）。
+ *
+ * 为什么断言落在折叠端态而不是「事件条数」：修复要保证的是「日志里没有一条
+ * 未落根的 create」，而「有几条事件」既可能是 create+delete（正常回滚），也可能是
+ * create 单独一条（没回滚）。只有 fold 出来的 active 才能把两者分开。
+ */
+const activeAfter = (agent) => foldScheduleEvents(agent.session.events, 0).active;
+
+/** flush 恒失败、且 append 会真的记进假日志的 ctx。 */
+const failingFlushCtx = { sessions: { flush: async () => false } };
+
+test('#205 create：flush 失败后日志侧没有未落根的 create', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent();
+  const result = await userScheduleCreate(
+    { prompt: '不会落盘', after_seconds: 600, time_zone: 'Asia/Shanghai' },
+    agent,
+    failingFlushCtx,
+  );
+  assert.ok(!result.ok && result.code === 'persistence_uncertain');
+  assert.equal(hasOwnership(agent.session.header.id, result.id), false, 'sidecar 已回滚');
+  // 修复前这里 fold 出 1 条：create 事件留在日志里、sidecar 已被撤，于是下次冷恢复
+  // 会折出一条无人认领、扫描器也看不见的提醒。
+  assert.deepEqual(activeAfter(agent), [], '日志侧必须补偿一笔 delete');
+});
+
+test('#205 edit：flush 失败后日志侧仍是旧记录（内容、时刻都没换）', async () => {
+  freshOwnershipDir();
+  const sessionId = 'session-edit-rollback';
+  const agent = fakeAgent();
+  agent.session.header.id = sessionId;
+
+  const created = await userScheduleCreate(
+    { prompt: '旧内容', after_seconds: 600, time_zone: 'Asia/Shanghai' },
+    agent,
+    fakeCtx,
+  );
+  assert.ok(created.ok);
+  const before = activeAfter(agent);
+  assert.equal(before.length, 1);
+
+  const edited = await userScheduleEditPrompt(created.id, '新内容', agent, failingFlushCtx);
+  assert.ok(!edited.ok && edited.code === 'persistence_uncertain');
+
+  const after = activeAfter(agent);
+  assert.equal(after.length, 1, `日志侧应仍有一条记录，实际 ${after.length}`);
+  // 修复前这几条都红：端态里是新内容，用户却被告知"未确认"，面板与日志各说一套。
+  assert.equal(after[0].prompt, '旧内容', '回滚后日志侧必须是旧内容');
+  // 时刻按秒重建，故容差 1s：after 的重建用「剩余秒数」，不是原 ISO 串。
+  const drift = Math.abs(Date.parse(after[0].scheduledAt) - Date.parse(before[0].scheduledAt));
+  assert.ok(drift <= 1000, `回滚后时刻漂移 ${drift}ms，超出 1s`);
+  // 日志 id **刻意换新**（复用旧 id 会被上游严格 fold 判 `was reused`，那是更糟的
+  // 永久读坏）；稳定身份靠 uid 延续，wire 面看到的仍是同一条提醒。
+  assert.notEqual(after[0].id, before[0].id, '重建必须换新日志 id');
+  const uid = [...Object.values(allOwnership(sessionId))].find(
+    (entry) => entry.uid !== undefined && entry.delivery === 'context',
+  )?.uid;
+  assert.ok(uid !== undefined, '回滚后的记录仍须有稳定 uid');
+  assert.equal(findScheduleIdByUid(sessionId, uid), after[0].id, 'uid 必须指回重建后的 id');
 });
