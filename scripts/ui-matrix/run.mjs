@@ -120,7 +120,7 @@ export function renderMatrixHtml(rows, meta = {}) {
 </style></head><body>
 <h1>${meta.title ?? 'dsh-later · 跨内核代次 UI 截图矩阵'}</h1>
 <div class="sub">每格都是真内核隔离实例 + 独立 headless Chromium；待发送行由同一条命令 <code>/later +30m …</code> 经真实命令通道造出（不烧模型）。点图看原图。</div>
-<table><thead><tr><th>DSH 代次</th><th>作曲行 + 定时按钮</th><th>待发送 dock</th><th>面板展开</th></tr></thead>
+<table><thead><tr><th>DSH 代次</th><th>作曲行 + 定时按钮</th><th>待发送 dock</th><th>面板展开</th><th>侧栏 badge</th></tr></thead>
 <tbody>${body}
 </tbody></table>
 <footer>生成时间：${meta.generatedAt ?? new Date().toLocaleString('zh-CN')} · 插件 ${meta.pluginVersion ?? ''}</footer>

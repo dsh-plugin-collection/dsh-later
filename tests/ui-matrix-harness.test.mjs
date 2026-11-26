@@ -81,6 +81,37 @@ test('renderMatrixHtml：成功的行给图 + 四处判据，失败的行说明�
 });
 
 /**
+ * 表头与格数必须一致。
+ *
+ * 这条是补的：`badge` 那一面进判据、进 manifest、进每行格子都做了，唯独**没进表头** ——
+ * 于是矩阵页上第四张图挂在一个没有列名的格里，读者看到的表是「4 列表头 + 5 列数据」。
+ * 原来的测试只断言「哪些图/文字出现」，不断言列数；而只要判据在长新面，这类漏改就会重演。
+ * 所以按结构断言：表头列数 === 每行格数，且 badge 必须在表头里。
+ */
+test('renderMatrixHtml：表头列数与每行格数一致（badge 不能只进格子不进表头）', () => {
+  const html = renderMatrixHtml([
+    {
+      version: '0.2.1-rc.2', ok: true, buttonFound: true, dockRows: 5, panelOpened: true, badges: 2, errors: [],
+      shots: {
+        composer: '/tmp/x/a.png', dock: '/tmp/x/b.png', panel: '/tmp/x/c.png', badge: '/tmp/x/d.png',
+      },
+    },
+  ], { pluginVersion: '1.7.0' });
+  // 不用正则切 HTML（`</tr>` 里的斜杠会把字面量的 flags 弄崩），按标记定位即可。
+  // 从 `<thead>` 之后开始切：`<thead>` 自己以 `<th` 开头，算进去会多一节。
+  const headStart = html.indexOf('<thead>');
+  const headEnd = html.indexOf('</thead>');
+  const head = html.slice(headStart, headEnd).replace('<thead>', '');
+  const headCells = head.split('<th').length - 1;
+  const bodyStart = html.indexOf('<tbody>');
+  const firstRowEnd = html.indexOf('</tr>', bodyStart);
+  const firstRow = html.slice(bodyStart, firstRowEnd);
+  const rowCells = firstRow.split('<td').length - 1 + firstRow.split('<th').length - 1;
+  assert.equal(rowCells, headCells, `表头 ${headCells} 列、数据行 ${rowCells} 列，二者必须相等`);
+  assert.match(head, /侧栏 badge/, 'badge 是判据的一面，表头必须给它一列');
+});
+
+/**
  * badge 此前**根本不在判据里**：它在 4 个代次整块不出现，矩阵仍然 `exit 0`。
  * 这条把"badge 为 0 就是不通过"钉死。结论只有一份（rowVerdict），HTML / manifest /
  * 退出码都走它——同一个结论算两次就一定会漂成两个结论，这次就是退出码那侧漏的。
