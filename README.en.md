@@ -225,11 +225,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 ## Feature digest
 
-- **Scheduling**: three entry points — the composer button, the pending dock, and `/later` delayed send
-- **Delivered**: server-driven, fires with the page closed; arrives as a "Reminder", never framed as your own words
-- **Visible**: pixel clock in the sidebar (purple = scheduled · amber = within 5 min · red = overdue), hover for count and next due time
-- **Model-assisted**: the shipped `SKILL.md` stays in the skill catalog and will offer to schedule unprompted
-- **Compatible & localized**: verified across 15 kernel generations; UI copy in 8 locales
+Set reminders for yourself inside DSH: three entry points (composer button, pending dock, `/later`), delivered server-side on time even with the page closed, shown as a "Reminder" rather than as your own words; a sidebar pixel clock shows status and next due time; the model can schedule on your behalf; works across 15 kernel generations with UI copy in 8 locales.
 
 ## Feature overview
 
