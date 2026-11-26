@@ -29,16 +29,14 @@
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canBuild, disposeAll, stageBuildableTree } from './helpers/staged-build.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
-const canBuild =
-  existsSync(join(root, 'node_modules/esbuild')) && existsSync(join(root, 'node_modules/typescript'));
+const buildable = canBuild(root);
 
 /* ---------------- 1. 接线 ---------------- */
 
@@ -98,62 +96,32 @@ test('#56 的兜底闸门只管 host，client 侧不得出现第二种产物形�
 
 const staged = [];
 after(() => {
-  for (const dir of staged) rmSync(dir, { recursive: true, force: true });
+  disposeAll(staged);
 });
 
 /**
- * 复制一份可构建的最小工作树，塞一个 **client 侧**类型错误（host 项目不收这个路径），
- * 并给 lib/client.js 放哨兵。
- * @returns {string} 临时工作树路径。
+ * 暂存一份可构建的最小工作树，塞一个 **client 侧**类型错误（host 的 tsconfig 不收 `src/client`），
+ * 并给 `lib/client.js` 放哨兵。
+ *
+ * 暂存与环境口径收在 `tests/helpers/staged-build.mjs`（issue #208 卫生第 5 条）。本文件
+ * 只保留自己的那一步：哨兵要放在 **client** 产物上，因为这一面测的是「client 检查失败时
+ * 还没有写出 lib/client.js」（失败发生在 esbuild 打包之前）。
+ * @returns {ReturnType<typeof stageBuildableTree>} 夹具句柄。
  */
 function stageClientFailingTree() {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-later-client-gate-'));
-  staged.push(dir);
-  for (const rel of ['build.mjs', 'tsconfig.json', 'tsconfig.client.json', 'package.json']) {
-    cpSync(join(root, rel), join(dir, rel));
-  }
-  cpSync(join(root, 'src'), join(dir, 'src'), { recursive: true });
-  mkdirSync(join(dir, 'scripts'), { recursive: true });
-  for (const name of readdirSync(join(root, 'scripts'))) {
-    if (name.endsWith('.mjs')) cpSync(join(root, 'scripts', name), join(dir, 'scripts', name));
-  }
-  symlinkSync(join(root, 'node_modules'), join(dir, 'node_modules'), 'dir');
-
-  mkdirSync(join(dir, 'lib'), { recursive: true });
-  writeFileSync(join(dir, 'lib/client.js'), '// CLIENT-SENTINEL 失败路径不得改写这行\n');
-  writeFileSync(
-    join(dir, 'src/client/__clientGateProbe.ts'),
-    '// 端到端夹具：故意让 client tsc 失败（host 的 tsconfig 不收 src/client）\n' +
-      'export const clientGateNotANumber: number = "not a number";\n',
-  );
-  return dir;
+  const tree = stageBuildableTree(root, 'client-gate');
+  staged.push(tree);
+  tree.write('lib/client.js', '// CLIENT-SENTINEL 失败路径不得改写这行\n');
+  tree.injectTypeError('src/client/__clientGateProbe.ts', '端到端夹具');
+  return tree;
 }
 
-/** 在隔离的临时树里跑一次 build.mjs（假 HOME + 清空环境开关，绝不碰真实 profile）。 */
-function runBuild(dir) {
-  const home = join(dir, 'fake-home');
-  mkdirSync(home, { recursive: true });
-  const result = spawnSync(process.execPath, ['build.mjs'], {
-    cwd: dir,
-    env: {
-      ...process.env,
-      HOME: home,
-      DSH_LATER_RELINK: '',
-      DSH_LATER_BUILD_FALLBACK: '',
-      PATH: `${join(root, 'node_modules/.bin')}:${process.env.PATH ?? ''}`,
-    },
-    encoding: 'utf8',
-    timeout: 300_000,
-  });
-  return { status: result.status, signal: result.signal, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
-}
-
-const clientFailing = canBuild ? (() => {
-  const dir = stageClientFailingTree();
-  return { dir, sentinel: readFileSync(join(dir, 'lib/client.js'), 'utf8'), ...runBuild(dir) };
+const clientFailing = buildable ? (() => {
+  const tree = stageClientFailingTree();
+  return { tree, sentinel: tree.read('lib/client.js'), ...tree.runBuild() };
 })() : null;
 
-test('端到端：client 类型错误让 build 非零退出', { skip: !canBuild }, () => {
+test('端到端：client 类型错误让 build 非零退出', { skip: !buildable }, () => {
   assert.ok(clientFailing, '夹具应已就绪');
   assert.equal(clientFailing.signal, null, `构建被信号打断：${clientFailing.signal}`);
   assert.notEqual(clientFailing.status, 0, '退出 0 说明闸门失效，又回到「warn 后继续」');
@@ -162,16 +130,16 @@ test('端到端：client 类型错误让 build 非零退出', { skip: !canBuild 
   assert.doesNotMatch(clientFailing.stderr, /构建完成|✅/, '失败路径不能再打成功勾');
 });
 
-test('端到端：失败的构建没写出 lib/client.js（哨兵字节原样）', { skip: !canBuild }, () => {
+test('端到端：失败的构建没写出 lib/client.js（哨兵字节原样）', { skip: !buildable }, () => {
   assert.ok(clientFailing, '夹具应已就绪');
   assert.equal(
-    readFileSync(join(clientFailing.dir, 'lib/client.js'), 'utf8'),
+    clientFailing.tree.read('lib/client.js'),
     clientFailing.sentinel,
     'lib/client.js 被改写：client 检查必须排在 esbuild 打包之前',
   );
 });
 
-test('端到端：诊断本体要能看见（runTypecheck 抓的是管道，不打出来等于吞了）', { skip: !canBuild }, () => {
+test('端到端：诊断本体要能看见（runTypecheck 抓的是管道，不打出来等于吞了）', { skip: !buildable }, () => {
   assert.ok(clientFailing, '夹具应已就绪');
   assert.match(clientFailing.stdout, /__clientGateProbe\.ts\(\d+,\d+\): error TS\d+/);
 });
