@@ -19,6 +19,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   buttonSchedule: 'Programar envio',
   panelTitle: 'Lembretes agendados',
   close: 'Fechar',
+  quickGroupLabel: 'Opções rápidas de hora',
   quick10m: 'Em 10 minutos',
   quick1h: 'Em 1 hora',
   quickSmart: 'Horário de trabalho',

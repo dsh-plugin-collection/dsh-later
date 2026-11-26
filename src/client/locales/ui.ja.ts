@@ -19,6 +19,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   buttonSchedule: '予約送信',
   panelTitle: '予約リマインダー',
   close: '閉じる',
+  quickGroupLabel: 'クイック時刻オプション',
   quick10m: '10 分後',
   quick1h: '1 時間後',
   quickSmart: '勤務時間',

@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, JSX } from 'react';
+import { focusIntoPanel, restoreFocusToTrigger } from '../panel-focus.js';
 import { IconClock } from '../primitives-compat.js';
 import { detectTimeZone } from '../../time-utils.js';
 import { useSchedT, type LocaleFaceLike } from '../useSchedT.js';
@@ -94,6 +95,42 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
   usePanelOutsideDismiss(rowRef, open, setOpen, panelRef);
 
   /**
+   * 触发按钮 ref（issue #204）：关闭时把焦点还回这里。只用 `useRef`，不必在 props 里加。
+   */
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+
+  /**
+   * 焦点搬进面板（issue #204）。
+   *
+   * 面板是 portal 出来的，返回 `SchedPanel` 的那一帧 `panelRef.current` 可能还没挂上
+   * （`createPortal` 的子节点在 commit 阶段才进文档），所以这里等一个 microtask 再取——
+   * 但它必须仍在「打开」这一轮之内，否则用户已经开始 Tab 了。用 `open` 作依赖，
+   * 打开/关闭各跑一次，不在关闭那一帧空转。
+   *
+   * 为什么放在 `if (!showButton) return null` **之前**：提前返回的组件也必须保持 hook
+   * 顺序不变（判断在 effect 内部，不是条件调用）。
+   */
+  useEffect(() => {
+    if (!open) return undefined;
+    const panel = panelRef.current;
+    if (panel !== null) focusIntoPanel(panel);
+    return undefined;
+  }, [open]);
+
+  /**
+   * 关闭时归还焦点：只在**焦点仍在面板内**时还（见 `panel-focus.ts` 的取舍）。
+   *
+   * 面板关闭那一帧 `panelRef.current` 会被 React 清成 null 吗？不会——ref 的清空发生在
+   * 节点被移除时，而这段代码跑在 `setOpen(false)` 的**事件处理里**（`closePanel`），
+   * 此时面板还挂在文档上。
+   */
+  const closePanel = (): void => {
+    const panel = panelRef.current;
+    if (panel !== null) restoreFocusToTrigger(panel, btnRef.current);
+    setOpen(false);
+  };
+
+  /**
    * `css-anchor` 后端（0.2.2-rc.2 起）：面板要靠触发元素上的 `anchor-name` 才定得了位。
    * 其余后端返回 `{ anchorName: 'auto' }`，显式清掉可能残留的同名锚点。
    */
@@ -123,6 +160,7 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
         aria-expanded={open}
         disabled={!enabled}
         onClick={() => setOpen((value) => !value)}
+        ref={btnRef}
       >
         <IconClock size={16} />
       </button>
@@ -135,7 +173,7 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
             顺手拦掉页面滚动与焦点移动。
           */}
           {!hasOfficialOutsideDismiss && (
-            <div className="ss-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
+            <div className="ss-backdrop" onClick={closePanel} aria-hidden="true" />
           )}
           <SchedPanel
             defaultPrompt={draft}
@@ -144,7 +182,7 @@ export function SchedButton(props: SchedButtonProps): JSX.Element | null {
             busy={busy}
             t={t}
             lang={lang}
-            onClose={() => setOpen(false)}
+            onClose={closePanel}
             onCreate={handleCreateWithErrorBoundary}
             onDelete={(id) => void handleDelete(id)}
             bottom={anchorBottom}

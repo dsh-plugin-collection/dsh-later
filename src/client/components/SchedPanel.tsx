@@ -309,6 +309,12 @@ export function SchedPanel({
       data-ss-panel=""
       role="dialog"
       aria-label={t.panelTitle}
+      /*
+       * `tabIndex={-1}` 让面板本身成为可编程焦点目标（issue #204）：没有它，`focus()`
+       * 是空操作，屏幕阅读器不会念 dialog 的内容，键盘用户 Tab 也会先走到面板后面的
+       * 元素上去。`-1` 而不是 `0`：面板不该进 Tab 序列，用户要走到的是里面的按钮。
+       */
+      tabIndex={-1}
       style={panelStyle}
       onClick={(event) => event.stopPropagation()}
     >
@@ -319,7 +325,18 @@ export function SchedPanel({
         </button>
       </div>
 
-      <div className="ss-quick-grid" role="radiogroup" aria-label={t.panelTitle}>
+      {/*
+        快捷芯片是**动作**（点一下就换目标时间并展开对应区域），而不是一组单选值：真正的
+        提交是下面那个「确定」。所以这里用 `role="group"` + 每枚 `aria-pressed` 的开关语义，
+        不用 `radiogroup`/`radio`（issue #204 的取舍）：
+          · 单选语义要求 roving tabindex 与方向键切换，否则屏幕阅读器会按「1 of 4」念，
+            键盘却只能 Tab 走四站，两个模型对不上；
+          · 单选语义还要求「已选中」是稳定状态，而这些芯片点第二次并不取消，用户随时可以
+            改选其它档——那是切换按钮的行为。
+        `aria-label` 也不再借用面板标题（`dialog` 已经有同一个名字），否则读出来是
+        「定时提醒 → 定时提醒 组」这种回声。
+      */}
+      <div className="ss-quick-grid" role="group" aria-label={t.quickGroupLabel}>
         {quickOptions.map((option) => {
           const key = keyOf(option);
           const active = selected === key || (option.kind === 'custom' && selected === 'custom');
@@ -327,8 +344,7 @@ export function SchedPanel({
             <button
               key={key}
               type="button"
-              role="radio"
-              aria-checked={active}
+              aria-pressed={active}
               className={active ? 'ss-quick-chip ss-active' : 'ss-quick-chip'}
               onClick={() => {
                 setSelected(key);

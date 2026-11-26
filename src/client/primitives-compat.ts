@@ -368,10 +368,18 @@ export function useEscapeToClose(open: boolean, setOpen: (open: boolean) => void
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpenRef.current(false);
+      // issue #204 的两条修正：
+      //  1. **不用捕获阶段**。旧实现监听 `window` 且 `capture: true`，于是它比宿主
+      //     composer / 编辑器的 keydown 先拿到 Esc——那边的「取消编辑 / 退出全屏 /
+      //     关闭自己那层浮层」被我们先吃掉一层（用户按一次 Esc 关掉两样东西）。
+      //     冒泡阶段 + 「谁先处理谁 preventDefault」是浏览器里约定俗成的分层方式。
+      //  2. **尊重已经处理过的事件**。上游处理器调 `preventDefault()` 是在说
+      //     「这个 Esc 归我」，我们就不该再把面板一并关掉。
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      setOpenRef.current(false);
     };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 }
 
