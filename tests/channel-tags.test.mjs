@@ -37,9 +37,19 @@ const LEDGER_IDS = new Set(KERNEL_GENERATIONS.map((g) => g.id));
  * 写死的后果是每发一版就有一条测试红，而红的原因不是代码错了、是测试过期 ——
  * 那种红会训练人「发版时顺手改测试」，于是护栏本身失效。
  */
-const CURRENT = JSON.parse(
+const PKG_VERSION = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).version;
+
+/**
+ * 当前**已发布**的正式版（台账只记它）。
+ *
+ * 预发布（`1.15.1-beta.0`）不进台账 —— 台账的语义是"验完并通过的版本"，
+ * 而 beta 正是"还没验完"的那一档。所以这里剥掉预发布后缀再查台账；
+ * 戴着 beta 号去要求台账登记，会把「预发布不登记」这条设计判成缺陷。
+ */
+const CURRENT = PKG_VERSION.replace(/-.*$/, '');
+const IS_PRERELEASE = PKG_VERSION !== CURRENT;
 
 test('台账模块不得回退成 .ts：两个 tsconfig 都只 include src/**，scripts/ 从未被类型检查过', () => {
   // issue #208：(c) 那一面的病灶。`scripts/lib/verified-on.ts` 写着 `type` 与 `satisfies`，
@@ -82,6 +92,20 @@ test('通道 tag：VERIFIED_ON 里的每个代次都必须在 KERNEL_GENERATIONS
 });
 
 test('通道 tag：当前版本覆盖全部台账代次（这是它同时服务三条通道的前提）', () => {
+  // 工作树停在预发布上时（`1.15.1-beta.0`），台账里**应当**只有上一个正式版：
+  // 「还没验完」正是 beta 这一档的定义。此时断言换成一个更弱但仍有意义的不变式 ——
+  // 台账非空且最高版就是 npm 上那条 latest 该指的地方。戴着实测号要求登记 beta，
+  // 等于把「预发布不进台账」这条设计当成缺陷。
+  const versions = Object.keys(VERIFIED_ON);
+  assert.ok(versions.length > 0, 'VERIFIED_ON 至少要有一条');
+  if (IS_PRERELEASE) {
+    const highest = versions.sort(compareVersions).at(-1);
+    const generations = VERIFIED_ON[highest];
+    for (const id of LEDGER_IDS) {
+      assert.ok(generations.includes(id), `${highest} 应覆盖 ${id}`);
+    }
+    return;
+  }
   const generations = VERIFIED_ON[CURRENT];
   assert.ok(
     Array.isArray(generations),
@@ -137,7 +161,11 @@ test('通道 tag：三条通道都跟随内核实时 dist-tag 推导', () => {
   });
   assert.deepEqual(unresolved, [], '三条通道都应能判定');
   for (const { channel, kernel, version } of targets) {
-    assert.equal(version, CURRENT, `${channel}（kernel=${kernel}）应挑到 ${CURRENT}`);
+    // 停在预发布上时，通道目标仍是**台账里验过的那个正式版**（不是工作树的 beta 号）
+    const expected = IS_PRERELEASE
+      ? Object.keys(VERIFIED_ON).sort(compareVersions).at(-1)
+      : CURRENT;
+    assert.equal(version, expected, `${channel}（kernel=${kernel}）应挑到 ${expected}`);
   }
 });
 

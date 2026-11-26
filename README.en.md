@@ -225,6 +225,11 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
 
 ## Feature overview
 
+- **Schedule button in the composer**: one click opens the scheduling panel — smart windows, custom time, this session's task list, and a countdown.
+- **Pending dock**: the reminder list above the composer. Each row can be **cancelled**, **edited in place**, **paused / resumed** (for `after` timers), or **sent right now** (no waiting for the countdown, with delivery confirmation so nothing is lost silently).
+- **`/later` delayed send**: sends "what you're typing right now" later under your identity, attachments included (see [what's the difference](#reminders-vs-delayed-sends-whats-the-difference)).
+- **Sidebar status**: sessions with live reminders show a pixel clock (purple = scheduled · amber = within 5 min · red = overdue); hover reveals the task count and next due time, and "paused" when everything is paused.
+- **Works across kernel generations**: verified generation by generation from `0.1.2-rc.1` through `0.2.2-rc.5` — **15 generations**, with a real-GUI screenshot matrix; see [supported DSH kernels](#supported-dsh-kernels).
 - **Fires with the page closed — both levels hold now**:
   - **Browser closed, server running**: reminders live server-side and arrive on time across devices.
   - **Server restarted, that session was never opened**: true now, but needs **plugin 1.12.1 or newer**. 1.12.0 carried a "wakes the session but never drives delivery" defect, so those reminders stayed silent at due time.
@@ -232,6 +237,7 @@ The sidebar hover card gains one status line ("3 scheduled reminder(s), next 15:
   Bounds and backoff are in [`docs/verification.md`](./docs/verification.md) under "remaining bounds": the host must be able to rebuild the session (when neither path works the reminder is marked `undelivered` and reported, without retrying forever); delegated child sessions are not cold-woken; a cold wake costs one turn; a just-closed session has a 120s grace period.
 
 - **Never impersonates you**: when due, the message appears as a `Reminder` — it is never framed as your own words.
+- **The model schedules for you**: the shipped `SKILL.md` (skill name `later-reminders`) stays in the model's skill catalog, so it will offer to schedule even when you never said "set a reminder", and it distinguishes this plugin from the kernel's own `schedule_create`. If the host has no skills service, this item simply does not appear — nothing else is affected.
 - **Multilingual**: UI copy follows the DSH UI language across **8 locales** (中文 / English / 日本語 / Español / Français / Deutsch / Русский / Português), live without reload.
   
   > ⚠️ **Six** of them (ja / es / fr / de / ru / pt) are machine-translated and only passed mechanical checks (placeholders preserved verbatim, proper nouns untranslated, no zero-width characters) — **not reviewed by native speakers**. Please open an issue for bad translations.
