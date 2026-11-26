@@ -5,7 +5,7 @@
  *  1. Session API 双轨探测（0.1.1 events/seedLength ↔ 0.1.2 ownEvents/inheritedEventCount）
  *     在 foldUserState / read* 上行为一致，且 seedLength 回退不再缺失。
  *  2. package.json peer 枚举与 src/upstream-compat.ts 的 KERNEL_GENERATIONS 同步
- *     ——新 rc 只改一处后跑 scripts/sync-peer-matrix.mjs，这里挡住漏同步。
+ *     ——新 rc 只改一处后跑 npm run sync:peers，这里挡住漏同步。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -284,7 +284,7 @@ test('peerRangeFor：commands 额外并上 0.0.1 线，其余仅内核代次（�
  * peer 与 dev 的**意图不同**，守卫也据此分开：
  *
  *  - `peerDependencies` = 声明「支持哪些代次」→ 必须等于 KERNEL_GENERATIONS 拼出的
- *    完整范围，由 `scripts/sync-peer-matrix.mjs` 单一事实来源生成。
+ *    完整范围，由 `npm run sync:peers`（`scripts/sync-peer-matrix.mjs`）单一事实来源生成。
  *  - `devDependencies` = 本地编译/测试**实际跑在哪一代** → 必须是**某一个具体代次**，
  *    且该代次在已验证列表里。
  *
@@ -299,7 +299,7 @@ test('peerDependencies 与 KERNEL_GENERATIONS 完整范围一致', () => {
     assert.equal(
       pkg.peerDependencies?.[packageName],
       range,
-      `peerDependencies.${packageName} 与 KERNEL_GENERATIONS 不同步——改 upstream-compat 后跑 scripts/sync-peer-matrix.mjs`,
+      `peerDependencies.${packageName} 与 KERNEL_GENERATIONS 不同步——改 upstream-compat 后跑 npm run sync:peers`,
     );
   }
   for (const name of KERNEL_SCOPED_PACKAGES) {

@@ -6,7 +6,7 @@
  * `engines.dsh` 此前是手写常量，而加新一代只重写了 peer 枚举 —— 两处各说各话，实测后果是
  * 一批**从没跑过的预发布**被判「支持」（`0.1.3-alpha.2`、`0.1.6-alpha.1`、`0.1.7-alpha.1`、
  * `0.2.2-alpha.2`、`0.1.5-rc.1/rc.2`）：node-semver 不把预发布算进普通范围，`>=0.1.2-rc.1 <0.2.0-0`
- * 这种写法兜不住。现在这一行由 `enginesDshRange()` 生成、`sync-peer-matrix` 落地，本文件钉住
+ * 这种写法兜不住。现在这一行由 `enginesDshRange()` 生成、`npm run sync:peers`（`sync-peer-matrix`）落地，本文件钉住
  * 「package.json 与本表不再可能漂移」＋「收口形状确实是逐 tuple」。
  *
  * ## 判定用的是谁
@@ -50,8 +50,26 @@ test('engines.dsh 必须由 KERNEL_GENERATIONS 推导，不许再手抄（防两
   assert.equal(
     pkg.engines.dsh,
     enginesDshRange(),
-    'package.json 的 engines.dsh 与本表推导结果不一致——跑 node scripts/sync-peer-matrix.mjs',
+    'package.json 的 engines.dsh 与本表推导结果不一致——跑 npm run sync:peers（node scripts/sync-peer-matrix.mjs）',
   );
+});
+
+/**
+ * 报错消息里指的必须是**一条能直接敲的命令**（issue #208 卫生第 3 条）。
+ *
+ * 原来写的是 `node scripts/sync-peer-matrix.mjs`：路径没错，但它是**实现细节**——
+ * 读者还得自己确认脚本参数、cwd；而 `package.json` 里根本没有对应入口，等于这条
+ * 「怎么修」的指路只能靠人肉转译。加 `sync:peers` 并把消息改指它，两处消费
+ * （`support-surface` 与 `upstream-compat`）才对得上同一句话。
+ */
+test('错误消息指向 `npm run sync:peers`，且该入口真的存在', () => {
+  assert.equal(
+    pkg.scripts['sync:peers'],
+    'node scripts/sync-peer-matrix.mjs',
+    'package.json 要有 sync:peers 入口：否则报错消息指的是一条不存在的命令',
+  );
+  const self = readFileSync(new URL('../tests/support-surface.test.mjs', import.meta.url), 'utf8');
+  assert.match(self, /跑 npm run sync:peers/, '本文件的报错消息也要指同一入口');
 });
 
 test('形状：每个 tuple 一条款，上界是下一 patch 的 `-0`', () => {

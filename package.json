@@ -50,7 +50,7 @@
     "deploy": "node build.mjs --deploy",
     "typecheck": "node scripts/typecheck-all.mjs",
     "test": "node scripts/run-tests.mjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build && npm run check:lib-reach && npm run check:release",
     "watch": "node watch.mjs",
     "verify:kernels": "node scripts/verify-across-kernels.mjs",
     "verify:kernels:all": "node scripts/verify-across-kernels.mjs --steps mount,function,type,gate",
@@ -58,7 +58,8 @@
     "check:lib-reach": "node scripts/lib-reachability.mjs",
     "check:release": "node scripts/release-selfcheck.mjs",
     "verify:cold": "node scripts/verify-cold-attribution.mjs",
-    "sync:tags": "node scripts/sync-generation-tags.mjs"
+    "sync:tags": "node scripts/sync-generation-tags.mjs",
+    "sync:peers": "node scripts/sync-peer-matrix.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
