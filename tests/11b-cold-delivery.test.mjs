@@ -41,7 +41,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Context } from '@deepseek-ai/cordis';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as plugin from '../lib/index.js';
 import { resolveScheduledAtFromLog } from '../lib/expiry-sweeper.js';
@@ -522,7 +522,16 @@ test('被委托子会话（delegationDepth > 0）不唤醒、不投递', async (
     const startupResumes = resumeCalls;
     boot.liveAgents.push(child);
     await flush();
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    // 等**退避窗口**过去：起步那一轮失败后，`backoffForFailures(1)=1000ms` 再加 250ms
+    // 宽限期，所以这里盯 1200ms。原来是固定 sleep 1200——它「慢但稳」，代价是每次跑都
+    // 白等 1.2s；换成轮询**不该发生的那件事**（子会话被冷唤醒）：真出问题时立刻红，
+    // 不出问题时等满同一个窗口，判定口径与原来逐字相同（issue #208 卫生第 5 条）。
+    const wronglyResumed = await until(() => resumeCalls > startupResumes, 1200);
+    assert.equal(
+      wronglyResumed,
+      false,
+      '子会话进表后又被 agents.resume 冷唤醒：扫描器没看深度（本用例要挡的就是这个）',
+    );
     // 先钉「判定本身」，再看「结果」。两条断言不能合在一起——`assert.equal` 的失败消息
     // 在断言**之前**求值，把投递计数写进消息里就等于检查前先读了一次状态
     // （这个坑在这里真踩过：测试"自己让自己通过"）。
@@ -564,8 +573,10 @@ test('静默期：刚被 disposed 的会话在静默期内不唤醒，但必须�
     await flush();
     // 静默期内：不允许主动冷唤醒。
     assert.equal(plugin.canWakeColdSession(boot.ctx, 'session-quiet', boot.watch), false, '静默期内必须判定为不可唤醒');
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    assert.equal(resumeCalls, 0, '静默期内不得冷唤醒（用户刚关掉，别又打开）');
+    // 静默期窗内盯「不该发生的冷唤醒」：原来是固定 sleep 800（慢但稳），现在同样等
+    // 800ms，但一旦真叫醒就立刻红并把次数带进消息（issue #208 卫生第 5 条）。
+    const wronglyWoke = await until(() => resumeCalls > 0, 800);
+    assert.equal(wronglyWoke, false, `静默期内不得冷唤醒（用户刚关掉，别又打开）；实际 resume ${resumeCalls} 次`);
     // 但**必须留痕**：这条到期提醒不许被无声滤掉。两条判据二选一，写死在这里：
     //   A. 真的被投递了（会话在静默期内也被叫醒），或
     //   B. 明确记成 undelivered(quiet-window)。
@@ -574,6 +585,51 @@ test('静默期：刚被 disposed 的会话在静默期内不唤醒，但必须�
     assert.ok(delivered || traced, `静默期内的到期提醒必须留痕：spliced=${deliveryOf(session, nonce).spliced.length} warn=${JSON.stringify(boot.warned).slice(0, 400)}`);
   } finally {
     await shutdown(boot);
+  }
+});
+
+// ── 4b3. 断言的**判据面**：为什么把固定 sleep 换成「盯不该发生的那件事」──────────
+
+/**
+ * issue #208 卫生第 5 条把本文件里五处固定 sleep 换成了 `until()` 轮询。那些等待**原本
+ * 就是用来放过一段时间的**（"再观察一会儿"），所以换法不能只是「等到某个条件成立」——
+ * 那样一条本来该红的用例会因为条件永不成立而白等到超时，也判红不了。正确的换法是
+ * **盯住那条被禁止的行为**：它一出现就立刻红。
+ *
+ * 这条用例用一个假时钟把这件事本身钉住（不依赖扫描器的实现细节）：同一个
+ * 「静默期内不得冷唤醒」的判据，在**延迟出现**的违规上必须判红。若哪天有人把上面的
+ * `until()` 改回固定 sleep（或改回「等到某个正向条件成立」），这条仍绿，但它守不住的东西
+ * 就回来了 —— 所以这里同时断言那五处真的是轮询而不是 sleep 字面量。
+ */
+test('判据面：直到某个违规出现，until() 立刻判红（不是「等满才看」也不是「等到成立」）', async () => {
+  // ① 语义自证：until 在条件成立时返回 true，在窗口内始终不成立时返回 false。
+  let flag = false;
+  const t0 = Date.now();
+  const setter = setTimeout(() => {
+    flag = true;
+  }, 120);
+  const sawIt = await until(() => flag, 2000);
+  clearTimeout(setter);
+  assert.equal(sawIt, true, '条件最终成立时必须返回 true');
+  assert.ok(Date.now() - t0 < 1000, `应当在违规出现后立刻返回，实测等了 ${Date.now() - t0}ms`);
+
+  // ② 反方向：窗口内不成立时返回 false（那才是「没发生违规」这一事实）。
+  const never = await until(() => false, 150);
+  assert.equal(never, false, '窗口内始终不成立时必须如实返回 false');
+
+  // ③ 结构面：本文件不得再有裸的观察窗口 sleep。
+  //    允许的只有两个小的：`flush()` 的 5ms（让微任务跑一轮）与 `until()` 自己的 20ms 轮询节拍
+  //    —— 它们不是"等一段时间再看结论"，前者是语义需要、后者是轮询间隔本身。
+  const body = readFileSync(new URL('./11b-cold-delivery.test.mjs', import.meta.url), 'utf8');
+  const bareSleeps = body.match(/await new Promise\(\(resolve\) => setTimeout\(resolve, (?!5\)|20\))\d+/g) ?? [];
+  assert.deepEqual(
+    bareSleeps.map((line) => line.slice(-20)),
+    [],
+    '还有观察窗口用固定 sleep 实现：换成 until() 盯住「不该发生的那件事」，违规一出现就红',
+  );
+  // ④ 五处「观察窗口」必须都以 until() 表达，且窗口值与原 sleep 一致（1200/800/400/800/300）。
+  for (const window of ['1200', '800', '400', '300']) {
+    assert.match(body, new RegExp(`until\\([\\s\\S]{0,400}?${window}\\)`), `观察窗口 ${window} 没有走 until()`);
   }
 });
 
@@ -635,7 +691,9 @@ test('反向：会话保持 live 时，投递由 runtime 完成，扫描器不�
     const ok = await until(() => deliveryOf(session, nonce).spliced.length > 0, 2000);
     assert.ok(ok, 'live 会话必须照常投递');
     // 再观察一段时间：扫描器也会看到这条过期条目，但绝不能因此再唤醒/再投一次。
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // 盯的是**第二次投递**（原来是固定 sleep 400）；出现第二次就立刻红。
+    const deliveredTwice = await until(() => deliveryOf(session, nonce).spliced.length > 1, 400);
+    assert.equal(deliveredTwice, false, '出现第二次投递：两个驱动源各投了一次');
     assert.equal(deliveryOf(session, nonce).spliced.length, 1, '只能投递一次（两个驱动源不得各投一次）');
     assert.equal(deliveryOf(session, nonce).dispatched.length, 1, 'dispatch 只能落一条');
     assert.equal(resumeCalls, 0, '扫描器不得对 live 会话做冷唤醒');
@@ -665,7 +723,15 @@ test('插件 fiber dispose 后再到期：不产生新的投递或唤醒', async
   assert.equal(boot.agentsSvc.resumeCalls.length, 0, '未到点不应唤醒');
   await boot.fiber.dispose();
   // 到期之后又等一轮：扫描器已经被拆掉，不该有任何动作。
-  await new Promise((resolve) => setTimeout(resolve, 800));
+  //
+  // 盯的是**任何动作**（投递或唤醒），窗口沿用原来的 800ms —— 不缩短，也不再加倍：
+  // 这条要证明"拆掉之后彻底哑了"，窗口与旧版逐字相同，判定力不变；换掉的只是
+  // 「等满才看结果」这一条（真出问题时立刻红，而不是白等 800ms 才报）。
+  const actedAfterDispose = await until(
+    () => deliveryOf(session, nonce).spliced.length > 0 || boot.agentsSvc.resumeCalls.length > 0,
+    800,
+  );
+  assert.equal(actedAfterDispose, false, 'fiber dispose 后仍有投递或冷唤醒：扫描器没被真的拆掉');
   assert.equal(deliveryOf(session, nonce).spliced.length, 0, 'dispose 后不得再投递');
   assert.equal(boot.agentsSvc.resumeCalls.length, 0, 'dispose 后不得再唤醒');
 });
@@ -690,7 +756,9 @@ test('不回归：会话本来就 live 时行为不变（投递一次、dispatch
     const ok = await until(() => deliveryOf(session, nonce).spliced.length > 0);
     assert.ok(ok, `live 会话照常投递；warn=${JSON.stringify(boot.warned).slice(0, 400)}`);
     // 再给扫描器几轮机会：它同样看到那条已到期的 sidecar，但不得造成第二次投递。
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // 原来是固定 sleep 300；现在盯「第二次投递」，出现就立刻红（issue #208 卫生第 5 条）。
+    const deliveredAgain = await until(() => deliveryOf(session, nonce).spliced.length > 1, 300);
+    assert.equal(deliveredAgain, false, 'live 会话出现了第二次投递（扫描器抢先了）');
     const seen = deliveryOf(session, nonce);
     assert.equal(seen.spliced.length, 1, 'live 会话只投递一次（不因扫描器而重复）');
     assert.equal(seen.dispatched.length, 1, 'dispatch 也只落一条');
