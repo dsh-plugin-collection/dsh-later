@@ -78,14 +78,38 @@ export const MAX_WAKE_FAILURES = 5;
 export const MAX_BACKOFF_MS = 10 * 60_000;
 
 /**
- * 一次唤醒之后的「消化宽限期」：这段时间内即使提醒仍在 sidecar 里到期，也不判失败。
+ * 一次唤醒之后、以及唤醒落定之后的「消化宽限期」：这段时间内即使提醒仍在 sidecar 里
+ * 到期，也不判失败。
  *
- * 投递不是同步的——`followup` 之后还有确认窗口与一次 flush，扫描轮次之间往往还没落盘。
- * 宽限期取 250ms：正常路径的 followup → `user/message` 落盘是同一次宏任务里的事，
- * 而确认轮询本身也会在毫秒级完成；真投不出去时，第一次退避（1s）立刻接上，既不会把成功
- * 判成失败，也能让"放弃"在十秒量级内收敛（实测 5 次失败 ≈ 11s）。
+ * 投递不是同步的——`wake()` 的 promise 在 `registry.drive()` 之后就 resolve（接线侧明说
+ * 「刻意不 await」），而投递真正落地还要 followup + 确认窗口（2000ms）+ 镜像那条
+ * `dispatchedAt` 落盘。所以宽限期要从**两个**时刻各起算一次：发起尝试时（保证下一轮
+ * 扫描不会在唤醒刚落定的那一刻就下结论）与 `wake()` 落定时（真正开始给投递留时间）。
+ * 旧实现只从"尝试起点"起算，而起点等于"上一次尝试的起点"，慢发行时就变成从更早的时刻
+ * 起算——issue #206 的形态。
+ *
+ * 这只是"同一发唤醒最多记一次失败"的**时间**那一半；**计数**那一半在 `settle`：
+ * 一轮扫描观察到"仍未投出去"不等于又失败了一次，只有真的**再唤醒一次**才可能再记一次。
  */
 const WAKE_GRACE_MS = 250;
+
+/**
+ * 一次唤醒**落定**之后的结算窗：这段时间内不下任何"投递失败"的结论。
+ *
+ * 为什么不是一个宽限期就够：{@link WAKE_GRACE_MS} 的 250ms 只够覆盖"同一次宏任务里落盘"
+ * 的正常路径。慢路径（大会话冷 resume 要读几 MB JSONL、确认窗拖满 2000ms、同一时刻多条
+ * 提醒排队）落盘要几秒到十几秒，而退避梯子 1s→2s→4s→8s 在旧口径下只需约 15.5s 就能数满
+ * 5 次失败并 `gaveUp`（issue #206 实测：投递 ≤15s 落地安全，16s 触发 gaveUp；时间线
+ * 0.5s:w1/f1 1.5s:f2 3.5s:f3 7.5s:f4 15.5s:f5）。`gaveUp` 之后该会话的冷提醒不再被叫醒，
+ * 直到用户亲手改动它或进程重启——README 承诺的「关掉网页也准时触发」就此变成一次性能
+ * 失败即永久哑化。
+ *
+ * 取 30s 而不是把 250ms 整体拉大：宽限期一拉大，**失败检测**也跟着变慢；这里只改
+ * "一次唤醒落定后给投递留多久"，不动任何退避倍率与 `noteFailure` 的 `attemptAt` 口径。
+ * 代价写在明处：唤醒成功落地但从头到尾没投出去，要等满这个窗口才开始记第一次失败，
+ * 五档退避也就被拉长到分钟级——这段窗口里不做重试风暴，正是本模块一贯的方向。
+ */
+const WAKE_SETTLE_MS = 30_000;
 
 /** 扫描器需要的最小 sidecar 面（`listOwnershipSnapshots` 的结构子集）。 */
 export interface SweepSnapshot {
@@ -110,8 +134,14 @@ export interface ExpirySweeperOptions {
    * 因为投递本身是异步的（followup + 确认窗口）。这里只要求**不抛**：抛错计入失败次数。
    */
   wake(sessionId: string): void | Promise<void>;
-  /** 这个会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。 */
-  wakeable(sessionId: string): boolean;
+  /**
+   * 这个会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。
+   *
+   * @param entries - 本轮快照里这个会话的条目（`snapshots()` 已经读过的那一份）。接线侧
+   *   用它回答「有没有已过期条目」，**不要**为同一个问题再扫一次 sidecar 目录
+   *   （issue #199：一轮扫 N 个会话就是 N 次全目录 readdir + stat）。
+   */
+  wakeable(sessionId: string, entries: Readonly<Record<string, OwnedEntry>>): boolean;
   /**
    * 可选：`wakeable` 返回 false 时，给出**软拒绝**的原因（例如 `quiet-window`）。
    *
@@ -119,7 +149,7 @@ export interface ExpirySweeperOptions {
    * 而不是当成一次失败去退避。返回 undefined = 硬拒绝（叫醒也没用），本轮静默跳过。
    * 没有这个旁路时，"暂缓"与"永远投不出去"在观测上无法区分——前者会被后者拖成假告警。
    */
-  refuseReason?(sessionId: string): string | undefined;
+  refuseReason?(sessionId: string, entries: Readonly<Record<string, OwnedEntry>>): string | undefined;
   /**
    * 给老条目（v1/v2，缺 `scheduledAt`）回算到期时刻。
    * @returns 回算不出来时 `undefined`（扫描器据此**保守跳过**，不猜）。
@@ -160,17 +190,48 @@ export interface ExpirySweeper {
   dispose(): Promise<void>;
   /** 诊断用：某会话当前的连续失败次数。 */
   failuresOf(sessionId: string): number;
-  /** 诊断用：被「有意暂缓」而未投递的条目数，按原因聚合（如 `quiet-window`）。 */
+  /**
+   * 诊断用：某会话累计发起过多少次唤醒。
+   *
+   * 与 {@link failuresOf} 分开是 issue #206 的结论：慢投递下「唤醒 1 次、失败 5 次」是
+   * 真实存在的形态，而旧告警把这件说成「连续 5 次冷唤醒失败」。
+   */
+  wakesOf(sessionId: string): number;
+  /**
+   * 诊断用：**本轮**被「有意暂缓」而未投递的条目数，按原因聚合（如 `quiet-window`）。
+   * 会话从快照里消失后，它那份也会被清算。
+   */
   undeliveredReasons(): ReadonlyMap<string, number>;
+  /** 诊断用：进程启动以来的**累计**暂缓条数，按原因聚合（与上一项是两个不同的问题）。 */
+  undeliveredTotal(): ReadonlyMap<string, number>;
 }
 
-/** 一个会话的退避状态。 */
+/**
+ * 一个会话的退避状态。
+ *
+ * `failures` 与 `wakes` 是两个**不同的问题**（issue #206）：前者决定退避到多久，后者是
+ * 放弃告警里必须如实报出来的那个数。旧实现把后者说成前者（告警写「连续 5 次冷唤醒失败」，
+ * 实测那次只唤醒过 1 次），排查时会得到完全相反的结论。
+ */
 interface BackoffState {
   failures: number;
+  /** 已经发起过多少次唤醒（跨退避档累计，只在清零时归零）。 */
+  wakes: number;
   /** 下一次允许尝试的时刻（epoch ms）：退避到期前扫描器不碰它。 */
   nextAttempt: number;
   /** 最近一次尝试的起点（epoch ms）——排下一次扫描与后来清算失败都以它为基准。 */
   attemptAt: number;
+  /**
+   * 自上次记失败以来**是否又发起过一次唤醒**（issue #206 的判据核心）。
+   *
+   * 为什么需要它：`settle` 每轮都会看到"提醒仍然到期"（投递还没落盘），但**看到**不等于
+   * **又失败了一次**。旧实现把每轮观察都当成一次失败，于是退避梯子由"观察次数"驱动而不是
+   * "尝试次数"驱动——实测一次唤醒在 ~15.5s 内被数成 5 次失败并 `gaveUp`，而那次对话里
+   * 只唤醒过 1 次（那句「连续 5 次冷唤醒失败」描述的是一件没发生过的事），且 `gaveUp`
+   * 之后该会话的冷提醒哑到进程重启。现在失败只在"上一发唤醒之后"记一次；记完必须等到
+   * 退避窗口过去、真的再唤醒一次，才允许记下一次。
+   */
+  pending: boolean;
   /** 是否已经为「放弃」告过警（只喊一次）。 */
   gaveUp: boolean;
 }
@@ -272,8 +333,18 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
   const warnedGaveUp = new Set<string>();
   /** 已喊过「暂缓未投递」的 `会话/原因`：每项只喊一次，不刷日志。 */
   const warnedUndelivered = new Set<string>();
-  /** 本轮/累计的 undelivered 计数（诊断面）：`原因 → 条数`。 */
-  const undelivered = new Map<string, number>();
+  /**
+   * 诊断面的 undelivered 计数，**本轮与累计分开**（issue #206）。
+   *
+   * 旧实现只有一个永不清零的 Map，而接口注释同时写着「本轮/累计」——读它的人分不清
+   * 「现在有一批被挡下」还是「开机以来一共挡下过这么多」。两个语义挤在一个数上，正是
+   * 本仓一贯在清理的那类"读得出数字、读不出事实"。
+   *
+   * 本轮那份按**会话**记账：它要能跟着 {@link pruneUnseen} 一起清算——会话被删之后
+   * "它正被暂缓"这件事就不成立了。只按原因累加的话这个数只增不减，又退回旧毛病。
+   */
+  const undeliveredRound = new Map<string, Set<string>>();
+  const undeliveredTotal = new Map<string, number>();
 
   const unref = (handle: unknown): void => {
     const candidate = handle as { unref?: () => void } | undefined;
@@ -410,20 +481,34 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
    */
   const noteFailure = (sessionId: string, detail: string): void => {
     const attemptAt = now();
-    const failures = (backoff.get(sessionId)?.failures ?? 0) + 1;
+    const state = backoff.get(sessionId);
+    const failures = (state?.failures ?? 0) + 1;
     const gaveUp = failures >= MAX_WAKE_FAILURES;
     backoff.set(sessionId, {
       failures,
+      wakes: state?.wakes ?? 0,
       nextAttempt: attemptAt + backoffForFailures(failures),
       attemptAt,
+      // 这一发已经清算过（无论它是抛错收场还是"观察到期仍未投出"），下一次失败要等
+      // 真的再唤醒一次——这正是"每发唤醒最多记一次失败"里的**计数**那一半。
+      pending: false,
       gaveUp,
     });
     if (gaveUp) {
       if (warnedGaveUp.has(sessionId)) return;
       warnedGaveUp.add(sessionId);
+      // 告警必须把**两件事**分开说：唤醒过几次、失败计了次（issue #206）。
+      // 慢投递下「唤醒 1 次、失败 5 次」是真实形态，把它写成「连续 5 次冷唤醒失败」
+      // 会让排查走反方向（去找"唤不醒"的原因，而实际是"唤醒了但投递没收敛"）。
+      const wakes = state?.wakes ?? 0;
+      const elapsed = Math.max(0, Math.round((attemptAt - (state?.attemptAt ?? attemptAt)) / 1000));
+      const what =
+        failures === wakes
+          ? `连续 ${failures} 次冷唤醒失败（每一次都没能把提醒投出去）`
+          : `自最后一次唤醒起已有 ${elapsed}s 投递未收敛（期间共唤醒 ${wakes} 次、失败计数 ${failures}）`;
       options.warn(
-        `later: 会话 ${sessionId} 连续 ${failures} 次冷唤醒失败，已停止自动唤醒（不再重试风暴）；` +
-          `该会话的提醒在它被打开或被用户改动时照常投递。最后一次错误: ${detail}`,
+        `later: 会话 ${sessionId} ${what}，已停止自动唤醒与自动重试（不再重试风暴）；` +
+          `该会话的提醒在它被打开或被用户改动时立即补投。最后一次错误: ${detail}`,
       );
       return;
     }
@@ -443,7 +528,7 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
    */
   const poll = (snapshot: SweepSnapshot, at: number): void => {
     const sessionId = snapshot.sessionId;
-    if (!options.wakeable(sessionId)) return;
+    if (!options.wakeable(sessionId, snapshot.entries)) return;
     const state = backoff.get(sessionId);
     if (state !== undefined && (state.gaveUp || at < state.nextAttempt)) return;
     // 记下"刚尝试过"。`attemptAt` 是这一次尝试的起点，`reschedule` 用它算"还要等多久"。
@@ -453,8 +538,10 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     // "退避未到"什么都不做，退化成逐 tick 空转（实测一个会话百来次唤醒就是从这里来的）。
     backoff.set(sessionId, {
       failures: state?.failures ?? 0,
+      wakes: (state?.wakes ?? 0) + 1,
       nextAttempt: Math.max(state?.nextAttempt ?? 0, at),
       attemptAt: at,
+      pending: true,
       gaveUp: state?.gaveUp ?? false,
     });
     inFlight.add(sessionId);
@@ -469,6 +556,17 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     void outcome.then(
       () => {
         inFlight.delete(sessionId);
+        // ⚠️ 宽限期从**这里**再起算一次，不是只从 `at` 起算（issue #206）。
+        // 接线侧的 `wake()` 在 `registry.drive()` 之后就 resolve（那里明说"刻意不 await"），
+        // 而投递真正落地还要 followup + 确认窗（2000ms）+ 镜像 `dispatchedAt` 落盘。旧实现
+        // 只把 `nextAttempt` 顶到 `at`，于是"唤醒刚落定"和"可以判失败了"是同一时刻——慢路上
+        // 每一轮扫描都在给**同一发**唤醒追加失败（实测 1 次唤醒被数成 5 次、约 15.5s 就
+        // `gaveUp`，而 `gaveUp` 之后该会话的冷提醒哑到进程重启）。
+        // 落定之后再排一个宽限期，让投递先有机会落地；`reschedule` 读的就是 `nextAttempt`。
+        const settled = backoff.get(sessionId);
+        if (settled !== undefined && !settled.gaveUp) {
+          backoff.set(sessionId, { ...settled, nextAttempt: now() + WAKE_SETTLE_MS });
+        }
       },
       (error: unknown) => {
         inFlight.delete(sessionId);
@@ -514,12 +612,17 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
         warnedGaveUp.delete(sessionId);
       } else if (state.gaveUp) {
         return 'skip';
-      } else {
-        // 仍然到期 = 上一次唤醒没投出去：这次失败已经"观察到"，`noteFailure` 立刻把等待
-        // 时间翻倍并重新排下一次扫描。
+      } else if (state.pending) {
+        // 仍然到期、且**自上次清算以来确实又唤醒过一发** ⇒ 这一次尝试失败，记一次。
+        // 退避随之翻倍，`settle` 立刻按新的 `nextAttempt` 排下一次扫描。
         noteFailure(sessionId, '唤醒后提醒仍然到期（未投递）');
         return 'skip';
       }
+      // 仍然到期、但这一发已经清算过了（`pending === false`）：**不再记账**。
+      // 这里是 issue #206 的修复点——旧实现走到这一支就 `return 'skip'` 且每轮都先
+      // `noteFailure`，于是失败计数由"观察次数"驱动：一次唤醒能在十几秒里被数成 5 次，
+      // 会话被 `gaveUp` 哑掉，而告警里那句「连续 5 次冷唤醒失败」根本没发生过。
+      // 现在落到下面，等退避窗口过去后**真的再唤醒一次**，才允许再记一次失败。
     }
     if (earliest === undefined || earliest > at) return 'skip';
     return 'poll';
@@ -533,11 +636,21 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
    * - 没给原因 ⇒ 硬拒绝（子会话 / 非 root），静默跳过（枚举层通常已经摘掉了它们）。
    * @returns true 表示本轮已处理完（不要再 poll）。
    */
-  const noteRefused = (sessionId: string, at: number): boolean => {
-    const reason = options.refuseReason?.(sessionId);
+  const noteRefused = (
+    sessionId: string,
+    at: number,
+    entries: Readonly<Record<string, OwnedEntry>>,
+  ): boolean => {
+    const reason = options.refuseReason?.(sessionId, entries);
     if (reason === undefined) return false;
     const key = `${sessionId}/${reason}`;
-    undelivered.set(reason, (undelivered.get(reason) ?? 0) + 1);
+    let reasonsOfRound = undeliveredRound.get(sessionId);
+    if (reasonsOfRound === undefined) {
+      reasonsOfRound = new Set<string>();
+      undeliveredRound.set(sessionId, reasonsOfRound);
+    }
+    reasonsOfRound.add(reason);
+    undeliveredTotal.set(reason, (undeliveredTotal.get(reason) ?? 0) + 1);
     if (!warnedUndelivered.has(key)) {
       warnedUndelivered.add(key);
       options.warn(
@@ -549,8 +662,10 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     const state = backoff.get(sessionId);
     backoff.set(sessionId, {
       failures: state?.failures ?? 0,
+      wakes: state?.wakes ?? 0,
       nextAttempt: at + WAKE_GRACE_MS,
       attemptAt: state?.attemptAt ?? at,
+      pending: state?.pending ?? false,
       gaveUp: state?.gaveUp ?? false,
     });
     return true;
@@ -569,11 +684,14 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
       if (stopped) return;
       seen.add(snapshot.sessionId);
       if (settle(snapshot, at) !== 'poll') continue;
-      if (options.wakeable(snapshot.sessionId)) {
+      // 判定只问一次：`wakeable` 与 `noteRefused` 都要「这个会话的条目」，两处各扫一遍
+      // sidecar 目录就是每条到期提醒付两份全目录 IO（issue #199 的另一半）。
+      const entries = snapshot.entries;
+      if (options.wakeable(snapshot.sessionId, entries)) {
         poll(snapshot, at);
         continue;
       }
-      noteRefused(snapshot.sessionId, at);
+      noteRefused(snapshot.sessionId, at, entries);
     }
     pruneUnseen(seen);
     reschedule();
@@ -594,6 +712,26 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
       if (seen.has(sessionId)) continue;
       backoff.delete(sessionId);
       warnedGaveUp.delete(sessionId);
+    }
+    // `warnedUnresolved` / `warnedUndelivered` 这两个 Set 旧实现**只增不减**（issue #206），
+    // 而模块头承诺「条目删除后可解除」。键形如 `会话/条目`、`会话/原因`，按会话前缀清即可：
+    // 一个会话的提醒被删、后来又建一条同名 id 的，它那句「无法回算」必须能再响一次——
+    // 一次性的沉默比从不告警更难查。
+    const ownerOf = (key: string): string => {
+      const slash = key.indexOf('/');
+      return slash === -1 ? '' : key.slice(0, slash);
+    };
+    const forget = (target: Set<string>): void => {
+      for (const key of [...target.keys()]) {
+        const owner = ownerOf(key);
+        // ⚠️ 只清「本轮快照里根本没有」的会话：还在快照里的条目仍须保持「每项只喊一次」。
+        if (owner !== '' && !seen.has(owner)) target.delete(key);
+      }
+    };
+    forget(warnedUnresolved);
+    forget(warnedUndelivered);
+    for (const sessionId of [...undeliveredRound.keys()]) {
+      if (!seen.has(sessionId)) undeliveredRound.delete(sessionId);
     }
   };
 
@@ -683,8 +821,18 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
     failuresOf(sessionId: string) {
       return backoff.get(sessionId)?.failures ?? 0;
     },
+    wakesOf(sessionId: string) {
+      return backoff.get(sessionId)?.wakes ?? 0;
+    },
     undeliveredReasons() {
-      return new Map(undelivered);
+      const counts = new Map<string, number>();
+      for (const reasons of undeliveredRound.values()) {
+        for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+      }
+      return counts;
+    },
+    undeliveredTotal() {
+      return new Map(undeliveredTotal);
     },
   };
 }

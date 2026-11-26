@@ -43,7 +43,8 @@ import { DEFAULT_SMART_WINDOW } from './smart-window.js';
 import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { createRuntimeRegistry } from './runtime-registry.js';
 import { createExpirySweeper, resolveScheduledAtFromLog } from './expiry-sweeper.js';
-import { listOwnershipSnapshots } from './ownership-store.js';
+import { allOwnership, listOwnershipSnapshots } from './ownership-store.js';
+import type { OwnedEntry } from './ownership-store.js';
 import { isDueIndex } from './due.js';
 import { isRootAgent, liveRootAgents, readDelegationDepth, readOwnEvents } from './upstream-compat.js';
 import { hostDictFor } from './strings.js';
@@ -507,15 +508,6 @@ export function registerUserScheduleTools(
 interface UserWatch {
   /** sessionId → 最近一次「用户动作」的时刻（epoch ms）。 */
   readonly recent: Map<string, number>;
-  /**
-   * sessionId → 被静默期挡下的到期条目（issue #11b 的修正）。
-   *
-   * 静默期的语义是「别主动去**打开**一个用户刚碰过的会话」，**不是**「到期任务可以不发」。
-   * 把两者混在一起，就成了"有一条到期了，因为它刚被关过，所以谁都不知道它没发"——
-   * 正是本仓一直在清理的那类安静失败。所以挡下来的每一条都在这里留痕，由扫描器取走并
-   * 报成 `undelivered`（原因 `quiet-window`），下次到期重排时重试。
-   */
-  readonly suppressed: Map<string, Set<string>>;
 }
 
 /** 用户动作后的静默期：两个扫描周期（120s）内不**主动**冷唤醒。 */
@@ -532,7 +524,6 @@ const COLD_WAKE_QUIET_MS = 120_000;
 function createUserWatch(): UserWatch {
   return {
     recent: new Map<string, number>(),
-    suppressed: new Map<string, Set<string>>(),
   };
 }
 
@@ -575,7 +566,9 @@ function watchSessionLifecycle(ctx: Context, watch: UserWatch): () => void {
  *     `isRootAgent` 的深度判据回答——见 upstream-compat。）
  *  3. **用户刚动过**（{@link COLD_WAKE_QUIET_MS} 内）：给"我刚关掉，你别又打开"留出静默期。
  *     注意这是**优先级最低**的一条：前两条（子会话 / 非 root）是「叫醒了也投不出去」，
- *     这一条只是「现在别打开」。被它挡下的到期任务必须留痕（见 `UserWatch.suppressed`）。
+ *     这一条只是「现在别打开」，但被它挡下的到期任务**必须留痕**——留痕落在扫描器侧：
+ *     `refuseReason`（接线见 `expiry-sweeper` 的 `wakeable` 旁路）→ `noteRefused` →
+ *     `undeliveredReasons()`（原因 `quiet-window`），下一轮重试。这里没有第二处留痕点。
  * @param ctx - 宿主上下文。
  * @param sessionId - 候选会话。
  * @param watch - 用户动作表。
@@ -614,18 +607,28 @@ export function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | '
  * 为什么用它、而不是问 runtime：真宿主里 `agent.dispose()` 之后内核会把会话日志封口，
  * `foldUserState` 折出来的 `active` 变成 0（实测 0.2.1-rc.2），runtime 于是说不出"到期"。
  * sidecar 是本插件自己写的断点索引，不随会话生命周期变化——它是这个问题唯一可靠的答案。
+ *
+ * ⚠️ **只读这一个会话的文件**（issue #199）。曾经这里走 `listOwnershipSnapshots()`，为了
+ * 回答「这一个会话有没有到期条目」而 readdir + 逐个文件 stat 整个目录——实测 0.86ms/次，
+ * 而单会话读只要 0.005ms/次（172 倍）。这个判据又被两处热路径按会话逐个调用：扫描器的
+ * `wakeable` / `refuseReason`（一轮扫 N 个会话就是 N 次全目录扫），以及
+ * `releaseWokenAgent` 的 50ms × 30s 轮询（最坏 600 次）。冷唤醒收尾期间等于在宿主主循环
+ * 里同步烧掉半秒，而代价随 sidecar 文件数（历史累积）线性增长。
  * @param sessionId - 候选会话。
+ * @param entries - 调用方**已经握着**的本会话条目快照（扫描器把本轮那一份传下来，
+ *   免掉再一次读盘）。不给就按需单会话读。
+ * 导出是为了让测试能直接量「一次判定碰了几个文件」——这条成本正是 issue #199 的本体，
+ * 而它藏在 `releaseWokenAgent` 的轮询里，走装配层量不出来。
  * @returns 存在已过期条目时为 true。
  */
-function hasOverdueEntry(sessionId: string): boolean {
+export function hasOverdueEntry(sessionId: string, entries?: Readonly<Record<string, OwnedEntry>>): boolean {
   try {
-    const snapshot = listOwnershipSnapshots().find((entry) => entry.sessionId === sessionId);
-    if (snapshot === undefined) return false;
     const now = Date.now();
     // 索引面那一版的同一判据（`due.ts`）。⚠️ 不能用 `isDue`：已投递的条目（带消化标记）
     // 在这里不能再算"到期"，否则静默期会让路给一条根本不需要再投的提醒（#139 的另一面）。
     // 时刻缺失/非法一律不算到期，回算在读侧另外那一处做。
-    return Object.values(snapshot.entries).some((entry) => isDueIndex(entry, now));
+    const owned = entries ?? allOwnership(sessionId);
+    return Object.values(owned).some((entry) => isDueIndex(entry, now));
   } catch {
     return false;
   }
@@ -781,10 +784,7 @@ async function wakeColdSession(
   // 这里清掉静默标记是**有意的**：既然本次已经决定唤醒并真的叫起来了，那这条会话就不再是
   // 「用户刚关掉、先别碰」的状态——留着它只会让下一轮扫描继续把它当静默期内的条目挡住。
   // （反过来不成立：`agent/disposed` **不能**一律当成用户动作，见 `createUserWatch`。）
-  if (watch !== undefined) {
-    watch.recent.delete(sessionId);
-    watch.suppressed.delete(sessionId);
-  }
+  if (watch !== undefined) watch.recent.delete(sessionId);
   // 无条件重驱一次。
   //
   // 原实现写成 `if (mounted === undefined) registry.drive(agent)`——但 `mount()` 成功后
@@ -1238,13 +1238,13 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
        * 来的 `active` 是 0（实测），所以"到期"这件事只能由 sidecar 这个断点索引来回答。
        * 被它挡下的条目一律记 `undelivered(quiet-window)`，绝不无声滤掉。
        */
-      wakeable: (sessionId) =>
+      wakeable: (sessionId, entries) =>
         coldWakeRefusal(ctx, sessionId) === undefined &&
-        (!isQuiet(sessionId, userWatch) || hasOverdueEntry(sessionId)),
-      refuseReason: (sessionId) =>
+        (!isQuiet(sessionId, userWatch) || hasOverdueEntry(sessionId, entries)),
+      refuseReason: (sessionId, entries) =>
         coldWakeRefusal(ctx, sessionId) === undefined &&
         isQuiet(sessionId, userWatch) &&
-        !hasOverdueEntry(sessionId)
+        !hasOverdueEntry(sessionId, entries)
           ? 'quiet-window'
           : undefined,
       /**

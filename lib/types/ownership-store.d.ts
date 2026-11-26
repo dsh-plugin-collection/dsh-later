@@ -24,7 +24,7 @@ export interface PausedEntry {
     readonly pausedAt: number;
     readonly attachments?: readonly ScheduledAttachment[];
 }
-export declare function ownershipGeneration(): number;
+export declare function ownershipGeneration(sessionId?: string): number;
 export declare function allOwnership(sessionId: string): Readonly<Record<string, OwnedEntry>>;
 export declare function hasOwnership(sessionId: string, id: string): boolean;
 export declare function getOwnership(sessionId: string, id: string): OwnedEntry | undefined;
@@ -43,4 +43,5 @@ export declare function getPaused(sessionId: string, uid: string): PausedEntry |
 export declare function findPausedByScheduleId(sessionId: string, scheduleId: string): PausedEntry | undefined;
 export declare function recordPaused(sessionId: string, entry: PausedEntry): void;
 export declare function removePaused(sessionId: string, uid: string): void;
+export declare function invalidateCacheForTests(sessionId: string): void;
 export declare function resetCacheForTests(): void;

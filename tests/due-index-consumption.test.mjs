@@ -42,12 +42,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Context } from '@deepseek-ai/cordis';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as plugin from '../lib/index.js';
 import { createExpirySweeper } from '../lib/expiry-sweeper.js';
 import {
   getOwnership,
+  invalidateCacheForTests,
   listOwnershipSnapshots,
   mirrorDueIndex,
   recordOwnership,
@@ -211,6 +212,13 @@ async function shutdown(boot) {
 /** 直接落一份 sidecar JSON（模拟某个版本写下的文件）。 */
 function writeSidecar(sessionId, payload) {
   writeFileSync(join(process.env.DSH_LATER_STATE_DIR, `${sessionId}.json`), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  // ⚠️ 写完必须拨一次缓存（issue #207 的实测教训）：`readFresh` 的判据是
+  // `mtimeMs === cached.mtimeMs && size === cached.size`。同一毫秒内以**同样大小**
+  // 覆写同一个文件时（容器 overlayfs 上 mtime 只有 ms 级），新旧两次 stat 完全相等，
+  // 缓存不会失效 —— 测试于是读到旧内容，用例假红/假绿。真实代码不受影响：同一个进程内
+  // 所有写都走 `writeThrough`（它同时更新缓存），外部改写本来也不在本插件的契约里。
+  // 这条不是"为了测试改实现"：它是**测试夹具**必须做的失效，否则断言测的是缓存不是行为。
+  invalidateCacheForTests(sessionId);
 }
 
 /**
@@ -312,6 +320,128 @@ test('recordOwnership：显式写新时刻就清消化标记（用户改动 = �
   const entry = getOwnership(sessionId, 'schedule-1');
   assert.equal(entry?.dispatchedAt, undefined, '写了新时刻必须解除消化状态');
   assert.equal(entry?.scheduledAt, now + 30_000);
+});
+
+// ── 1c. 有界清理：投完的条目有过期删除、空文件会消失（issue #207）──────────
+
+/**
+ * 条目投递后只打标记、永不摘除是 #139 修法的**刻意取舍**（`rearmOneShot` 在 dispatch 之后
+ * 还要按 id 回读 uid / windowSeconds / attachments），但它没有 TTL：一条长期会话每建一条
+ * 提醒就永久多一行。本机实测 `~/.dsh/plugin-state/later` 454 条里 103 条（22.7%）是这种
+ * 死重，而 `foldUserState` 把这些 id 全塞进 `owned`、投影 `init` 同样全收、`apply` 又对每个
+ * 事件跑一次 `owned.includes(...)` ⇒ 会话寿命内 fold 退化 O(n²)。
+ *
+ * 现在只摘「早已消化」的（`PRUNE_CONSUMED_AFTER_MS = 60s`，远大于同一次派发里
+ * 「append dispatch → reconcileDueIndex → rearmOneShot 回读」那一整段同步块）。
+ */
+test('mirrorDueIndex：早已消化的条目在下一次镜像时被摘除，该会话仍能建新提醒（#207）', () => {
+  freshOwnershipDir();
+  const sessionId = 'session-prune';
+  const now = Date.now();
+  // 三种条目摆在一份索引里：超期已消化（该摘）、刚消化（rearm 回读窗口内，该留）、
+  // 仍在 active 的 `every`（绝不能被当成死条目）。
+  writeSidecar(sessionId, {
+    version: 3,
+    entries: {
+      'schedule-old': { delivery: 'context', createdAt: now - 7200_000, uid: 'uid-old', scheduledAt: now - 7200_000, dispatchedAt: now - 61_000 },
+      'schedule-fresh': { delivery: 'context', createdAt: now - 1000, uid: 'uid-fresh', scheduledAt: now - 1000, dispatchedAt: now - 10 },
+      'schedule-every': { delivery: 'context', createdAt: now - 1000, uid: 'uid-every', scheduledAt: now + 120_000 },
+    },
+    paused: {},
+  });
+
+  // 一轮镜像：`targets` 只含仍在 active 的那条。清理跟着这一轮一起跑。
+  const changed = mirrorDueIndex(sessionId, new Map([['schedule-every', now + 120_000]]));
+  assert.equal(changed, 1, `本次镜像应当正好摘除一条超期条目，实测改动 ${changed}`);
+  assert.equal(getOwnership(sessionId, 'schedule-old'), undefined, '61s 前投完的条目必须被摘掉');
+  assert.equal(typeof getOwnership(sessionId, 'schedule-fresh')?.dispatchedAt, 'number', '刚投完的必须留着（rearm 回读窗口）');
+  assert.equal(typeof getOwnership(sessionId, 'schedule-every')?.scheduledAt, 'number', '仍在 active 的 every 绝不能被摘');
+  assert.equal(getOwnership(sessionId, 'schedule-every')?.dispatchedAt, undefined, 'every 不是"已消化"');
+
+  // 摘掉不等于这个会话语义受损：它仍然能建新提醒、新条目照常进索引。
+  recordOwnership(sessionId, 'schedule-next', 'context', 'uid-next', undefined, undefined, now - 1000);
+  assert.equal(typeof getOwnership(sessionId, 'schedule-next')?.scheduledAt, 'number', '清理之后该会话仍可正常建条目');
+  assert.equal(mirrorDueIndex(sessionId, new Map([['schedule-next', undefined]])), 1, '新条目仍能被正常镜像');
+});
+
+test('mirrorDueIndex：条目清空后 sidecar 文件本身被删除（空文件永不累积，#207）', () => {
+  freshOwnershipDir();
+  const sessionId = 'session-empty-file';
+  const now = Date.now();
+  const path = join(process.env.DSH_LATER_STATE_DIR, `${sessionId}.json`);
+  recordOwnership(sessionId, 'schedule-1', 'context', 'uid-1', undefined, undefined, now - 5000);
+  assert.equal(existsSync(path), true, '前置：文件先得在');
+  mirrorDueIndex(sessionId, new Map([['schedule-1', undefined]]));
+  // 把标记推回保留期之外，下一次镜像就会把它摘掉 ⇒ 文件里一条不剩 ⇒ 文件该消失。
+  const entry = getOwnership(sessionId, 'schedule-1');
+  writeSidecar(sessionId, { version: 3, entries: { 'schedule-1': { ...entry, dispatchedAt: now - 61_000 } }, paused: {} });
+  mirrorDueIndex(sessionId, new Map());
+  assert.equal(existsSync(path), false, '条目清空的 sidecar 文件必须被删掉（否则每轮扫描白付一次 statSync）');
+  assert.equal(getOwnership(sessionId, 'schedule-1'), undefined);
+  // 删掉之后仍可重建（清理不是单向门）。
+  recordOwnership(sessionId, 'schedule-2', 'context', 'uid-2', undefined, undefined, now + 60_000);
+  assert.equal(existsSync(path), true, '文件删掉之后该会话仍能重新落盘');
+});
+
+// ── 1b. 单会话读取（issue #199）────────────────────────────────────────────
+
+/**
+ * 「这一个会话有没有到期条目」必须只读这一个会话的文件。
+ *
+ * 缺陷形状（issue #199）：`hasOverdueEntry` 走 `listOwnershipSnapshots()`，为回答一条会话
+ * 的问题付整个目录的代价（`readdirSync` + 每个 `.json` 的 `statSync`）。实测 0.86ms/次 vs
+ * 单会话读 0.005ms/次（172 倍），而这个判据被两处热路径按会话逐个调用——扫描器的
+ * `wakeable`/`refuseReason`（一轮 N 个会话就是 N 次全目录扫）与 `releaseWokenAgent` 的
+ * 50ms × 30s 轮询（最坏 600 次）。冷唤醒收尾期间等于在宿主主循环里同步烧掉半秒。
+ *
+ * 判据用**调用次数**而不是耗时（毫秒断言在 CI 上必然抖）：修复后一次判定最多碰一次
+ * `statSync`（`readFresh` 校验缓存后的那一发），且**一次 `readdirSync` 都没有**。
+ * 修复前这两个数分别是 `1 + 文件数` 与 `1`，所以这条用例在修复前必红。
+ *
+ * 为什么要打 `node:fs` 的桩而不是量时间：`lib/ownership-store.js` 是 `import { statSync }
+ * from 'node:fs'` 的**具名绑定**，直接改 `fs.statSync` 对已加载的 ESM 不可见；必须先
+ * `syncBuiltinESMExports()` 把内置模块的导出重绑一次（实测有效，见用例）。
+ */
+test('hasOverdueEntry：只读本会话的 sidecar，不做全目录枚举（#199）', async () => {
+  freshOwnershipDir();
+  const { syncBuiltinESMExports } = await import('node:module');
+  const fs = (await import('node:fs')).default;
+
+  // 目录里塞 40 个别的会话，让"全目录扫"与"单会话读"在调用次数上必然拉开距离。
+  const now = Date.now();
+  for (let index = 0; index < 40; index += 1) {
+    recordOwnership(`session-other-${index}`, 'schedule-1', 'context', `uid-${index}`, undefined, undefined, now + 60_000);
+  }
+  recordOwnership('session-target', 'schedule-1', 'context', 'uid-target', undefined, undefined, now - 5000);
+
+  const originalStat = fs.statSync;
+  const originalReaddir = fs.readdirSync;
+  let stats = 0;
+  let readdirs = 0;
+  fs.statSync = (...args) => {
+    stats += 1;
+    return originalStat(...args);
+  };
+  fs.readdirSync = (...args) => {
+    readdirs += 1;
+    return originalReaddir(...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    // 前置：目标会话确实有一条已过期条目，判据必须答"是"（否则下面数到 0 次调用是无意义的）。
+    assert.equal(plugin.hasOverdueEntry('session-target'), true, '判据本身必须仍然正确');
+    assert.equal(stats <= 2, true, `一次判定最多碰一个文件的 stat：实测 ${stats} 次`);
+    assert.equal(readdirs, 0, `单会话判定不得枚举目录：实测 readdirSync ${readdirs} 次`);
+    // 已消化的条目不算到期（#139 的另一面）：换个带消化标记的会话，答案必须是"否"。
+    recordOwnership('session-target-consumed', 'schedule-1', 'context', 'uid-c', undefined, undefined, now - 5000);
+    mirrorDueIndex('session-target-consumed', new Map([['schedule-1', undefined]]));
+    assert.equal(plugin.hasOverdueEntry('session-target-consumed'), false, '已消化不算到期');
+    assert.equal(plugin.hasOverdueEntry('session-absent'), false, '没有文件的会话按"没有到期条目"处理');
+  } finally {
+    fs.statSync = originalStat;
+    fs.readdirSync = originalReaddir;
+    syncBuiltinESMExports();
+  }
 });
 
 // ── 2. 扫描器层：退避、gaveUp 与三条解除路径（假时钟，可精确驱动）──────────

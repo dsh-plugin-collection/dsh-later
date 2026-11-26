@@ -283,9 +283,26 @@ const cache = new Map<string, CacheRow>();
  */
 let sidecarGeneration = 0;
 
-/** 当前 sidecar 变更代数；与上一次读取不同，说明所有权/留档可能已变。 */
-export function ownershipGeneration(): number {
-  return sidecarGeneration;
+/**
+ * 会话 → 该会话 sidecar 的变更代数（issue #207）。
+ *
+ * 旧实现只有一个**进程全局**的计数器（本段注释自己承认）：任一会话写 sidecar 会让所有
+ * 会话的 fold 缓存作废。修 #139 之前这不算大问题——写 sidecar 只发生在用户改动提醒时。
+ * 但 `mirrorDueIndex` 把 sidecar 变成了**每次投递都写**的东西，于是时序变成确定的：
+ * 会话 A 投递一次，会话 B 下一次 drive 的 fold 缓存必然 miss，白折一遍全量日志（会话越多
+ * 越贵，且全是同步 IO）。改成按会话记账后，A 的投递只作废 A 自己的缓存。
+ */
+const sessionGenerations = new Map<string, number>();
+
+/**
+ * 某个会话的 sidecar 变更代数；与上一次读取不同，说明**这个会话**的所有权/留档可能已变。
+ * @param sessionId - 会话 id。取不到时退回进程全局计数（调用方拿不到会话的场景：
+ *   广播式失效，语义与旧实现一致，不会漏失效）。
+ * @returns 单调递增的代数。
+ */
+export function ownershipGeneration(sessionId?: string): number {
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return sidecarGeneration;
+  return sessionGenerations.get(sessionId) ?? 0;
 }
 
 function readFresh(sessionId: string): OwnershipFile {
@@ -399,7 +416,12 @@ function writeThrough(sessionId: string, file: OwnershipFile): void {
   cache.set(sessionId, { mtimeMs: stat.mtimeMs, size: stat.size, file });
   // 每一次落盘都拨一代：读侧（foldUserState 的缓存）据此知道所有权可能已变，
   // 即使会话日志一条都没加。四个 mutation 入口都汇到这里，所以只需在这一处加。
+  //
+  // 按会话拨（issue #207）：全局那一枚仍然保留并一起递增——它只管"拿不到 sessionId 的
+  // 调用方"（广播式失效），不会漏；而拿到 sessionId 的读侧只看自己那一枚，于是会话 A
+  // 的投递不再作废会话 B 的 fold 缓存。
   sidecarGeneration += 1;
+  sessionGenerations.set(sessionId, (sessionGenerations.get(sessionId) ?? 0) + 1);
 }
 
 function safeName(sessionId: string): string {
@@ -552,6 +574,21 @@ export function removeOwnership(sessionId: string, id: string): void {
 }
 
 /**
+ * 已消化条目的保留期：过了这个窗口就从索引里摘掉（issue #207）。
+ *
+ * 为什么**不能**在投递那一刻就删（#139 的修法选了"只标记、不出列"）：同一次派发里，
+ * `rearmOneShot` 在 dispatch 之后还要按 id 回读这条的 `uid` / `windowSeconds` /
+ * `attachments`——删早了，`every` 重排与一次性重挂就失去稳定身份。60s 远大于
+ * 「append dispatch → reconcileDueIndex → rearmOneShot 回读」这一整段同步块（毫秒级），
+ * 也远小于"下次有人再看这份索引"的量级，于是它既不会撞上回读，也不会永远堆着。
+ *
+ * 摘掉之后侧写文件里若一条不剩，`mirrorDueIndex` 会顺手把文件删掉（见那边的注释）：
+ * 空文件既让扫描轮的 `statSync` 白付，也会在 `listOwnershipSnapshots` 里被跳过——
+ * 留着它的唯一作用是让 `readdirSync` 的结果越来越长。
+ */
+const PRUNE_CONSUMED_AFTER_MS = 60_000;
+
+/**
  * 把 fold 的端态镜像进索引面（issue #139 的唯一写入口）。
  *
  * ## 为什么需要一个专门的镜像函数
@@ -582,8 +619,11 @@ export function mirrorDueIndex(
   sessionId: string,
   targets: ReadonlyMap<string, number | undefined>,
 ): number {
-  if (typeof sessionId !== 'string' || sessionId.length === 0 || targets.size === 0) return 0;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return 0;
   const file = readFresh(sessionId);
+  // ⚠️ 空 `targets` 不再早退（issue #207）：空文件删除正落在"这个会话此刻没有任何要镜像
+  // 的条目"那一支上。早退会让空 sidecar 永远留着（实测本机 26 个：`listOwnershipSnapshots`
+  // 跳过它们，但每一轮扫描仍各付一次 `statSync`，而它们只会在磁盘上越积越多）。
   const entries: Record<string, OwnedEntry> = { ...file.entries };
   let changed = 0;
   for (const [id, target] of targets) {
@@ -605,8 +645,43 @@ export function mirrorDueIndex(
     entries[id] = { ...rest, scheduledAt: safe };
     changed += 1;
   }
+  // 有界清理（issue #207）：条目只打标记、永不摘除，于是 D2 的代价从"一次"变成"永久"——
+  // 一条长期会话每建一条提醒就永久多一行，本机实测 454 条里 103 条（22.7%）是已经投完的
+  // 死重，而 `foldUserState` 把这些 id 全塞进 `owned`、投影 `init` 同样全收，`apply` 又对
+  // 每个事件跑一次 `owned.includes(...)` ⇒ 会话寿命内 fold 退化 O(n²)。
+  //
+  // 只摘「早已消化」的：仍在 active 的 `every` 条目 `dispatchedAt` 会被下一次派发清掉
+  // （`recordOwnership` 的显式 `scheduledAt` 规则），所以它们永远进不了这一支。
+  const cutoff = Date.now() - PRUNE_CONSUMED_AFTER_MS;
+  let pruned = 0;
+  for (const [id, entry] of Object.entries(entries)) {
+    const dispatchedAt = validTimestamp(entry.dispatchedAt);
+    if (dispatchedAt === undefined || dispatchedAt >= cutoff) continue;
+    delete entries[id];
+    pruned += 1;
+  }
+  changed += pruned;
+  const paused = file.paused ?? {};
+  if (Object.keys(entries).length === 0 && Object.keys(paused).length === 0) {
+    // 一条不剩（而且没有暂停留档）⇒ 文件本身就是死重：`listOwnershipSnapshots` 会跳过它，
+    // 但每一轮扫描仍要为它付一次 `statSync`，而它永远不会再长回内容（实测本机 26 个）。
+    //
+    // 删之前**不再**写一份空表：那会多一次 rename + 一次 `sidecarGeneration`，而文件马上
+    // 就要没了，那一代没有任何读者受益。并发面靠 `existsSync` 这一发收住——只在文件真的
+    // 还在时才删，而不是"删完等下一次写重建"（同进程单线程，跨进程的另一个宿主 rename
+    // 上来的是非空内容，`isEmpty` 就不成立了）。
+    if (existsSync(fileOf(sessionId))) {
+      try {
+        unlinkSync(fileOf(sessionId));
+        cache.delete(sessionId);
+      } catch {
+        /* 删不掉不影响语义（文件已空），下一轮还会再试。 */
+      }
+    }
+    return changed;
+  }
   if (changed === 0) return 0;
-  writeThrough(sessionId, { version: CURRENT_VERSION, entries, paused: file.paused ?? {} });
+  writeThrough(sessionId, { version: CURRENT_VERSION, entries, paused });
   return changed;
 }
 
@@ -661,8 +736,25 @@ export function removePaused(sessionId: string, uid: string): void {
   writeThrough(sessionId, { version: CURRENT_VERSION, entries: file.entries, paused });
 }
 
+/**
+ * 测试辅助：只拨一个会话的缓存（不删文件）。
+ *
+ * 为什么需要它：`readFresh` 的失效判据是 `mtimeMs === … && size === …`。同一毫秒内以
+ * **同样大小**覆写同一个文件时（容器 overlayfs 的 mtime 只有 ms 级，实测两次 stat 完全
+ * 相等），缓存不会失效 —— 直接 `writeFileSync` 造 sidecar 的测试会读到旧内容。真实路径
+ * 不受影响：进程内所有写都走 `writeThrough`（它同步更新缓存），外部改写不在本插件契约
+ * 里。所以这是**夹具**需要的口子，不是运行期语义（运行期不该有人手动拨缓存）。
+ * @param sessionId - 要失效的会话。
+ */
+export function invalidateCacheForTests(sessionId: string): void {
+  cache.delete(sessionId);
+}
+
 /** 测试辅助：清空进程内缓存（不删文件）。 */
 export function resetCacheForTests(): void {
   cache.clear();
   cachedDir = undefined;
+  // 代数也一并清（issue #207 之后它是按会话的 Map，跨用例残留会让"改了 sidecar 就必须
+  // 失效"那条断言在下一轮假绿：旧值比新值大，读侧以为没变）。
+  sessionGenerations.clear();
 }

@@ -646,17 +646,25 @@ export class UserScheduleRuntime {
    *
    * @returns 实际改动的条目数（`0` = 索引本来就和 fold 一致，没碰磁盘）。
    */
-  private reconcileDueIndex(): number {
+  private reconcileDueIndex(activeByIdHint?: ReadonlyMap<string, ScheduleRecord>): number {
     const sessionId = this.agent.session.header?.id;
     if (typeof sessionId !== 'string' || sessionId.length === 0) return 0;
     let targets: Map<string, number | undefined>;
     try {
-      const active = foldUserState(this.agent.session).folded.active;
+      // 调用方**已经折过**时把它传进来（issue #207）：`driveOnce` 与维护事务各自刚折完
+      // 一份全量日志，这里再折就是第三/第四趟。折是同步 IO，一次派发里 2–4 趟全量遍历
+      // （`foldScheduleEvents` + `foldOwnedIds` + `foldOwnedDelivery`）是纯浪费。
+      //
+      // ⚠️ 判据来源不变：只有"日志里仍 active 的那些"与"索引里的 id"参与镜像，端态还是
+      // 取自同一份 fold 结果——换个来源会让 #139 的三态判定与这里分叉。
+      const active = activeByIdHint === undefined
+        ? foldUserState(this.agent.session).folded.active
+        : undefined;
       // 键写成裸 `string`：`record.id` 是 `ScheduleId` 品牌类型，而 sidecar 的键是磁盘上的
       // 普通字符串（`allOwnership` 返回 `Record<string, …>`）。品牌只在本仓类型层存在，
       // 运行时两边都是同一个 id；不做这层收窄就得在每个调用点 `ScheduleId(...)` 一次。
-      const activeById = new Map<string, ScheduleRecord>(
-        active.map((record) => [record.id as string, record]),
+      const activeById = activeByIdHint ?? new Map<string, ScheduleRecord>(
+        (active ?? []).map((record) => [record.id as string, record]),
       );
       targets = new Map<string, number | undefined>();
       for (const id of Object.keys(allOwnership(sessionId))) {
@@ -715,7 +723,11 @@ export class UserScheduleRuntime {
      * 消化标记的条目」补上的时机。不加这一处，那种条目会让扫描器每次兜底 tick 都白拉一次
      * 会话（拉起来又什么都投不出去），而用户看到的是一条早就发过的提醒反复叫醒会话。
      */
-    this.reconcileDueIndex();
+    // 复用上面刚折出来的那一份（issue #207）：`active` 是 `fold` 的 `active` 再按 `owned`
+    // 过滤的结果，与 `reconcileDueIndex` 内部要的判据同一个口径，没必要再折一趟。
+    this.reconcileDueIndex(
+      new Map<string, ScheduleRecord>(active.map((record) => [record.id as string, record])),
+    );
 
     if (decision.kind === 'wait') {
       if (decision.target !== undefined) this.arm(decision.target, now);
@@ -778,6 +790,10 @@ export class UserScheduleRuntime {
          * 宽限期只有 250ms——窗口里条目在索引上仍然"到期且未消化"，一次成功的唤醒就会被
          * 记成一次失败。留痕的口径也与日志一致：这里读的是刚 append 过 dispatch 的同一份
          * 日志，一次性已出列、`every` 已推进。
+         *
+         * 这里必须**重新折**（不能沿用 `claimed`）：上面刚 append 过 dispatch，一次性已出列、
+         * `every` 已推进到下一次，镜像的端态只能来自这份新结果。这是 `driveOnce` 一轮里
+         * 唯一不能省的那一趟（issue #207 把另外两趟合并掉了，这一趟留着是判据本身）。
          */
         this.reconcileDueIndex();
         return Promise.resolve(true);
