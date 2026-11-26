@@ -110,8 +110,14 @@ export interface ExpirySweeperOptions {
    * 因为投递本身是异步的（followup + 确认窗口）。这里只要求**不抛**：抛错计入失败次数。
    */
   wake(sessionId: string): void | Promise<void>;
-  /** 这个会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。 */
-  wakeable(sessionId: string): boolean;
+  /**
+   * 这个会话是否允许被唤醒（被委托子会话 / 非 root 一律 false，理由见 `wakeable`）。
+   *
+   * @param entries - 本轮快照里这个会话的条目（`snapshots()` 已经读过的那一份）。接线侧
+   *   用它回答「有没有已过期条目」，**不要**为同一个问题再扫一次 sidecar 目录
+   *   （issue #199：一轮扫 N 个会话就是 N 次全目录 readdir + stat）。
+   */
+  wakeable(sessionId: string, entries: Readonly<Record<string, OwnedEntry>>): boolean;
   /**
    * 可选：`wakeable` 返回 false 时，给出**软拒绝**的原因（例如 `quiet-window`）。
    *
@@ -119,7 +125,7 @@ export interface ExpirySweeperOptions {
    * 而不是当成一次失败去退避。返回 undefined = 硬拒绝（叫醒也没用），本轮静默跳过。
    * 没有这个旁路时，"暂缓"与"永远投不出去"在观测上无法区分——前者会被后者拖成假告警。
    */
-  refuseReason?(sessionId: string): string | undefined;
+  refuseReason?(sessionId: string, entries: Readonly<Record<string, OwnedEntry>>): string | undefined;
   /**
    * 给老条目（v1/v2，缺 `scheduledAt`）回算到期时刻。
    * @returns 回算不出来时 `undefined`（扫描器据此**保守跳过**，不猜）。
@@ -443,7 +449,7 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
    */
   const poll = (snapshot: SweepSnapshot, at: number): void => {
     const sessionId = snapshot.sessionId;
-    if (!options.wakeable(sessionId)) return;
+    if (!options.wakeable(sessionId, snapshot.entries)) return;
     const state = backoff.get(sessionId);
     if (state !== undefined && (state.gaveUp || at < state.nextAttempt)) return;
     // 记下"刚尝试过"。`attemptAt` 是这一次尝试的起点，`reschedule` 用它算"还要等多久"。
@@ -533,8 +539,12 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
    * - 没给原因 ⇒ 硬拒绝（子会话 / 非 root），静默跳过（枚举层通常已经摘掉了它们）。
    * @returns true 表示本轮已处理完（不要再 poll）。
    */
-  const noteRefused = (sessionId: string, at: number): boolean => {
-    const reason = options.refuseReason?.(sessionId);
+  const noteRefused = (
+    sessionId: string,
+    at: number,
+    entries: Readonly<Record<string, OwnedEntry>>,
+  ): boolean => {
+    const reason = options.refuseReason?.(sessionId, entries);
     if (reason === undefined) return false;
     const key = `${sessionId}/${reason}`;
     undelivered.set(reason, (undelivered.get(reason) ?? 0) + 1);
@@ -569,11 +579,14 @@ export function createExpirySweeper(options: ExpirySweeperOptions): ExpirySweepe
       if (stopped) return;
       seen.add(snapshot.sessionId);
       if (settle(snapshot, at) !== 'poll') continue;
-      if (options.wakeable(snapshot.sessionId)) {
+      // 判定只问一次：`wakeable` 与 `noteRefused` 都要「这个会话的条目」，两处各扫一遍
+      // sidecar 目录就是每条到期提醒付两份全目录 IO（issue #199 的另一半）。
+      const entries = snapshot.entries;
+      if (options.wakeable(snapshot.sessionId, entries)) {
         poll(snapshot, at);
         continue;
       }
-      noteRefused(snapshot.sessionId, at);
+      noteRefused(snapshot.sessionId, at, entries);
     }
     pruneUnseen(seen);
     reschedule();

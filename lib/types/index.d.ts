@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type z from '@deepseek-ai/schemastery';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { name } from './domain.js';
+import type { OwnedEntry } from './ownership-store.js';
 export declare const Config: z;
 export declare const inject: string[];
 export interface SchedulerSettings {
@@ -23,6 +24,7 @@ interface UserWatch {
 }
 export declare function canWakeColdSession(ctx: Context, sessionId: string, watch?: UserWatch): boolean;
 export declare function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | 'not-root' | undefined;
+export declare function hasOverdueEntry(sessionId: string, entries?: Readonly<Record<string, OwnedEntry>>): boolean;
 export declare function apply(ctx: Context, config?: {
     maxSchedules?: number;
 }): void;

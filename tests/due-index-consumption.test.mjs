@@ -314,6 +314,67 @@ test('recordOwnership：显式写新时刻就清消化标记（用户改动 = �
   assert.equal(entry?.scheduledAt, now + 30_000);
 });
 
+// ── 1b. 单会话读取（issue #199）────────────────────────────────────────────
+
+/**
+ * 「这一个会话有没有到期条目」必须只读这一个会话的文件。
+ *
+ * 缺陷形状（issue #199）：`hasOverdueEntry` 走 `listOwnershipSnapshots()`，为回答一条会话
+ * 的问题付整个目录的代价（`readdirSync` + 每个 `.json` 的 `statSync`）。实测 0.86ms/次 vs
+ * 单会话读 0.005ms/次（172 倍），而这个判据被两处热路径按会话逐个调用——扫描器的
+ * `wakeable`/`refuseReason`（一轮 N 个会话就是 N 次全目录扫）与 `releaseWokenAgent` 的
+ * 50ms × 30s 轮询（最坏 600 次）。冷唤醒收尾期间等于在宿主主循环里同步烧掉半秒。
+ *
+ * 判据用**调用次数**而不是耗时（毫秒断言在 CI 上必然抖）：修复后一次判定最多碰一次
+ * `statSync`（`readFresh` 校验缓存后的那一发），且**一次 `readdirSync` 都没有**。
+ * 修复前这两个数分别是 `1 + 文件数` 与 `1`，所以这条用例在修复前必红。
+ *
+ * 为什么要打 `node:fs` 的桩而不是量时间：`lib/ownership-store.js` 是 `import { statSync }
+ * from 'node:fs'` 的**具名绑定**，直接改 `fs.statSync` 对已加载的 ESM 不可见；必须先
+ * `syncBuiltinESMExports()` 把内置模块的导出重绑一次（实测有效，见用例）。
+ */
+test('hasOverdueEntry：只读本会话的 sidecar，不做全目录枚举（#199）', async () => {
+  freshOwnershipDir();
+  const { syncBuiltinESMExports } = await import('node:module');
+  const fs = (await import('node:fs')).default;
+
+  // 目录里塞 40 个别的会话，让"全目录扫"与"单会话读"在调用次数上必然拉开距离。
+  const now = Date.now();
+  for (let index = 0; index < 40; index += 1) {
+    recordOwnership(`session-other-${index}`, 'schedule-1', 'context', `uid-${index}`, undefined, undefined, now + 60_000);
+  }
+  recordOwnership('session-target', 'schedule-1', 'context', 'uid-target', undefined, undefined, now - 5000);
+
+  const originalStat = fs.statSync;
+  const originalReaddir = fs.readdirSync;
+  let stats = 0;
+  let readdirs = 0;
+  fs.statSync = (...args) => {
+    stats += 1;
+    return originalStat(...args);
+  };
+  fs.readdirSync = (...args) => {
+    readdirs += 1;
+    return originalReaddir(...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    // 前置：目标会话确实有一条已过期条目，判据必须答"是"（否则下面数到 0 次调用是无意义的）。
+    assert.equal(plugin.hasOverdueEntry('session-target'), true, '判据本身必须仍然正确');
+    assert.equal(stats <= 2, true, `一次判定最多碰一个文件的 stat：实测 ${stats} 次`);
+    assert.equal(readdirs, 0, `单会话判定不得枚举目录：实测 readdirSync ${readdirs} 次`);
+    // 已消化的条目不算到期（#139 的另一面）：换个带消化标记的会话，答案必须是"否"。
+    recordOwnership('session-target-consumed', 'schedule-1', 'context', 'uid-c', undefined, undefined, now - 5000);
+    mirrorDueIndex('session-target-consumed', new Map([['schedule-1', undefined]]));
+    assert.equal(plugin.hasOverdueEntry('session-target-consumed'), false, '已消化不算到期');
+    assert.equal(plugin.hasOverdueEntry('session-absent'), false, '没有文件的会话按"没有到期条目"处理');
+  } finally {
+    fs.statSync = originalStat;
+    fs.readdirSync = originalReaddir;
+    syncBuiltinESMExports();
+  }
+});
+
 // ── 2. 扫描器层：退避、gaveUp 与三条解除路径（假时钟，可精确驱动）──────────
 
 /**

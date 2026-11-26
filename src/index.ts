@@ -43,7 +43,8 @@ import { DEFAULT_SMART_WINDOW } from './smart-window.js';
 import { checkKernelIdentityAtStartup } from './kernel-identity.js';
 import { createRuntimeRegistry } from './runtime-registry.js';
 import { createExpirySweeper, resolveScheduledAtFromLog } from './expiry-sweeper.js';
-import { listOwnershipSnapshots } from './ownership-store.js';
+import { allOwnership, listOwnershipSnapshots } from './ownership-store.js';
+import type { OwnedEntry } from './ownership-store.js';
 import { isDueIndex } from './due.js';
 import { isRootAgent, liveRootAgents, readDelegationDepth, readOwnEvents } from './upstream-compat.js';
 import { hostDictFor } from './strings.js';
@@ -614,18 +615,28 @@ export function coldWakeRefusal(ctx: Context, sessionId: string): 'subagent' | '
  * 为什么用它、而不是问 runtime：真宿主里 `agent.dispose()` 之后内核会把会话日志封口，
  * `foldUserState` 折出来的 `active` 变成 0（实测 0.2.1-rc.2），runtime 于是说不出"到期"。
  * sidecar 是本插件自己写的断点索引，不随会话生命周期变化——它是这个问题唯一可靠的答案。
+ *
+ * ⚠️ **只读这一个会话的文件**（issue #199）。曾经这里走 `listOwnershipSnapshots()`，为了
+ * 回答「这一个会话有没有到期条目」而 readdir + 逐个文件 stat 整个目录——实测 0.86ms/次，
+ * 而单会话读只要 0.005ms/次（172 倍）。这个判据又被两处热路径按会话逐个调用：扫描器的
+ * `wakeable` / `refuseReason`（一轮扫 N 个会话就是 N 次全目录扫），以及
+ * `releaseWokenAgent` 的 50ms × 30s 轮询（最坏 600 次）。冷唤醒收尾期间等于在宿主主循环
+ * 里同步烧掉半秒，而代价随 sidecar 文件数（历史累积）线性增长。
  * @param sessionId - 候选会话。
+ * @param entries - 调用方**已经握着**的本会话条目快照（扫描器把本轮那一份传下来，
+ *   免掉再一次读盘）。不给就按需单会话读。
+ * 导出是为了让测试能直接量「一次判定碰了几个文件」——这条成本正是 issue #199 的本体，
+ * 而它藏在 `releaseWokenAgent` 的轮询里，走装配层量不出来。
  * @returns 存在已过期条目时为 true。
  */
-function hasOverdueEntry(sessionId: string): boolean {
+export function hasOverdueEntry(sessionId: string, entries?: Readonly<Record<string, OwnedEntry>>): boolean {
   try {
-    const snapshot = listOwnershipSnapshots().find((entry) => entry.sessionId === sessionId);
-    if (snapshot === undefined) return false;
     const now = Date.now();
     // 索引面那一版的同一判据（`due.ts`）。⚠️ 不能用 `isDue`：已投递的条目（带消化标记）
     // 在这里不能再算"到期"，否则静默期会让路给一条根本不需要再投的提醒（#139 的另一面）。
     // 时刻缺失/非法一律不算到期，回算在读侧另外那一处做。
-    return Object.values(snapshot.entries).some((entry) => isDueIndex(entry, now));
+    const owned = entries ?? allOwnership(sessionId);
+    return Object.values(owned).some((entry) => isDueIndex(entry, now));
   } catch {
     return false;
   }
@@ -1238,13 +1249,13 @@ export function apply(ctx: Context, config?: { maxSchedules?: number }): void {
        * 来的 `active` 是 0（实测），所以"到期"这件事只能由 sidecar 这个断点索引来回答。
        * 被它挡下的条目一律记 `undelivered(quiet-window)`，绝不无声滤掉。
        */
-      wakeable: (sessionId) =>
+      wakeable: (sessionId, entries) =>
         coldWakeRefusal(ctx, sessionId) === undefined &&
-        (!isQuiet(sessionId, userWatch) || hasOverdueEntry(sessionId)),
-      refuseReason: (sessionId) =>
+        (!isQuiet(sessionId, userWatch) || hasOverdueEntry(sessionId, entries)),
+      refuseReason: (sessionId, entries) =>
         coldWakeRefusal(ctx, sessionId) === undefined &&
         isQuiet(sessionId, userWatch) &&
-        !hasOverdueEntry(sessionId)
+        !hasOverdueEntry(sessionId, entries)
           ? 'quiet-window'
           : undefined,
       /**
