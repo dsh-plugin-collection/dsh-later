@@ -26,6 +26,11 @@
  * badge 元素带 `.ss-presence` 类，全部状态用 data-state 表达；React 重渲染
  * 移除注入节点时由 MutationObserver 重插。
  *
+ * 时钟风格（issue #200）：badge 的 SVG 是**一次性注入**的字符串（`innerHTML`），
+ * 风格只在那一次求值。所以插入时把风格写进 `data-icon`，对账分支发现它变了就
+ * 重画 —— 并让 `settings.subscribe` 也走同一条扫描路径。没有这两条，用户改完
+ * 设置必须刷新页面才看得到新 glyph（badge 不进 React 树，没人会替它重渲染）。
+ *
  * ## 悬浮卡片状态区增补（issue #4）
  *
  * 行内 badge 与宿主悬浮卡片数据源不一致：卡片正文由宿主 `sessionStatuses`
@@ -87,6 +92,20 @@ export interface PresenceLocaleLike {
   subscribe(fn: () => void): () => void;
 }
 
+/**
+ * 设置面的**订阅子集**（两代轨道形状一致：`settingsScope` 与 `configForms` 都有
+ * `getSnapshot` / `subscribe`）。
+ *
+ * 本模块只订阅、不读快照：风格值经 {@link SessionPresenceOptions.getClockIconStyle}
+ * 现读，这里唯一的职责是「设置保存后立刻重扫一次」。
+ */
+export interface PresenceSettingsLike {
+  subscribe(fn: () => void): () => void;
+}
+
+/** 时钟图标风格的设置取值（`auto` 由宿主代次决定，见 index.tsx 的探测）。 */
+export type ClockIconStyle = 'auto' | 'modern' | 'classic';
+
 export interface SessionPresenceOptions {
   /**
    * 定时摘要 store（`src/schedule-summary-store.ts`）。本模块**不再**自己读
@@ -96,7 +115,16 @@ export interface SessionPresenceOptions {
   readonly summary: ScheduleSummaryStore;
   readonly locale?: PresenceLocaleLike;
   /** 获取时钟图标风格的函数（支持动态获取最新设置）。 */
-  readonly getClockIconStyle?: () => 'auto' | 'modern' | 'classic';
+  readonly getClockIconStyle?: () => ClockIconStyle;
+  /**
+   * 设置保存后的重扫信号（可选）。
+   *
+   * 时钟风格只影响已注入 badge 的 innerHTML（见 {@link applyBadge}），而 badge 是
+   * 一次性注入的 DOM，不会因为设置变化自己重画——没有这条订阅时，用户切了风格要刷新
+   * 页面才看得到（#200）。`locale` 那条订阅是同一形状的先例：**设置与语言都是
+   * 「输入变了、输出要重算」**，归同一条路径。
+   */
+  readonly settings?: PresenceSettingsLike;
 }
 
 /** badge 类名（本插件命名空间，绝不复用宿主类名）。 */
@@ -375,11 +403,15 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     return () => undefined;
   }
 
-  // 根据设置选择 SVG：auto 时默认使用新版（modern），后续可接入版本检测
-  const getClockSvg = (): string => {
-    const style = getClockIconStyle?.() ?? 'auto';
-    return style === 'classic' ? CLOCK_SVG_CLASSIC : CLOCK_SVG_MODERN;
-  };
+  /**
+   * 当前渲染用的时钟风格。`auto` 在 index.tsx 里已按宿主代次解析成具体值；这里再兜一次，
+   * 让「调用方给了 auto / 没给」都落到新版的旧行为（改造前 auto 就是 modern）。
+   */
+  const clockStyleOf = (): 'modern' | 'classic' => (getClockIconStyle?.() === 'classic' ? 'classic' : 'modern');
+
+  /** 某风格对应的 SVG 字符串。两种风格是**两份不同的 DOM**，不是同一份加 class。 */
+  const clockSvgOf = (style: 'modern' | 'classic'): string =>
+    style === 'classic' ? CLOCK_SVG_CLASSIC : CLOCK_SVG_MODERN;
 
   let index: ScheduleSummaryMap = new Map<string, ScheduleSummaryEntry>();
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
@@ -460,10 +492,26 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
      * `now` 重跑一遍，缓存只会多出失效分支。
      */
     const progress = progressOf(entry, now);
+    const clockStyle = clockStyleOf();
+    /**
+     * 对账分支也要比**图标风格**（#200）。
+     *
+     * 旧写法只比 data-state / aria / title，而 `badge.innerHTML` 只在插入那一刻求值
+     * 一次——于是用户改了「时钟图标风格」后，已注入的 badge 永远停在旧 glyph 上，直到
+     * 页面刷新（React 重渲染擦掉节点、下一轮扫描重新插入）。问题的关键不是缺重画分支，
+     * 是**少了一份「当前风格」的记忆**：DOM 里除了 SVG 本身没有任何地方写着它是哪一档。
+     * `dataset.icon` 就是那份记忆，重画后立刻回写，使它既是对账依据也是重画后的状态。
+     */
     if (existing !== null) {
       if (existing.dataset.state !== state) existing.dataset.state = state;
       if (existing.getAttribute('aria-label') !== aria) existing.setAttribute('aria-label', aria);
       if (existing.getAttribute('title') !== tooltip) existing.setAttribute('title', tooltip);
+      if (existing.dataset.icon !== clockStyle) {
+        existing.dataset.icon = clockStyle;
+        existing.innerHTML = clockSvgOf(clockStyle);
+      }
+      // 重画会换掉整棵 SVG（含进度弧节点），所以 applyProgress 必须在重画**之后**无条件跑：
+      // classic 档查询落空即静默跳过，modern 档则把当前比例写回新弧上。
       applyProgress(existing, progress);
       return;
     }
@@ -473,10 +521,15 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     const badge = document.createElement('span');
     badge.className = beside ? `${BADGE_CLASS} ${BADGE_CLASS}-beside` : BADGE_CLASS;
     badge.dataset.state = state;
+    /**
+     * 记下这份 innerHTML 是哪一档风格 —— 对账分支靠它判断要不要重画（见上面的注释）。
+     * 不记的话「风格没变」与「风格变了但没察觉」在 DOM 上完全同形。
+     */
+    badge.dataset.icon = clockStyle;
     badge.setAttribute('role', 'img');
     badge.setAttribute('aria-label', aria);
     badge.setAttribute('title', tooltip);
-    badge.innerHTML = getClockSvg();
+    badge.innerHTML = clockSvgOf(clockStyle);
     applyProgress(badge, progress);
     if (beside) slot.after(badge);
     else slot.append(badge);
@@ -750,11 +803,16 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     for (const child of Array.from(statusHost.children)) restoreAdoptedRow(child);
   }
 
-  // 数据/环境触发：摘要变化（含当前会话投影帧与状态 tick）、语言切换、DOM 变化。
+  // 数据/环境触发：摘要变化（含当前会话投影帧与状态 tick）、语言切换、设置保存、DOM 变化。
   // 「其余会话的时效」由 store 负责（周期 session.list 读 RPC + 可见性/online 触发），
   // 本模块不再自己 refresh，避免同一份数据被拉两次。
+  //
+  // `settings` 与前两条同形，理由也一样：**输入变了、输出就得重算**。这里唯一的输出来自
+  // 「时钟风格」，它只影响已注入 badge 的 innerHTML（对账分支比对 `data-icon` 后重画，
+  // 见 {@link applyBadge}）。不订阅的话，用户保存风格后要刷新页面才生效（#200）。
   const unsubscribeSummary = summary.subscribe(scheduleScan);
   const unsubscribeLocale = locale?.subscribe(scheduleScan);
+  const unsubscribeSettings = options.settings?.subscribe(scheduleScan);
   const observer = new MutationObserver(scheduleScan);
   observer.observe(document.body, { childList: true, subtree: true });
 
@@ -769,6 +827,7 @@ export function mountSessionPresence(options: SessionPresenceOptions): () => voi
     observer.disconnect();
     unsubscribeSummary();
     unsubscribeLocale?.();
+    unsubscribeSettings?.();
     for (const badge of Array.from(document.querySelectorAll(`.${BADGE_CLASS}`))) badge.remove();
     // 追加行整体删掉；被接管的宿主行**不能删**，只把文案还原回去（删了就是在改宿主的结构）。
     for (const row of Array.from(document.querySelectorAll(`.${HOVER_ROW_CLASS}`))) row.remove();
