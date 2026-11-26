@@ -43,4 +43,5 @@ export declare function getPaused(sessionId: string, uid: string): PausedEntry |
 export declare function findPausedByScheduleId(sessionId: string, scheduleId: string): PausedEntry | undefined;
 export declare function recordPaused(sessionId: string, entry: PausedEntry): void;
 export declare function removePaused(sessionId: string, uid: string): void;
+export declare function invalidateCacheForTests(sessionId: string): void;
 export declare function resetCacheForTests(): void;

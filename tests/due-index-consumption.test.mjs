@@ -48,6 +48,7 @@ import * as plugin from '../lib/index.js';
 import { createExpirySweeper } from '../lib/expiry-sweeper.js';
 import {
   getOwnership,
+  invalidateCacheForTests,
   listOwnershipSnapshots,
   mirrorDueIndex,
   recordOwnership,
@@ -211,6 +212,13 @@ async function shutdown(boot) {
 /** 直接落一份 sidecar JSON（模拟某个版本写下的文件）。 */
 function writeSidecar(sessionId, payload) {
   writeFileSync(join(process.env.DSH_LATER_STATE_DIR, `${sessionId}.json`), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  // ⚠️ 写完必须拨一次缓存（issue #207 的实测教训）：`readFresh` 的判据是
+  // `mtimeMs === cached.mtimeMs && size === cached.size`。同一毫秒内以**同样大小**
+  // 覆写同一个文件时（容器 overlayfs 上 mtime 只有 ms 级），新旧两次 stat 完全相等，
+  // 缓存不会失效 —— 测试于是读到旧内容，用例假红/假绿。真实代码不受影响：同一个进程内
+  // 所有写都走 `writeThrough`（它同时更新缓存），外部改写本来也不在本插件的契约里。
+  // 这条不是"为了测试改实现"：它是**测试夹具**必须做的失效，否则断言测的是缓存不是行为。
+  invalidateCacheForTests(sessionId);
 }
 
 /**

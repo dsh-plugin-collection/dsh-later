@@ -736,6 +736,20 @@ export function removePaused(sessionId: string, uid: string): void {
   writeThrough(sessionId, { version: CURRENT_VERSION, entries: file.entries, paused });
 }
 
+/**
+ * 测试辅助：只拨一个会话的缓存（不删文件）。
+ *
+ * 为什么需要它：`readFresh` 的失效判据是 `mtimeMs === … && size === …`。同一毫秒内以
+ * **同样大小**覆写同一个文件时（容器 overlayfs 的 mtime 只有 ms 级，实测两次 stat 完全
+ * 相等），缓存不会失效 —— 直接 `writeFileSync` 造 sidecar 的测试会读到旧内容。真实路径
+ * 不受影响：进程内所有写都走 `writeThrough`（它同步更新缓存），外部改写不在本插件契约
+ * 里。所以这是**夹具**需要的口子，不是运行期语义（运行期不该有人手动拨缓存）。
+ * @param sessionId - 要失效的会话。
+ */
+export function invalidateCacheForTests(sessionId: string): void {
+  cache.delete(sessionId);
+}
+
 /** 测试辅助：清空进程内缓存（不删文件）。 */
 export function resetCacheForTests(): void {
   cache.clear();
