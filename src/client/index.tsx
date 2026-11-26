@@ -46,7 +46,7 @@ import { SchedulerSettingsCard } from './components/SchedulerSettingsCard.js';
 import type { SchedButtonInjected } from './components/SchedButton.js';
 import type { ScheduleDockInjected } from './components/ScheduleDock.js';
 import type { ClientAttachment } from './types.js';
-import { mountSessionPresence, type PresenceLocaleLike } from './session-presence.js';
+import { mountSessionPresence, type ClockIconStyle, type PresenceLocaleLike } from './session-presence.js';
 import { mountBubbleMarker } from './marker-controller.js';
 import type { LocaleFaceLike } from './useSchedT.js';
 import {
@@ -113,7 +113,37 @@ function apply(ctx: Context): void {
   // auto 模式根据 DSH 版本自动选择：0.2.0+ 用新版，0.1.x 用旧版
   // 检测方式：有 configForms 服务 = 0.2.0+，否则 = 0.1.x
   let detectedVersion: 'modern' | 'classic' = 'classic';
-  let getClockIconStyle: () => 'auto' | 'modern' | 'classic' = () => 'auto';
+  /** 当前记录 `clockIconStyle` 设置的那条轨道（未绑上时 undefined = 按 auto）。 */
+  let clockIconScope: ClientSettingsScope | ClientConfigForm | undefined;
+
+  /**
+   * 从某条设置轨道的快照里读 `clockIconStyle`（两代轨道形状一致，故两条轨道共用这**一份**
+   * 实现）。
+   *
+   * 旧写法在 `settingsScope` 与 `configForms` 两个分支里各抄了一遍同样的三行，改一处忘
+   * 另一处时会**静默**只修好一半宿主代次——`getClockIconStyle` 的两份定义长得一模一样，
+   * 光看 diff 很难发现漏改。抽成一个函数后，两代之间的差异只剩「从哪里取 scope」。
+   */
+  const readClockIconStyle = (scope: ClientSettingsScope | ClientConfigForm | undefined): ClockIconStyle => {
+    if (scope === undefined) return 'auto';
+    const snap = scope.getSnapshot();
+    if (snap.status !== 'ready') return 'auto';
+    const value = (snap.value ?? {}) as Record<string, unknown>;
+    const style = value['clockIconStyle'];
+    return style === 'modern' || style === 'classic' ? style : 'auto';
+  };
+
+  /**
+   * 时钟图标风格：`auto` 落成宿主代次探测的结果（0.2.0+ 新描边、0.1.x 旧点阵）。
+   *
+   * 挂在 `mountSessionPresence` 上的是**这个**函数（现读），而不是某一刻的快照值——
+   * 扫描路径随时可能被设置订阅、DOM 变化或 30s tick 触发，每次都要读到当时的设置。
+   */
+  const currentClockIconStyle = (): ClockIconStyle => {
+    const style = readClockIconStyle(clockIconScope);
+    return style === 'auto' ? detectedVersion : style;
+  };
+
   /**
    * 「在分组徽标中显示定时任务」当前取值（issue #83）。
    *
@@ -137,6 +167,30 @@ function apply(ctx: Context): void {
     'dsh-later: schedule summary',
   );
 
+  /**
+   * 侧栏 badge 的「设置变了」信号。
+   *
+   * 为什么不是直接把某条轨道的 `scope` 交给 `mountSessionPresence`：设置轨道由
+   * `ctx.inject([...])` 的回调建立，**晚于**本段 presence 挂载（cordis 的 inject 回调
+   * 让出一个微任务，见 `settings-live-binding` 那轮踩过的时序）。此时还不知道谁是那条
+   * 轨道，所以先建一个空发布器，谁绑上谁往里转发。
+   *
+   * 不订阅的后果与 #200 同形：`clockIconStyle` 只影响已注入 badge 的 innerHTML，而 badge
+   * 不在 React 树里，没有任何东西会替它重渲染——保存完设置要刷新页面才看得到。
+   */
+  const presenceSettingsListeners = new Set<() => void>();
+  const presenceSettings = {
+    subscribe(listener: () => void): () => void {
+      presenceSettingsListeners.add(listener);
+      return () => {
+        presenceSettingsListeners.delete(listener);
+      };
+    },
+  };
+  const notifyPresenceSettings = (): void => {
+    for (const listener of [...presenceSettingsListeners]) listener();
+  };
+
   // 侧栏会话行「定时状态」badge（docs/ui/09 路线 B）：数据源为上面的摘要 store
   // （store 内部订阅 sessions.list 的行级 projectionValues——session.list 基线
   // 覆盖全会话，当前会话由投影帧实时推进——并周期 refresh() 读 RPC 补时效）。
@@ -146,11 +200,10 @@ function apply(ctx: Context): void {
       mountSessionPresence({
         summary,
         ...(locale === undefined ? {} : { locale: locale as unknown as PresenceLocaleLike }),
-        getClockIconStyle: () => {
-          const style = getClockIconStyle();
-          if (style === 'auto') return detectedVersion;
-          return style;
-        },
+        // 现读而不是传真值：扫描随时可能被设置订阅 / DOM 变化 / 30s tick 触发，
+        // 每次都要拿到那一刻的设置。
+        getClockIconStyle: currentClockIconStyle,
+        settings: presenceSettings,
       }),
     'dsh-later: presence',
   );
@@ -248,6 +301,26 @@ function apply(ctx: Context): void {
     );
     // 绑定这一刻的快照可能还是 loading（→ 按默认显示）；订阅会在它变 ready 时再刷一次。
     facetMount.refresh();
+  };
+
+  /**
+   * 把一条设置轨道接到侧栏 badge 的「时钟风格已变」信号上（issue #200）。
+   *
+   * 与 {@link attachBadgeVisibility} 同形：两条轨道各调一次，谁先到先接。区别在于这里
+   * 不需要现读快照——`getClockIconStyle` 本来就是现读函数，订阅只负责**告诉扫描器
+   * 「现在该重画了」**。重画由 `applyBadge` 比对 `data-icon` 完成，幂等：风格没变时
+   * 一次多余的扫描不算代价（它就是每 30s 都在跑的那条路径）。
+   *
+   * 反过来说，订阅不能省：设置页保存后 apply 不会再跑，而 badge 不在 React 树里，
+   * 没有订阅就没人通知它（#200 的真实形态：改完风格要刷新页面）。
+   */
+  const attachClockIconStyle = (scope: ClientSettingsScope | ClientConfigForm): void => {
+    ctx.effect(
+      () => scope.subscribe(notifyPresenceSettings),
+      'dsh-later: clock icon style setting',
+    );
+    // 绑定这一刻的快照可能是 loading（→ auto）；它变 ready 时会经订阅再扫一次。
+    notifyPresenceSettings();
   };
 
   /**
@@ -458,14 +531,11 @@ function apply(ctx: Context): void {
     // 旧版本（0.1.x）使用旧版点阵时钟
     detectedVersion = 'classic';
     const scope = binder.bind({ namespace: SETTINGS_NS });
-    // 更新 getClockIconStyle 函数，从 scope 中读取 clockIconStyle 设置
-    getClockIconStyle = () => {
-      const snap = scope.getSnapshot();
-      if (snap.status !== 'ready') return 'auto';
-      const value = (snap.value ?? {}) as Record<string, unknown>;
-      const style = value['clockIconStyle'];
-      return style === 'modern' || style === 'classic' ? style : 'auto';
-    };
+    // 这条轨道成为 `clockIconStyle` 的读数来源；`auto` 落到上面探测出的代次。
+    // 保存后立刻重扫 badge（见下方 `attachClockIconStyle`）：风格只影响已注入节点的
+    // innerHTML，没有这条订阅就得刷新页面才生效（#200）。
+    clockIconScope = scope;
+    attachClockIconStyle(scope);
     // 徽标显隐开关接到这条设置轨道上（issue #83）：保存即生效，不依赖刷新页面。
     attachBadgeVisibility(scope);
     mountComposer(scope);
@@ -501,14 +571,9 @@ function apply(ctx: Context): void {
     // 新版本（0.2.0+）使用新版描边时钟
     detectedVersion = 'modern';
     const scope = forms.get(ENTRY_ID);
-    // 更新 getClockIconStyle 函数，从 configForms scope 中读取 clockIconStyle 设置
-    getClockIconStyle = () => {
-      const snap = scope.getSnapshot();
-      if (snap.status !== 'ready') return 'auto';
-      const value = (snap.value ?? {}) as Record<string, unknown>;
-      const style = value['clockIconStyle'];
-      return style === 'modern' || style === 'classic' ? style : 'auto';
-    };
+    // 同旧轨道：这条成为 `clockIconStyle` 的读数来源，并订阅「保存了 → 重扫 badge」。
+    clockIconScope = scope;
+    attachClockIconStyle(scope);
     // 徽标显隐开关接到这条设置轨道上（issue #83）：保存即生效，不依赖刷新页面。
     attachBadgeVisibility(scope);
     mountComposer(scope);

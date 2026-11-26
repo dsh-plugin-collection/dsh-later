@@ -95,6 +95,103 @@ function planBarAnimationFor(
   return planBarAnimation(totalMs, now - start);
 }
 
+/**
+ * 「减少动态效果」的**订阅式**判定（issue #202）。
+ *
+ * 为什么不在 `MultiBar` 里每行每秒查两次 `matchMedia`：
+ *  - 那是每秒 2N 次同步样式查询（N = 行数），`matchMedia().matches` 会强制浏览器
+ *    重新求值媒体查询；它不便宜，而结果几乎永不变。
+ *  - 更实际的问题是，用户在系统设置里改开关时，行内的 `matchMedia` 查询**不会**触发
+ *    重渲染（没有人订阅 `change`），界面要等到下一次 tick 才「碰巧」跟上；如果队列
+ *    静止（没有 tick），就永远不跟。这里在组件顶层订阅一次，取到值后按 prop 下发。
+ */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState<boolean>(() => prefersReducedMotion());
+  useEffect(() => {
+    let query: MediaQueryList | undefined;
+    try {
+      query = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
+    } catch {
+      query = undefined; // 老环境 matchMedia 抛错：退化成「挂载时读一次」
+    }
+    if (query === undefined || typeof query.addEventListener !== 'function') return undefined;
+    const onChange = (): void => setReduced(prefersReducedMotion());
+    query.addEventListener('change', onChange);
+    return () => query?.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
+
+/**
+ * 进度条几何的两份探测值（issue #202：从渲染期搬进 effect）。
+ *
+ * 旧实现把两件事写在**渲染函数体里**：
+ *  - 每次渲染 `new Map(lastActiveAt)` 再逐条比大小——每渲染一次一次 O(n) 拷贝，
+ *    里面还套着 `schedules.some(...)` 的 O(n) 清理，合起来每秒 O(n²)；
+ *  - 更麻烦的是这些写入只在「渲染」时发生，所以外观正确**依赖调用顺序**：任何人在
+ *    中间加一句早退/短路，探测值就悄悄不更新了（不报错，只是条长慢慢偏）。
+ *
+ * 搬进 effect 后判据变成「渲染是纯的、记账是副作用」，且只在 id 集合真的变化时才
+ * 产生新对象（`firstSeen` 用 state，引用不变就不额外制造重渲染）。
+ *
+ * 两份值的作用不同，别合并成一个 Map：
+ *  - `firstSeen`：首次见到任务 id 的本地时刻，只增不改（`at`/`every` 类任务的窗口起点）。
+ *    放 state 是因为它**必须在本帧就可读**——放 ref 再在 effect 里补，会让新任务的第一帧
+ *    拿 `now` 当起点、条长为 0，下一帧才跳到正确长度（一次可见的闪烁）。
+ *  - `lastActiveAt`：最后一次「以 active 渲染」的墙钟时刻，每秒都在推进，且只作为冻结帧
+ *    的上界钳制（见 `frozenBarSegments` 的 `renderedAt`）。推进本身不需要重渲染，放 ref。
+ */
+function useBarProbes(
+  schedules: readonly ClientSchedule[],
+  wallClock: number,
+): {
+  readonly firstSeen: ReadonlyMap<string, number>;
+  readonly lastActiveAt: ReadonlyMap<string, number>;
+} {
+  const [firstSeen, setFirstSeen] = useState<ReadonlyMap<string, number>>(() => new Map());
+  useEffect(() => {
+    setFirstSeen((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const item of schedules) {
+        if (!next.has(item.id)) {
+          next.set(item.id, Date.now());
+          changed = true;
+        }
+      }
+      for (const id of [...next.keys()]) {
+        if (!schedules.some((item) => item.id === id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      // 没有变化就原样返回同一个引用：否则每秒 tick 都会造一个新 Map 并把下游重渲染一遍。
+      return changed ? next : current;
+    });
+  }, [schedules]);
+
+  const lastActiveAtRef = useRef<ReadonlyMap<string, number>>(new Map());
+  useEffect(() => {
+    const current = lastActiveAtRef.current;
+    let next: Map<string, number> | undefined;
+    for (const item of schedules) {
+      if (item.status === 'paused') continue; // 暂停后停止更新，避免上界前进
+      const prev = current.get(item.id);
+      if (prev !== undefined && wallClock <= prev) continue;
+      next ??= new Map(current);
+      next.set(item.id, wallClock);
+    }
+    for (const id of current.keys()) {
+      if (schedules.some((item) => item.id === id)) continue;
+      next ??= new Map(current);
+      next.delete(id);
+    }
+    if (next !== undefined) lastActiveAtRef.current = next;
+  }, [schedules, wallClock]);
+
+  return { firstSeen, lastActiveAt: lastActiveAtRef.current };
+}
+
 /** 应用层注入的调用能力。 */
 export interface ScheduleDockInjected {
   /** 向宿主执行一条 slash 命令；返回是否受理（`matched`）。 */
@@ -280,6 +377,17 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
    */
   const now = useNow(schedules.length === 0 || sessionId === undefined ? 0 : 1000);
 
+  /**
+   * 「减少动态效果」在整棵 dock 里**只判定一次**（issue #202）。
+   *
+   * 旧实现由 `MultiBar` 每行每秒查两次 `matchMedia`（2N 次/秒的同步媒体查询）。除了
+   * 开销，还有一个正确性问题：行内查询没人订阅 `change`，用户在系统设置里切换开关时
+   * 界面不会重渲染，得等下一次 tick「碰巧」跟上——队列静止（无 tick）时永远不跟。
+   * 这里顶层订阅一次，值按 prop 下发到每一行。
+   */
+  const reducedMotion = useReducedMotion();
+
+
   const [collapsed, setCollapsed] = useState(true);
   /** 折叠头与列表的关联 id（`aria-controls` ↔ `id`），宿主同款做法。 */
   const listId = useId();
@@ -367,60 +475,14 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
   // 暂停 / 恢复的失败原因（在途标记已并入 `busyId`）。
   const [pauseErr, setPauseErr] = useState<ReadonlyMap<string, string>>(new Map());
 
-  // 进度条起点：首次见到任务 id 的本地时刻（仅 at 类任务需要）。
-  const firstSeenRef = useRef<ReadonlyMap<string, number>>(new Map());
   /**
-   * 每个任务「最后一次以 active 渲染」的墙钟时刻（按 id 记账）。
-   *
-   * 仅用于给冻结帧做**上界钳制**：宿主 `paused_at` 是命令到达宿主的时刻，比用户
-   * 点击晚（命令往返），钳一下可让暂停瞬间的条长等于点击前最后一帧。
-   *
-   * 注意这只是「锦上添花」——冻结比本身由 `(窗口 - 剩余) / 窗口` 纯算术得出
-   * （见 bar-geometry），不依赖本 map。因此即便记账缺失/过期，最坏也只是多显示
-   * 一点进度，不会出现塌缩或漂移（早期版本把冻结比建在这个上界上，
-   * 导致 resume 换窗口后 25.7% → 3.3% 的塌缩）。
+   * 本帧的墙钟时刻。进度条的活动期宽度、冻结帧的上界钳制都以它为「当下」——
+   * 不用 `now`（`useNow` 的 tick 值），因为 tick 在停摆期间不推进，而墙钟总是在动。
    */
-  const lastActiveAtRef = useRef<ReadonlyMap<string, number>>(new Map());
   const wallClock = Date.now();
-  {
-    const next = new Map(lastActiveAtRef.current);
-    let changed = false;
-    for (const item of schedules) {
-      if (item.status === 'paused') continue; // 暂停后停止更新，避免上界前进
-      const prev = next.get(item.id);
-      if (prev === undefined || wallClock > prev) {
-        next.set(item.id, wallClock);
-        changed = true;
-      }
-    }
-    for (const id of [...next.keys()]) {
-      if (!schedules.some((item) => item.id === id)) {
-        next.delete(id);
-        changed = true;
-      }
-    }
-    if (changed) lastActiveAtRef.current = next;
-  }
 
-  const byId = useMemo(() => new Map(schedules.map((item) => [item.id, item] as const)), [schedules]);
-  useEffect(() => {
-    // 记录新任务的首次可见时刻（进度条近似起点）
-    let changed = false;
-    const next = new Map(firstSeenRef.current);
-    for (const [id] of byId) {
-      if (!next.has(id)) {
-        next.set(id, Date.now());
-        changed = true;
-      }
-    }
-    for (const id of [...next.keys()]) {
-      if (!byId.has(id)) {
-        next.delete(id);
-        changed = true;
-      }
-    }
-    if (changed) firstSeenRef.current = next;
-  }, [byId]);
+  // 进度条的两份探测值（issue #202：从渲染期搬进 effect，见 useBarProbes）。
+  const { firstSeen, lastActiveAt } = useBarProbes(schedules, wallClock);
 
   /**
    * `editingId` 的清理（issue #31）。
@@ -455,20 +517,14 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
     setSaving(false);
   }, [sessionId]);
 
-  /**
-   * 折叠态复位口径（issue #31/#32）：与宿主对齐后**不再需要 effect**。
-   *
-   * 旧实现的条件是 `schedules.length <= 1`，但单条本来就被 `expanded` 强制直出，
-   * 复位与不复位对界面无差异；反而是「多条展开 → 删到一条 → 再加回多条」这条路会
-   * 把用户自己展开的状态被抹掉。宿主的复位条件是队列为空（client.js:15397-15401），
-   * 而本组件在 `length === 0` 时整体返回 null（卸载），复位自然由下一次挂载的初始
-   * 值 `true` 完成——与宿主同形，所以这里两条路径都不需要 effect。
+  /*
+   * ── 渲染期派生值（放在早退之前，因为它们里有 hook：相位版本号）────────────────
+   * 这几项都只依赖 state，不依赖 `schedules` 的具体内容，所以可以在「没有提醒 → 返回
+   * null」的那条路之前算出来——而 `phaseNonce` 的 useState/useEffect **必须**在这里，
+   * 不能放到早退之后：那会让「有提醒 / 没提醒」两条路使用不同的 hook 槽位数（旧实现
+   * 早期就在 `useNow` 之后的某个位置栽过同一类跟头，见 `tests/client-tick-count.test.mjs`
+   * 的「null 分支与渲染分支来回切换，hook 序列恒定」）。
    */
-
-  if (schedules.length === 0 || sessionId === undefined) return null;
-
-  const next = schedules[0];
-  if (next === undefined) return null;
   /**
    * 整块 dock 是否有命令在途——宿主的同一条判据（`disabled: busy !== null`）。
    * `saving` 是行内编辑的「保存中」标记，属 dock-editor 的区，这里只读并入。
@@ -492,6 +548,64 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
   const interactionActive = editingId !== null || busy;
   const expanded = schedules.length === 1 || !collapsed || interactionActive;
 
+  /**
+   * 相位版本号（issue #202）：**取代**旧实现在列表上写的 `key={expanded ? 'open' : 'closed'}`。
+   *
+   * ## 为什么原来要重挂载
+   *
+   * 列表常驻 DOM（`hidden` 控可见，为了 `aria-controls` 永远指向真实目标），于是收起/
+   * 展开不再卸载行；而 `MultiBar` 的动画相位是**挂载那一刻**冻结的（见 `MultiBar` 的
+   * 的 `phaseAt` 注释：每次渲染重算 delay 会让动画每秒多跳一秒）。两者相撞的结果是
+   * 「收起 → 等十分钟 → 展开」，进度条的相位还停在收起那一刻。
+   *
+   * ## 为什么不再用 key
+   *
+   * `key` 是 React 的**身份**字段，拿它当「重新初始化某个子树的命令」有两处代价：
+   *  - 整列重建：所有行连同其 DOM、滚动位置、正在跑的动画一起被丢掉重建，发生在
+   *    用户点折叠的那一帧；
+   *  - 它把一个**数据**决定（相位该不该重取）写成了**结构**决定：将来再加一档折叠
+   *    状态（比如「半展开」），得先想清楚 key 该怎么拼。
+   *
+   * 现在用显式版本号：展开边沿把版本号 +1，`MultiBar` 把它写进 effect 依赖，在 effect
+   * 里把 `phaseAt` 清空，下一帧渲染按当下时刻重取。重取只发生在「展开」这一次，
+   * tick 不碰版本号，所以「相位参数在挂载后恒定」那条既有契约（`tests/bar-geometry.test.mjs`
+   * 的回归用例）不受影响。
+   *
+   * ⚠️ 清空必须在 effect 里做，不能在渲染期写 ref：渲染期写 ref 让「这一帧读到的是新值
+   * 还是旧值」取决于渲染被调了几次，StrictMode 双渲染 / 并发重放会让相位随机重置。
+   * 这也是本次把 `MultiBar` 里那段渲染期写 ref 的逻辑一并搬进 effect 的
+   * 原因。
+   *
+   * 依赖用**布尔**而不是 `expanded` 本身：`expanded` 还含「行数 === 1」「交互进行中」，
+   * 那些变化不代表优先级被重置，不该重置相位（重置会让条长跳回当下时刻，看起来像丢帧）。
+   */
+  const [phaseNonce, setPhaseNonce] = useState(0);
+  const wasExpandedRef = useRef(expanded);
+  useEffect(() => {
+    if (!expanded) {
+      wasExpandedRef.current = false;
+      return;
+    }
+    if (wasExpandedRef.current) return;
+    wasExpandedRef.current = true;
+    setPhaseNonce((value) => value + 1);
+  }, [expanded]);
+
+
+  /**
+   * 折叠态复位口径（issue #31/#32）：与宿主对齐后**不再需要 effect**。
+   *
+   * 旧实现的条件是 `schedules.length <= 1`，但单条本来就被 `expanded` 强制直出，
+   * 复位与不复位对界面无差异；反而是「多条展开 → 删到一条 → 再加回多条」这条路会
+   * 把用户自己展开的状态被抹掉。宿主的复位条件是队列为空（client.js:15397-15401），
+   * 而本组件在 `length === 0` 时整体返回 null（卸载），复位自然由下一次挂载的初始
+   * 值 `true` 完成——与宿主同形，所以这里两条路径都不需要 effect。
+   */
+
+  if (schedules.length === 0 || sessionId === undefined) return null;
+
+  const next = schedules[0];
+  if (next === undefined) return null;
   const handleCancel = (id: string, status?: 'active' | 'paused'): void => {
     setBusyId(id);
     /** 撤销本地摘除（命令未被受理时回滚，避免行无谓消失）。 */
@@ -770,7 +884,9 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
             */}
             <DockPrompt text={item.prompt} renderFactorySlot={renderFactorySlot} />
           </div>
-          <MultiBar item={item} now={wallClock} firstSeen={firstSeenRef.current} t={t} frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAtRef.current.get(item.id) ?? wallClock} />
+          <MultiBar item={item} now={wallClock} firstSeen={firstSeen} t={t}
+            frozen={isPaused} frozenLeftMs={frozenLeft} renderedAt={lastActiveAt.get(item.id) ?? wallClock}
+            reducedMotion={reducedMotion} phaseNonce={phaseNonce} />
           {(steerErr.get(item.id) ?? pauseErr.get(item.id)) !== undefined && (
             <span className="ss-dock-steer-err">{steerErr.get(item.id) ?? pauseErr.get(item.id)}</span>
           )}
@@ -845,17 +961,15 @@ export function ScheduleDock({ callCommand, loadImage, peekImage, localMediaUrl,
 
           代价与对策：进度条的相位是在**挂载那一刻**冻结的（见本文件头部 #13/#16 那条结论：
           「CSS 动画在元素被重建时会从头播放」）。列表常驻 DOM 后，收起/展开不再触发重挂载，
-          相位就停在第一次挂载时的值。`display:none` 期间动画究竟推不推进，我没有在本机验证
-          （规范页取不到：w3.org 403、drafts.csswg.org 404），因此不作断言——但两种行为下这个
-          `key` 都是对的：展开即整列重挂载、`MultiBar` 相位按当前时刻重算，与「收起即卸载」的
-          旧行为等价，同时保住 `aria-controls` 指向一个真实存在的列表。
+          相位就停在第一次挂载时的值。旧对策是在这个 `ul` 上写
+          `key={expanded ? 'open' : 'closed'}` 强制整列重建（issue #202 已移除），现在改由
+          `phaseNonce` 显式传达「该重取相位了」——理由与代价见组件里那段状态注释，以及
+          `MultiBar` 顶部关于「为什么清空 ref 必须留在 effect 里」的说明。
+          `display:none` 期间动画究竟推不推进，我没有在本机验证（规范页取不到：w3.org 403、
+          drafts.csswg.org 404），因此不作断言；两种行为下 `phaseNonce` 都对：展开即让每一行
+          在下一帧重取相位，与「收起即卸载」的旧行为等价，同时保住 `aria-controls`。
         */}
-        <ul
-          id={listId}
-          className="ss-dock-list"
-          key={expanded ? 'open' : 'closed'}
-          hidden={!expanded}
-        >
+        <ul id={listId} className="ss-dock-list" hidden={!expanded}>
           {schedules.map(renderRow)}
         </ul>
       </div>
@@ -877,6 +991,8 @@ function MultiBar({
   frozen = false,
   frozenLeftMs,
   renderedAt,
+  reducedMotion,
+  phaseNonce,
 }: {
   item: ClientSchedule;
   now: number;
@@ -886,6 +1002,18 @@ function MultiBar({
   frozenLeftMs?: number;
   /** 客户端已渲染过的最新时刻；冻结帧据此钳位，避免暂停瞬间条长跳增。 */
   renderedAt: number;
+  /**
+   * 「减少动态效果」（issue #202）：由 `ScheduleDock` 顶层订阅 `prefers-reduced-motion`
+   * 后按 prop 下发。**不要在行内再查 `matchMedia`** —— 那是每秒 2N 次同步媒体查询，
+   * 且没人订阅 `change`，系统设置变化时界面不会及时跟上。
+   */
+  reducedMotion: boolean;
+  /**
+   * 相位版本号（issue #202）：展开边沿由 `ScheduleDock` +1，本行在 effect 里据此把
+   * 冻结的相位清空，下一次渲染按当下时刻重取。取代旧实现在列表上写
+   * `key={expanded ? 'open' : 'closed'}` 的整列重挂载。
+   */
+  phaseNonce: number;
 }): JSX.Element {
   const frozenSeg = frozen
     ? frozenBarSegments(item, frozenLeftMs ?? 0, firstSeen, renderedAt)
@@ -922,15 +1050,38 @@ function MultiBar({
    *  - 重新挂载（切会话回来）→ ref 重取当前时刻 → 相位按绝对时间重新对齐
    *    （这正是「切回来不归零」所需的行为）。
    */
-  const phaseAtRef = useRef<number | null>(null);
-  if (frozen || prefersReducedMotion()) {
-    phaseAtRef.current = null; // 暂停/降级：清掉，恢复时重新取
-  } else if (phaseAtRef.current === null) {
-    phaseAtRef.current = now;
-  }
-  const anim = frozen || prefersReducedMotion()
+  const [phaseAt, setPhaseAt] = useState<number | null>(null);
+
+  /**
+   * 相位账本的写入**挪进 effect**（issue #202）。旧实现在渲染函数体里直接改 ref：
+   *
+   *   if (frozen || reduced) phaseAtRef.current = null;
+   *   else if (phaseAtRef.current === null) phaseAtRef.current = now;
+   *
+   * 渲染期改「跨帧存放的可变状态」让这一帧读到的值取决于渲染被调用的次数——StrictMode
+   * 双渲染、并发渲染的重放都会让相位提前冻结或随机重置；而它要精确到毫秒，等于要求
+   * 「渲染恰好只发生一次」，这不是渲染能给出的保证。
+   *
+   * 现在：渲染期只读 `phaseAt`，写入全在下面这一个 effect 里。
+   *
+   * 依赖里**刻意不含 `now`**：每秒 tick 都重取就要把 `delay` 重算一遍，播放头被再往前
+   * 推一格——正是「双倍计数、每秒一跳」那条历史缺陷（见上方注释里的实测数字）。
+   * effect 只在三种时机跑：
+   *  - 挂载：取当前时刻做相位（与旧实现的挂载路径等价）；
+   *  - `frozen` / `reducedMotion` 变化：暂停时清空（渲染走静态宽度），恢复时重取；
+   *  - `phaseNonce` 变化：展开边沿要求按当下时刻重取（取代旧的 `<ul key>` 整列重挂载）。
+   *
+   * 用 state 而不是 ref，是为了让「重取」这件事自己带一次重渲染：渲染N 读到的还是旧
+   * 相位，effect 写进新的 → effect 引起的重渲染里 DOM 就带着正确的 `--ss-bar-delay`。
+   * 用 ref 的话值变了但没人重渲染，得等下一次 tick（最多 1 秒）才落到 DOM 上。
+   */
+  useEffect(() => {
+    setPhaseAt(frozen || reducedMotion ? null : now);
+  }, [frozen, reducedMotion, phaseNonce]);
+
+  const anim = frozen || reducedMotion
     ? undefined
-    : planBarAnimationFor(item, phaseAtRef.current ?? now, firstSeen);
+    : planBarAnimationFor(item, phaseAt ?? now, firstSeen);
   const fillStyle: CSSProperties = anim === undefined
     ? { width: `${totalRatio * 100}%` }
     : {
@@ -943,7 +1094,7 @@ function MultiBar({
          */
         ['--ss-bar-duration' as string]: `${anim.durationMs}ms`,
         // 负 delay 把播放头定位到挂载时刻的绝对相位；此后恒定不变
-        // （重算会让动画多跳——见上方 phaseAtRef 注释）。
+        // （重算会让动画多跳——见上方 `phaseAt` 注释）。
         ['--ss-bar-delay' as string]: `${anim.delayMs}ms`,
       };
   return (

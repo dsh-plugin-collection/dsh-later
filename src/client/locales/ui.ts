@@ -51,6 +51,8 @@ export const zh = {
   panelTitle: '定时提醒',
   /** 关闭面板 */
   close: '关闭',
+  /** 快捷选项组的无障碍名（不是面板标题：dialog 已有名字，组再叫同一个会读出回声） */
+  quickGroupLabel: '快捷时间选项',
   /** 快捷选项 */
   quick10m: '10分钟后',
   quick1h: '1小时后',
@@ -200,6 +202,7 @@ const en: { [K in keyof typeof zh]: string } = {
   buttonSchedule: 'Schedule send',
   panelTitle: 'Scheduled reminders',
   close: 'Close',
+  quickGroupLabel: 'Quick time options',
   quick10m: 'In 10 minutes',
   quick1h: 'In 1 hour',
   quickSmart: 'Work hours',

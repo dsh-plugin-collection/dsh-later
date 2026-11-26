@@ -79,6 +79,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   sectionDisplayToggle: 'Einstellungseintrag',
   showInSettings: 'In den Einstellungen anzeigen',
   showInSettingsHint: 'Zeigt die Einstellungsseite dieses Plugins im Einstellungsdialog an (Seite neu laden, damit es wirkt)',
+  helpAria: 'Informationen zu {label}',
 };
 
 export default dict;

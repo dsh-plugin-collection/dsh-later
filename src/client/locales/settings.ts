@@ -93,6 +93,7 @@ export const zh = {
   sectionDisplayToggle: '设置入口',
   showInSettings: '在设置中显示',
   showInSettingsHint: '在设置对话框中显示本插件的设置页（刷新页面后生效）',
+  helpAria: '{label}说明',
 } as const;
 
 /**
@@ -163,6 +164,7 @@ const en: { [K in keyof typeof zh]: string } = {
   sectionDisplayToggle: 'Settings entry',
   showInSettings: 'Show in settings',
   showInSettingsHint: 'Show this plugin\'s settings page in the settings dialog (refresh to take effect)',
+  helpAria: '{label} information',
 };
 
 /** 设置卡词条的键联合。 */
