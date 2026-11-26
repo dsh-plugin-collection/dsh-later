@@ -274,6 +274,78 @@ test('userScheduleEditPrompt：en 作用域下的 id 校验回执是英文', asy
   assert.ok(!looksChinese(edit.message), `edit 回执仍有中文：${edit.message}`);
 });
 
+// ── 6. 跨事务边界（issue #197）────────────────────────────────────────────
+//
+// 写路径不短：`runUserScheduleTransaction` 把操作排在 `tails.get(agent).then(operation)`
+// ——**微任务**里。入口的 `try` 里 `return` 那个 promise 之后，`finally { leaveLocale() }`
+// 立刻把栈弹空，事务体那时还没起跑。于是事务体内的回执读到的永远是空栈 ⇒ zh。
+//
+// 这一组用例全部**在事务体内部**触发回执，所以它们在修复前必然红；改完之后语言来自
+// 入口钉住的那份字典，与「此刻栈里是什么」解耦。
+
+/**
+ * 让 fold 读路径抛出的假 Session。
+ *
+ * 为什么不用「一条 delete 指向 inactive id」那种历史日志：上游 0.1.7 及更早会抛
+ * `delete targets inactive id`，但 0.2.2-alpha.3 起本仓走自己的容错 fold，
+ * 对不自洽的序列是**跳过**而不是抛——同一份日志在两代上一条抛一条不抛，用例会
+ * 只在部分代次上真的走到那个分支。把 `ownEvents()` 本身弄坏则跨代一致：读日志
+ * 那一步就没有返回值，`foldUserState` 必然抛。
+ */
+function unreadableSession() {
+  const session = new FakeSession();
+  session.ownEvents = () => {
+    throw new Error('log unreadable');
+  };
+  return session;
+}
+
+test('#197 跨事务边界：locale:"en" + maxSchedules:0 的回执是英文', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent();
+  const result = await userScheduleCreate(
+    { prompt: 'quota', after_seconds: 600 },
+    agent,
+    fakeCtx,
+    0,
+    { locale: 'en' },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'quota_exceeded');
+  assert.ok(
+    !looksChinese(result.message),
+    `事务体内回执仍有中文（locale 栈已被 finally 弹空）：${result.message}`,
+  );
+  assert.equal(result.message, hostDictFor('en').errToolQuotaFull.replace('{maxSchedules}', '0'));
+});
+
+test('#197 跨事务边界：edit 不存在的 id 回执随 locale（不是「未找到定时任务」）', async () => {
+  freshOwnershipDir();
+  const edit = await userScheduleEditPrompt('schedule-missing', 'new text', fakeAgent(), fakeCtx, undefined, 'en');
+  assert.equal(edit.ok, false);
+  assert.equal(edit.code, 'schedule_not_found');
+  // ⚠️ 这里不能用 `looksChinese` 判：那条判据把「含拉丁字母」当作已翻译的信号，
+  // 而这条文案里带着 id（`schedule-missing`），于是中文原文也会被判「不是中文」。
+  // 事务体路径必须与字典**逐字**对齐，顺带钉住占位符来自本次调用。
+  assert.equal(
+    edit.message,
+    hostDictFor('en').errToolScheduleNotFoundById.replace('{id}', 'schedule-missing'),
+  );
+  assert.ok(!/\p{Script=Han}/u.test(edit.message), `edit 事务体内回执仍有汉字：${edit.message}`);
+});
+
+test('#197 跨事务边界：delete 折读失败的回执随 locale', async () => {
+  freshOwnershipDir();
+  // `ownEvents()` 抛 ⇒ `foldUserState` 抛出 ⇒ 删除路径的读失败分支（事务体内部）。
+  const agent = fakeAgent();
+  agent.session = unreadableSession();
+  const result = await userScheduleDelete('schedule-ghost', agent, fakeCtx, 'en');
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'internal_error');
+  assert.ok(!looksChinese(result.message), `delete 事务体内回执仍有中文：${result.message}`);
+  assert.equal(result.message, hostDictFor('en').errToolLogUnreadable);
+});
+
 test('未收录的 locale id 回退 zh（不是回退 en，也不是抛）', () => {
   assert.equal(hostDictFor('xx-XX').errToolPromptEmpty, hostDictFor('zh').errToolPromptEmpty);
   assert.equal(hostDictFor(undefined).errToolPromptEmpty, hostDictFor('zh').errToolPromptEmpty);

@@ -303,7 +303,26 @@ export const DEFAULT_MAX_PROMPT_CHARS = 1000;
  * 同一事件循环里，工具执行（已进入 en 作用域）可能同步调用另一个导出函数，
  * 或者测试想临时切语言再嵌套切回。单变量 + 保存/恢复在**同步**路径上其实够用，
  * 但栈让「异常打断」的恢复点仍然明确（`finally` 里弹出的是自己压的那一层）。
- * 注意本模块所有路径都是同步的（不 await 跨作用域），所以不需要 AsyncLocalStorage。
+ *
+ * ## 但栈只覆盖**同步窗口**，跨事务边界必须靠入口钉住的局部字典（issue #197）
+ *
+ * 写路径不短：所有读改写都排在 `runUserScheduleTransaction` 的微任务里
+ * （`tails.get(agent).then(operation)`）。入口的 `try` 里 `return` 那个 promise 之后，
+ * `finally { leaveLocale() }` 立刻把栈弹空——那一刻事务体**还没起跑**。于是事务体内
+ * `hostT()` 取到的是空栈 ⇒ zh，`locale:'en'` 只对外层同步校验生效，回执永远中文。
+ *
+ * 旧注释曾写「本模块所有路径都是同步的（不 await 跨作用域），所以不需要
+ * AsyncLocalStorage」。路径确实是同步的，但事务体不在**同一个**同步窗口里——
+ * 这句话是错的，它把「代码里没有跨作用域 await」误当成「栈的生命周期覆盖整次调用」。
+ *
+ * 现在两类位置各用各的来源，判据只有一条「此刻在不在入口的同步窗口内」：
+ *  - **纯函数**（`validatePrompt` / `validateCreateInput` / `validateUpdateInput`）
+ *    仍在同步窗口内，走栈即可；测试也是独立调用它们，靠 `enterHostLocale` 指定语言。
+ *  - **导出函数的读改写事务体**在入口用 {@link hostTextFor} 钉一份局部字典，闭包
+ *    带着它进微任务，语言不再依赖「此刻栈里是什么」。
+ *
+ * 仍然不引入 AsyncLocalStorage：它救的是「忘了传语言」，而这里要的恰恰是**显式**
+ * 一份随闭包走的值——事务体是唯一读者，多一层隐式传递只会让漏传更难发现。
  */
 let hostLocaleStack: string[] = [];
 
@@ -341,7 +360,37 @@ export function resetHostLocaleForTest(): void {
 }
 
 /**
+ * 入口钉住的一份文案来源：字典 + 渲染器都取自**进调用那一刻**的语言。
+ *
+ * 为什么不是「再读一次栈」：读改写事务体排在微任务里（见 `runUserScheduleTransaction`），
+ * 那时入口的 `finally` 已经弹栈。闭包带着这份值走，语言就不再是「此刻栈里是什么」的
+ * 函数（issue #197 的根因）。纯函数不需要它——它们本就在同步窗口内，走栈更省。
+ */
+export interface HostText {
+  readonly dict: ReturnType<typeof hostDictFor>;
+  /** 无参键的回执文案。 */
+  readonly t: (key: HostUIKey) => string;
+  /** 带 `{name}` 占位符的回执文案。 */
+  readonly tf: (key: HostUIKey, params: Record<string, string | number>) => string;
+}
+
+/**
+ * 在入口处钉一份文案来源（`undefined` 同样回退 zh，与 `hostDictFor` 同规则）。
+ */
+export function hostTextFor(locale: string | undefined): HostText {
+  const dict = hostDictFor(locale);
+  return {
+    dict,
+    t: (key) => dict[key],
+    tf: (key, params) => hostFormat(dict[key], params),
+  };
+}
+
+/**
  * 取当前作用域的宿主字典。
+ *
+ * 只给**同步窗口内**的纯函数用；事务体一律读入口钉住的 {@link HostText}
+ * （理由见上面「栈只覆盖同步窗口」那段）。
  *
  * `hostDictFor(undefined)` 会回退 zh（`isLocaleId` 判假），与本模块的历史行为一致。
  */
@@ -350,7 +399,7 @@ function hostT(): ReturnType<typeof hostDictFor> {
 }
 
 /**
- * 按当前作用域语言格式化一条带占位符的回执。
+ * 按当前作用域语言格式化一条带占位符的回执（同样只给同步窗口内的纯函数用）。
  *
  * 占位符走 `hostFormat` 的 `{name}` 语法而**不是**模板字符串拼接：拼接会把「语序」
  * 固化进代码（中文「{date} {time} 在 {tz} 里…」与德语「Zur Zeit … in {tz}」语序不同），
@@ -808,25 +857,25 @@ export function foldUserState(session: Session): UserFoldState {
 }
 
 /** 稳定内部错误（不透出异常细节）。 */
-export function internalError(): UserScheduleError {
-  return { ok: false, code: 'internal_error', message: hostT().errToolInternalFailed };
+export function internalError(text?: HostText): UserScheduleError {
+  return { ok: false, code: 'internal_error', message: (text?.dict ?? hostT()).errToolInternalFailed };
 }
 
 /** 稳定持久化不确定错误。 */
-export function persistenceError(): UserScheduleError {
+export function persistenceError(text?: HostText): UserScheduleError {
   return {
     ok: false,
     code: 'persistence_uncertain',
-    message: hostT().errToolPersistenceUnconfirmed,
+    message: (text?.dict ?? hostT()).errToolPersistenceUnconfirmed,
   };
 }
 
 /** 把 dsh-schedule 的 ScheduleInputError 翻译为闭包错误值。 */
-export function toInputError(error: unknown): UserScheduleError {
+export function toInputError(error: unknown, text?: HostText): UserScheduleError {
   if (error instanceof ScheduleInputError) {
     return { ok: false, code: error.code, message: error.message };
   }
-  return internalError();
+  return internalError(text);
 }
 
 /** 记录视图的 snake_case 序列化。 */
@@ -953,9 +1002,10 @@ export async function userScheduleCreate(
   options?: UserScheduleCreateOptions,
   limits?: PromptLimits,
 ): Promise<UserScheduleCreateResult> {
-  // 语言的取值必须包住整次调用（含 `validateCreateInput` 这层纯函数），见
-  // `enterHostLocale` 的注释：纯函数的回执不走形参，走这里压栈的作用域。
+  // 语言的取值必须包住整次调用：同步窗口内的 `validateCreateInput` 走栈，
+  // 事务体（微任务）走下面钉住的 `text`，见 `enterHostLocale` 与 `HostText` 的注释。
   const leaveLocale = enterHostLocale(options?.locale);
+  const text = hostTextFor(options?.locale);
   try {
     const validated = validateCreateInput(input, limits);
     if (!validated.ok) return validated;
@@ -973,14 +1023,14 @@ export async function userScheduleCreate(
         folded = state.folded;
         owned = state.owned;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const activeCount = folded.active.filter((record) => owned.has(record.id)).length;
       if (activeCount >= maxSchedules) {
         return {
           ok: false,
           code: 'quota_exceeded',
-          message: hostTf('errToolQuotaFull', { maxSchedules }),
+          message: text.tf('errToolQuotaFull', { maxSchedules }),
         };
       }
       const id = allocateScheduleId(folded);
@@ -988,7 +1038,7 @@ export async function userScheduleCreate(
       try {
         record = buildScheduleRecord(validated.value, id, now);
       } catch (error) {
-        return toInputError(error);
+        return toInputError(error, text);
       }
       // 所有权写 sidecar（append 之前：投影 fold 在事件到达时按 sidecar 判定归属）。
       // flush 失败则回滚，避免 sidecar 与日志漂移。
@@ -1012,11 +1062,11 @@ export async function userScheduleCreate(
         });
       } catch {
         removeOwnership(sessionId, id);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
         removeOwnership(sessionId, id);
-        return persistenceError();
+        return persistenceError(text);
       }
       const view = scheduleViewCompat(record, Date.now());
       return {
@@ -1035,6 +1085,7 @@ export async function userScheduleList(
   locale?: string,
 ): Promise<UserScheduleListResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     return runUserScheduleTransaction(agent, async () => {
       let folded;
@@ -1044,7 +1095,7 @@ export async function userScheduleList(
         folded = state.folded;
         owned = state.owned;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const now = Date.now();
       const schedules = folded.active
@@ -1065,9 +1116,10 @@ export async function userScheduleDelete(
   locale?: string,
 ): Promise<UserScheduleDeleteResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof id !== 'string' || id.length === 0 || id.trim() !== id) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolScheduleIdInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolScheduleIdInvalid') };
     }
     return runUserScheduleTransaction(agent, async () => {
       const sessionId = agent.session.header?.id;
@@ -1075,7 +1127,7 @@ export async function userScheduleDelete(
       try {
         folded = foldUserState(agent.session).folded;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       // 1) 活动任务：uid → scheduleId
       const activeId = resolveActiveScheduleId(sessionId, id);
@@ -1087,9 +1139,9 @@ export async function userScheduleDelete(
             id: ScheduleId(activeId),
           });
         } catch {
-          return internalError();
+          return internalError(text);
         }
-        if (!(await flushSession(ctx, agent.session))) return persistenceError();
+        if (!(await flushSession(ctx, agent.session))) return persistenceError(text);
         removeOwnership(sessionId, activeId);
         return { ok: true, id, deleted: true };
       }
@@ -1125,9 +1177,10 @@ export async function userScheduleEditPrompt(
   locale?: string,
 ): Promise<UserScheduleCreateResult | UserScheduleError> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof id !== 'string' || id.length === 0 || id.trim() !== id) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolScheduleIdInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolScheduleIdInvalid') };
     }
     const promptResult = validatePrompt(newPrompt, limits);
     if (!promptResult.ok) return promptResult;
@@ -1153,7 +1206,7 @@ export async function userScheduleEditPrompt(
         folded = state.folded;
         deliveries = state.delivery;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const existing = folded.active.find((record) => record.id === scheduleId);
       if (existing === undefined) {
@@ -1197,7 +1250,7 @@ export async function userScheduleEditPrompt(
         return {
           ok: false,
           code: 'schedule_not_found',
-          message: hostTf('errToolScheduleNotFoundById', { id }),
+          message: text.tf('errToolScheduleNotFoundById', { id }),
         };
       }
       // P0-4：已过期（overdue）的 at 任务禁止改内容——「保留原时刻」会让新记录
@@ -1210,7 +1263,7 @@ export async function userScheduleEditPrompt(
         return {
           ok: false,
           code: 'already_overdue',
-          message: hostTf('errToolEditOverdue', { id: scheduleId }),
+          message: text.tf('errToolEditOverdue', { id: scheduleId }),
         };
       }
       const now = Date.now();
@@ -1247,7 +1300,7 @@ export async function userScheduleEditPrompt(
           );
         }
       } catch (error) {
-        return toInputError(error);
+        return toInputError(error, text);
       }
       const delivery = deliveries.get(scheduleId) ?? 'context';
       // 新所有权先写 sidecar（create 事件到达投影 fold 时按 sidecar 判定归属）；
@@ -1272,7 +1325,7 @@ export async function userScheduleEditPrompt(
         agent.session.append('schedule/change', { version: 1, operation: 'create', schedule: toChangePayload(record) });
       } catch {
         removeOwnership(sessionId, record.id);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
         removeOwnership(sessionId, record.id);
@@ -1289,7 +1342,7 @@ export async function userScheduleEditPrompt(
             previousEntry.scheduledAt,
           );
         }
-        return persistenceError();
+        return persistenceError(text);
       }
       removeOwnership(sessionId, scheduleId);
       const view = scheduleViewCompat(record, Date.now());
@@ -1318,9 +1371,10 @@ export async function userSchedulePause(
   locale?: string,
 ): Promise<UserSchedulePauseResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof id !== 'string' || id.length === 0 || id.trim() !== id) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolScheduleIdInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolScheduleIdInvalid') };
     }
     return runUserScheduleTransaction(agent, async () => {
       const sessionId = agent.session.header?.id;
@@ -1333,7 +1387,7 @@ export async function userSchedulePause(
         owned = state.owned;
         deliveryMap = state.delivery;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const scheduleId = resolveActiveScheduleId(sessionId, id);
       const existing = folded.active.find((record) => record.id === scheduleId);
@@ -1341,11 +1395,11 @@ export async function userSchedulePause(
         return {
           ok: false,
           code: 'schedule_not_found',
-          message: hostTf('errToolPauseNotFoundById', { id }),
+          message: text.tf('errToolPauseNotFoundById', { id }),
         };
       }
       if (existing.kind !== 'after') {
-        return { ok: false, code: 'unsupported_kind', message: hostT().errToolPauseUnsupportedKind };
+        return { ok: false, code: 'unsupported_kind', message: text.t('errToolPauseUnsupportedKind') };
       }
       const now = Date.now();
       const target = Date.parse(existing.scheduledAt);
@@ -1353,7 +1407,7 @@ export async function userSchedulePause(
         return {
           ok: false,
           code: 'already_overdue',
-          message: hostT().errToolPauseOverdue,
+          message: text.t('errToolPauseOverdue'),
         };
       }
       const remainingSeconds = Math.max(1, Math.ceil((target - now) / 1000));
@@ -1407,11 +1461,11 @@ export async function userSchedulePause(
         });
       } catch {
         removePaused(sessionId, uid);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
         removePaused(sessionId, uid);
-        return persistenceError();
+        return persistenceError(text);
       }
       removeOwnership(sessionId, scheduleId);
       return {
@@ -1436,9 +1490,10 @@ export async function userScheduleResume(
   locale?: string,
 ): Promise<UserScheduleResumeResult> {
   const leaveLocale = enterHostLocale(locale);
+  const text = hostTextFor(locale);
   try {
     if (typeof uid !== 'string' || uid.length === 0 || uid.trim() !== uid) {
-      return { ok: false, code: 'invalid_rule', message: hostT().errToolUidInvalid };
+      return { ok: false, code: 'invalid_rule', message: text.t('errToolUidInvalid') };
     }
     return runUserScheduleTransaction(agent, async () => {
       const sessionId = agent.session.header?.id;
@@ -1447,7 +1502,7 @@ export async function userScheduleResume(
         return {
           ok: false,
           code: 'not_paused',
-          message: hostTf('errToolResumeNotFound', { uid }),
+          message: text.tf('errToolResumeNotFound', { uid }),
         };
       }
       let folded;
@@ -1457,14 +1512,14 @@ export async function userScheduleResume(
         folded = state.folded;
         owned = state.owned;
       } catch {
-        return { ok: false, code: 'internal_error', message: hostT().errToolLogUnreadable };
+        return { ok: false, code: 'internal_error', message: text.t('errToolLogUnreadable') };
       }
       const activeCount = folded.active.filter((record) => owned.has(record.id)).length;
       if (activeCount >= maxSchedules) {
         return {
           ok: false,
           code: 'quota_exceeded',
-          message: hostTf('errToolQuotaFull', { maxSchedules }),
+          message: text.tf('errToolQuotaFull', { maxSchedules }),
         };
       }
       const now = Date.now();
@@ -1477,7 +1532,7 @@ export async function userScheduleResume(
           now,
         );
       } catch (error) {
-        return toInputError(error);
+        return toInputError(error, text);
       }
       // 先清 paused：投影 fold 在 append(create) 时读 sidecar；若 create 落地后才
       // removePaused，视图会短暂同时出现「已暂停」+ 新活动行（实测重复行根因）。
@@ -1501,12 +1556,12 @@ export async function userScheduleResume(
       } catch {
         removeOwnership(sessionId, record.id);
         recordPaused(sessionId, paused);
-        return internalError();
+        return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
         removeOwnership(sessionId, record.id);
         recordPaused(sessionId, paused);
-        return persistenceError();
+        return persistenceError(text);
       }
       return {
         ok: true,
