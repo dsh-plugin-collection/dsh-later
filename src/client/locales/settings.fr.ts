@@ -79,6 +79,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   sectionDisplayToggle: 'Entrée des réglages',
   showInSettings: 'Afficher dans les réglages',
   showInSettingsHint: 'Affiche la page de réglages de cette extension dans la boîte de dialogue des réglages (actualisez la page pour que cela prenne effet)',
+  helpAria: 'Informations sur {label}',
 };
 
 export default dict;

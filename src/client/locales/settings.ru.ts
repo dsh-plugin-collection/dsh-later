@@ -79,6 +79,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   sectionDisplayToggle: 'Пункт настроек',
   showInSettings: 'Показывать в настройках',
   showInSettingsHint: 'Показывает страницу настроек этого плагина в диалоге настроек (для применения обновите страницу)',
+  helpAria: 'Описание: {label}',
 };
 
 export default dict;

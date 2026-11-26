@@ -8,6 +8,7 @@ import {
   type SmartWindowConfig,
 } from '../../smart-window.js';
 import { CLOCK_SVG_CLASSIC, CLOCK_SVG_MODERN } from '../session-presence.js';
+import { format } from '../locales/ui.js';
 
 /**
  * 时钟风格预览 —— 直接复用 session-presence.ts 里线上 badge 用的**同一份** SVG
@@ -709,7 +710,7 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
                         <button
                           type="button"
                           className={helpOpen[field.key] === true ? 'ss-help-btn ss-help-btnOpen' : 'ss-help-btn'}
-                          aria-label={`${t(labelKey)}说明`}
+                          aria-label={format(t('helpAria'), { label: t(labelKey) })}
                           aria-expanded={helpOpen[field.key] === true}
                           aria-controls={`ss-help-${field.key}`}
                           onClick={() => setHelpOpen((prev) => ({ ...prev, [field.key]: !prev[field.key] }))}
@@ -759,7 +760,7 @@ function SchedulerSettingsForm({ scope, t, surface, snapshot, failed, setFailed 
                     <p className="ss-card-invalid" role="status">{invalid}</p>
                   ) : null}
                   {helpOpen[field.key] === true && hintKey !== undefined && t(hintKey).length > 0 ? (
-                    <div id={`ss-help-${field.key}`} role="region" aria-label={`${t(labelKey)}说明`} className="ss-help">
+                    <div id={`ss-help-${field.key}`} role="region" aria-label={format(t('helpAria'), { label: t(labelKey) })} className="ss-help">
                       <p>{t(hintKey)}</p>
                     </div>
                   ) : null}

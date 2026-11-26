@@ -79,6 +79,7 @@ const dict: { [K in keyof typeof zh]: string } = {
   sectionDisplayToggle: '設定の入口',
   showInSettings: '設定に表示',
   showInSettingsHint: '設定ダイアログにこのプラグインの設定ページを表示します（ページを再読み込みすると反映されます）',
+  helpAria: '{label}の説明',
 };
 
 export default dict;
