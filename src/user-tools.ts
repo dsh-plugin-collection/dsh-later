@@ -20,7 +20,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import type { Session, SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session';
 import * as schedNs from '@deepseek-ai/dsh-schedule';
 import { resolveEveryOccurrence } from '@deepseek-ai/dsh-schedule';
 import { ScheduleId, ScheduleInputError } from '@deepseek-ai/dsh-schedule';
@@ -951,6 +951,90 @@ async function flushSession(ctx: Context, session: Session): Promise<boolean> {
   }
 }
 
+/**
+ * 补偿事件里 `schedule/change` 的荷载类型。
+ *
+ * 直接取宿主 `SessionEventMap` 里的那一项，而不是本文件头那个同名的读视图
+ * `ScheduleChange`：读视图被本仓收窄过（`{operation, schedule?}` 一组，不含 `version`），
+ * 拿它当写载荷 tsc 会如实报不可赋值。这里让「写进日志的荷载」跟着宿主声明走，
+ * 跨代时由宿主自己变更形状。
+ */
+type SessionChangePayload = SessionEventMap['schedule/change'];
+
+/**
+ * 一次写事务的日志侧补偿入口：**补偿本身失败只告警，绝不改写本次返回值**。
+ *
+ * 为什么补偿要单独成形：`append` 之后 `flush` 返回 false，说明内存里的日志可能没
+ * 落盘（也可能只落了前半段）。那一刻唯一还能表达「这件事没成」的地方就是日志本身，
+ * 而已经 append 的 create 无法撤销（上游 fold 对 id 复用与「删已 dispatch 的 id」
+ * 都抛错——见 runtime.ts 的 `rearmOneShot` 那段）。于是补一笔**反向事件**把端态压回去。
+ *
+ * 为什么失败只 warn：此刻用户拿到的必须是「持久化未确认」这条真话。把补偿失败
+ * 升级成另一种错误码，会让「日志侧到底有没有这笔」更难判断，而补偿其实并不保证
+ * 成功（flush 已经不可用）。返回值不变是本函数的契约。
+ *
+ * 注意补偿事件**不再 flush**：刚失败的就是持久化 barrier，再调一次只会得到同样的
+ * 结论；内存里的补偿事件已经进了日志，宿主下一次 flush（下一次成功事务）会带上它。
+ */
+function compensateAppend(
+  ctx: Context,
+  session: Session,
+  agent: Agent,
+  events: readonly { readonly type: 'schedule/change'; readonly data: SessionChangePayload }[],
+  reason: string,
+): void {
+  for (const event of events) {
+    try {
+      session.append(event.type, event.data);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      ctx.logger?.warn(`later: ${reason}补偿追加失败 agent "${agent.id}": ${detail}`);
+    }
+  }
+}
+
+/**
+ * 把一条**因 flush 失败而从日志里消失**的旧记录重新立起来（edit 路径的日志侧补偿）。
+ *
+ * 为什么不按直觉写「create(旧 id)」：`dsh-schedule` 的严格 fold（0.1.5 / 0.1.7 / 0.2.1
+ * 都导出版本）对**复用已见过的 id** 直接抛 `schedule id … was reused`，本仓在那些
+ * 代次上取到的正是那条严格 fold（`upstreamFold` 存在就用它）。补一笔旧 id 会把整条
+ * schedule 折叠路径打成永久抛错——下一次 `user_schedule_list` 直接回「日志读取失败」，
+ * 比丢掉一条提醒更糟。0.2.2-alpha.3 起本仓自己的容错 fold 对复用 id 是静默跳过，
+ * 于是同一份补偿在那一侧又会变成**什么都不做**。
+ *
+ * 所以走本仓已有的既有做法（`runtime.ts` 的 `rearmOneShot` 同一个理由）：**换新 id、
+ * 保住内容与时刻**，uid 不变。三件事各有代价，都写着：
+ *  - `after` 用「剩余秒数」重建，目标时刻按秒取整，最多漂 <1s；
+ *  - `at` 原样保留 ISO 时刻；
+ *  - `every` 只能按原间隔从「现在」重排，下一次时刻可能比原来晚不到一个间隔
+ *    （周期提醒本来就没有「第几次」的概念，能够晚一点、不会早发）。
+ *
+ * @returns 重建后的日志 id；连事件都构造不出来时返回 undefined（调用方只告警）。
+ */
+function restoreEditedRecord(
+  folded: ReturnType<typeof foldUserState>['folded'],
+  existing: ScheduleRecord,
+  now: number,
+): ScheduleRecord | undefined {
+  const id = allocateScheduleId(folded);
+  try {
+    if (existing.kind === 'after') {
+      const target = Date.parse(existing.scheduledAt);
+      const remaining = Number.isFinite(target) ? Math.max(1, Math.ceil((target - now) / 1000)) : existing.afterSeconds;
+      return createAfterScheduleRecord(id, existing.prompt, remaining, now);
+    }
+    if (existing.kind === 'at') {
+      return createAtScheduleRecord(id, existing.prompt, existing.scheduledAt, now);
+    }
+    const everySeconds =
+      existing.kind === 'every' && typeof existing.everySeconds === 'number' ? existing.everySeconds : 300;
+    return createEveryScheduleRecord(id, existing.prompt, everySeconds, now);
+  } catch {
+    return undefined;
+  }
+}
+
 /** 构造一条通过与 dsh-schedule 完全兼容的 `schedule/change` 记录。 */
 function buildScheduleRecord(input: UserScheduleCreateInput, id: ReturnType<typeof ScheduleId>, now: number): ScheduleRecord {
   if (input.at !== undefined) {
@@ -1065,6 +1149,21 @@ export async function userScheduleCreate(
         return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
+        // 日志侧补一笔反向事件：内存里那条 create 已经进日志（可能落盘也可能只落一半），
+        // 而 sidecar 马上要被撤。不补的话，一次「没落根」的 create 会在下次冷恢复的
+        // fold 里复活成一条无人认领、且扫描器再也看不见的提醒（issue #205）。
+        compensateAppend(
+          ctx,
+          agent.session,
+          agent,
+          [
+            {
+              type: 'schedule/change',
+              data: { version: 1, operation: 'delete', id: ScheduleId(id) },
+            },
+          ],
+          'create 失败回滚',
+        );
         removeOwnership(sessionId, id);
         return persistenceError(text);
       }
@@ -1328,18 +1427,64 @@ export async function userScheduleEditPrompt(
         return internalError(text);
       }
       if (!(await flushSession(ctx, agent.session))) {
+        /**
+         * 日志侧**成对**压回旧记录（issue #205）。
+         *
+         * 编辑是「删旧 + 建新」两笔。flush 失败时只撤 sidecar 的话，内存日志里的端态是
+         * 「旧的没了、新的在」：用户以为改失败了（拿到 persistence_uncertain），面板上
+         * 却多出一条改过的提醒，而且它的 sidecar 已被撤——那正是「日志与 sidecar 漂移」。
+         *
+         * 旧注释曾写「旧记录此刻仍是 active 的（日志里的 create 没被撤销）」，这句话是
+         * **错的**：旧记录在上一行就被 `delete` 事件摘掉了，无论 flush 成没成，fold 端态
+         * 里它都不再 active。所以必须真补两笔：先 `delete` 新记录，再「重建」旧记录。
+         * 重建为什么换新 id 而不是复用旧 id，见 {@link restoreEditedRecord}。
+         */
+        compensateAppend(
+          ctx,
+          agent.session,
+          agent,
+          [
+            {
+              type: 'schedule/change',
+              data: { version: 1, operation: 'delete', id: ScheduleId(record.id) },
+            },
+          ],
+          'edit 失败回滚（删新记录）',
+        );
+        // 日志侧的重建与 sidecar 无关：`previousEntry` 缺席只说明这条不是用户建的
+        // （别的插件写进来的记录也可能被编辑），日志的端态照样必须压回去。
+        const restored = restoreEditedRecord(folded, existing, Date.now());
+        if (restored !== undefined) {
+          compensateAppend(
+            ctx,
+            agent.session,
+            agent,
+            [
+              {
+                type: 'schedule/change',
+                data: { version: 1, operation: 'create', schedule: toChangePayload(restored) },
+              },
+            ],
+            'edit 失败回滚（重建旧记录）',
+          );
+        } else {
+          ctx.logger?.warn(`later: 编辑回滚重建失败 agent "${agent.id}"，日志侧只剩 delete，面板可能少一条提醒`);
+        }
+        // sidecar 跟着日志的端态走：**两个**旧 id 都要撤（旧 id 已被 delete 事件摘掉，
+        // 新 id 已被上面的补偿删掉），旧内容只挂在重建后的 id 上（uid 不变，于是 dock
+        // 与命令面看到的仍是同一条提醒）。漏撤旧 id 的后果是两行 sidecar 共用同一个
+        // uid —— `findScheduleIdByUid` 只能命中其中一行，dock 与删除按钮会指向错的那条。
         removeOwnership(sessionId, record.id);
-        // 回滚同样要把 `scheduledAt` 带回去：只恢复 delivery 会让扫描器看不见这条提醒，
-        // 而它此刻仍是 active 的（日志里的 create 没被撤销，flush 失败的只有新写入）。
-        if (previousEntry !== undefined) {
+        removeOwnership(sessionId, scheduleId);
+        if (restored !== undefined && previousEntry !== undefined) {
           recordOwnership(
             sessionId,
-            scheduleId,
+            restored.id,
             previousEntry.delivery,
             previousEntry.uid,
             previousEntry.windowSeconds,
             previousEntry.attachments,
-            previousEntry.scheduledAt,
+            Date.parse(restored.scheduledAt),
           );
         }
         return persistenceError(text);
