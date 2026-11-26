@@ -6,67 +6,61 @@
 
 ## 1.15.1-beta.0 — 2026-11-26
 
-### 修复
-
-- **提醒到点前，dock 里的进度条在「收起 → 等一会儿 → 展开」后停在旧位置**（#202）。列表常驻 DOM
+- **fix** **提醒到点前，dock 里的进度条在「收起 → 等一会儿 → 展开」后停在旧位置**（#202）。列表常驻 DOM
   （为了 `aria-controls` 永远指向真实目标），收起不会卸载行；而进度条的动画相位是在挂载那一刻
   冻结的——两个机制相撞，展开后相位还是收起那一刻的。现在改用显式相位版本号：展开边沿 +1，
   进度条在 effect 里据此重取相位，不依赖「React 会不会在 key 变化时重建子树」这种框架内部行为。
 
-- **定时面板打开后焦点没进面板，键盘用户 Tab 会走到面板后面的元素**（#204）。焦点是副作用不是
+- **fix** **定时面板打开后焦点没进面板，键盘用户 Tab 会走到面板后面的元素**（#204）。焦点是副作用不是
   渲染结果：面板打开时 `document.activeElement` 还是点击前的输入框，屏幕阅读器根本不会念 dialog
   内容。现在打开即把焦点搬进面板；关闭时**只在「焦点仍在面板内」才归还**——用户在面板外点过或
   自己挪走了焦点，就不再拽回时钟按钮。Esc 也不再抢键。
 
-- **宿主某帧没给 input 快照时，定时面板与按钮整棵子树会消失**（#203）。`useInput` / `useProjection`
+- **fix** **宿主某帧没给 input 快照时，定时面板与按钮整棵子树会消失**（#203）。`useInput` / `useProjection`
   在类型上是可选宿主标准件，旧实现按「这一帧有没有」分支调用，槽位数从 N 变 N-1，React 抛
   `Rendered more/fewer hooks than during the previous render`，用户看到入口直接不见了、也没有报错。
   现在槽位恒定（`useStableHook`）。
 
-- **同一条待发提醒可能投递两次**（#203）。旧实现把待发队列放进 state 并让它当投递 effect 的依赖：
+- **fix** **同一条待发提醒可能投递两次**（#203）。旧实现把待发队列放进 state 并让它当投递 effect 的依赖：
   一条成交 → setState → 重渲染 → cleanup 把 `cancelled` 置真 → 正在 await 的下一条回来时**不**
   removePending，但命令已经送达 → 恢复网络后又投一遍。现在按 `clientSeq` 幂等。
 
-- **`create` / `edit` 半落根**（#205）。flush 失败分支此前只撤 sidecar，内存日志里的端态停在
+- **fix** **`create` / `edit` 半落根**（#205）。flush 失败分支此前只撤 sidecar，内存日志里的端态停在
   「create 在、所有权没了」，下一次冷恢复会折出一条无人认领、扫描器也不认的条目。现在日志侧
   成对回滚。
 
-- **`every_seconds` 的三处说法互不一致**（#198）：声明、准入、回执各说一个数。现在统一取严
+- **fix** **`every_seconds` 的三处说法互不一致**（#198）：声明、准入、回执各说一个数。现在统一取严
   **300**（`MIN_EVERY_SECONDS`，与 `MAX_AFTER_SECONDS` 同处），并本地化上游错误码。
 
-- **写路径上的回执语言会跨微任务丢失**（#197）。写路径排在 `tails.get(agent).then(operation)` 的
+- **fix** **写路径上的回执语言会跨微任务丢失**（#197）。写路径排在 `tails.get(agent).then(operation)` 的
   微任务里，入口的 `finally { leaveLocale() }` 在 `return` 那个 promise 之后立刻弹栈，事务体起跑时
   栈已空，`locale:'en'` 就丢了。现在事务体内回执钉住入口字典。
 
-- **改了「时钟图标风格」之后，已经显示在侧栏的 badge 停在旧图标上**（#200）。badge 的 SVG 是
+- **fix** **改了「时钟图标风格」之后，已经显示在侧栏的 badge 停在旧图标上**（#200）。badge 的 SVG 是
   `innerHTML` 一次性注入的字符串，对账分支只比 `data-state` / `aria` / `title`，风格不在判据里。
   现在风格变化后重画已注入的 badge。
 
-- **设置卡的两处 `aria-label` 把中文写进了源码**（#201）。它拼的是 `${t(labelKey)}说明`，中文藏
+- **fix** **设置卡的两处 `aria-label` 把中文写进了源码**（#201）。它拼的是 `${t(labelKey)}说明`，中文藏
   在模板串插值的尾巴上，原有护栏两类都抓不到。现在改成带参键，并补上护栏的三类盲区。
 
-- **跨内核矩阵页的表头少一列**（#208）。`badge` 这一面进了判据、进了 manifest、进了每行格子，
+- **fix** **跨内核矩阵页的表头少一列**（#208）。`badge` 这一面进了判据、进了 manifest、进了每行格子，
   唯独没进表头——看起来是「4 列表头 + 5 列数据」，第四张图挂在一个没有列名的格子里。现在补上
   并加了「表头列数 = 每行格数」的结构断言。
 
-### 性能
-
-- **冷唤醒热路径不再枚举整个 sidecar 目录**（#199）。`hasOverdueEntry` 只为回答「这一个会话有没有
+- **perf** **冷唤醒热路径不再枚举整个 sidecar 目录**（#199）。`hasOverdueEntry` 只为回答「这一个会话有没有
   到期条目」就走了 `listOwnershipSnapshots()`：`readdirSync` + 每个 sidecar 两次 `statSync`，
   实测 **0.86 ms/次**，而单会话读只要零头。现在按会话直读。
 
-- **成本曲线上的三件事一起收**（#207）：已消化条目 60 秒后出列不再永久滞留、空 sidecar 删除、
+- **perf** **成本曲线上的三件事一起收**（#207）：已消化条目 60 秒后出列不再永久滞留、空 sidecar 删除、
   fold 代数按会话、镜像复用调用方的 fold。每件单看都「现在不疼」，叠起来随会话寿命线性增长。
 
-### 其他
-
-- **跨内核矩阵进 CI**（#208）：红与「未判定」分开呈现，不再混成一个「失败」。
-- **`npm test` 统计 skipped 并加 `--require-no-skip` 严格档**（#208）。此前 4 条真对端用例
+- **chore** **跨内核矩阵进 CI**（#208）：红与「未判定」分开呈现，不再混成一个「失败」。
+- **chore** **`npm test` 统计 skipped 并加 `--require-no-skip` 严格档**（#208）。此前 4 条真对端用例
   在 worktree 里静默 skip，一条从不跑的测试比没有测试更糟。
-- **`prepublishOnly` 串上 `check:release`**，发布前的包内容自检不再靠人记得跑。
-- **`verified-on` 台账改成 `.mjs` + JSDoc**，脱离 tsconfig 失明；台账测试改读 `package.json`，
+- **chore** **`prepublishOnly` 串上 `check:release`**，发布前的包内容自检不再靠人记得跑。
+- **chore** **`verified-on` 台账改成 `.mjs` + JSDoc**，脱离 tsconfig 失明；台账测试改读 `package.json`，
   每发一版不再固定红一条。
-- 抽 `scripts/lib/playwright-loader.mjs` 统一 playwright 解析；删掉全仓零引用的
+- **chore** 抽 `scripts/lib/playwright-loader.mjs` 统一 playwright 解析；删掉全仓零引用的
   `verify-clock-progress.mjs`；`build-artifact-shape` 去掉被共享夹具替掉的未用导入。
 
 ## 1.15.0 — 2026-11-20
