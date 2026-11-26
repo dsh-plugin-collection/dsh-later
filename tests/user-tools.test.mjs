@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 // `foldScheduleEvents` 自 dsh-schedule@0.2.2-alpha.3 起被移除，从上游具名 import 是
 // 链接期硬失败（整个文件一条用例都跑不起来）。这里取本仓的同义实现：有上游走上游，
 // 没有走 `foldScheduleEventsCompat`——正是要在跨代上都核对本插件写入的事件能被折出来。
-import { MIN_EVERY_INTERVAL_SECONDS } from '@deepseek-ai/dsh-schedule';
+import { MIN_EVERY_SECONDS } from '../lib/due.js';
 import {
   DEFAULT_MAX_SCHEDULES,
   foldScheduleEventsLikeUpstream as foldScheduleEvents,
@@ -120,14 +120,21 @@ test('create 校验：空 prompt / 多选 / 非法时区 / 过低频次', async 
   );
   assert.ok(!badTz.ok && badTz.code === 'invalid_time_zone');
 
-  // 最小周期随内核代次变化（0.1.5 = 300s，0.1.7 = 60s），故按内核实际常量
-  // 取「刚好低于下限」的值，避免把某代的阈值写死进测试。
+  // 地板是**本仓自己的** 300（不是随内核漂的 MIN_EVERY_INTERVAL_SECONDS：0.1.7-rc.1
+  // 及更早是 300、rc.2 起是 60），见 src/due.ts 的 MIN_EVERY_SECONDS 与 issue #198。
   const tooFast = await userScheduleCreate(
-    { prompt: 'x', every_seconds: MIN_EVERY_INTERVAL_SECONDS - 1, time_zone: 'Asia/Shanghai' },
+    { prompt: 'x', every_seconds: MIN_EVERY_SECONDS - 1, time_zone: 'Asia/Shanghai' },
     fakeAgent(),
     fakeCtx,
   );
   assert.ok(!tooFast.ok && tooFast.code === 'frequency_too_high');
+  // 恰在地板上必须放行：把 300 写成 `< 300` 还是 `<= 300` 只差一次边界，别靠人眼读。
+  const atFloor = await userScheduleCreate(
+    { prompt: 'x', every_seconds: MIN_EVERY_SECONDS, time_zone: 'Asia/Shanghai' },
+    fakeAgent(),
+    fakeCtx,
+  );
+  assert.ok(atFloor.ok, `every_seconds=${MIN_EVERY_SECONDS} 必须被接受：${JSON.stringify(atFloor)}`);
 });
 
 test('create 过去时间 → not_future', async () => {

@@ -13,7 +13,6 @@ export declare const zh: {
     readonly presentList: "列出定时提醒";
     readonly presentDelete: "删除定时提醒";
     readonly cmdLaterDesc: "创建一条会话内定时提醒（GUI 内部通道）。";
-    readonly cmdScheduleDesc: "创建一条会话内定时提醒（GUI 内部通道）。";
     readonly cmdListDesc: "列出当前会话用户创建的定时提醒（GUI 内部通道）。";
     readonly cmdDeleteDesc: "删除一条会话内定时提醒（GUI 内部通道）。";
     readonly cmdEditDesc: "修改一条会话内定时提醒的内容（保留原时刻；GUI 内部通道）。";

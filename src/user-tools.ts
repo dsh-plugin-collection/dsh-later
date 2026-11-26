@@ -242,7 +242,7 @@ import {
   asLegacySchedules,
 } from './schedule-compat.js';
 import { OWNED_EVENT } from './domain.js';
-import { MAX_AFTER_SECONDS } from './due.js';
+import { MAX_AFTER_SECONDS, MIN_EVERY_SECONDS } from './due.js';
 import type { UserScheduleOwnedChange, UserScheduleDelivery } from './domain.js';
 import { hostDictFor, hostFormat } from './locales/host.js';
 import type { HostUIKey } from './locales/host.js';
@@ -685,6 +685,21 @@ export function validateCreateInput(
     }
     if (raw > MAX_AFTER_SECONDS) return tooLong();
   }
+  /**
+   * `every_seconds` 的**地板**单独判：`after_seconds` 没有下限（「10 秒后提醒我」是
+   * 合理用例，也是 README 演示），而固定间隔是**持续成本**，必须有准入下限。
+   *
+   * 为什么不交给上游的 `createEveryScheduleRecord`：上游那条地板在 0.1.7-rc.2 前后
+   * 从 300 掉到 60（见 `MIN_EVERY_SECONDS` 的注释），跟它走 = 同一次调用在不同内核上
+   * 结论不同，而 8 门字典早写着 ≥300。取严一侧，本仓自己兜。
+   *
+   * 与上一条用**两个** code/键：`frequency_too_high`（`errFrequencyTooHigh`）说的正是
+   * 「频率太高」，而复用 `invalid_rule` 会让用户以为形状写错了。
+   */
+  const everyRaw = args['every_seconds'];
+  if (typeof everyRaw === 'number' && Number.isInteger(everyRaw) && everyRaw < MIN_EVERY_SECONDS) {
+    return { ok: false, code: 'frequency_too_high', message: hostT().errFrequencyTooHigh };
+  }
 
   return { ok: true, value: { prompt: trimmed, time_zone, ...remainingSelectors(args, atNormalized) } };
 }
@@ -870,9 +885,54 @@ export function persistenceError(text?: HostText): UserScheduleError {
   };
 }
 
-/** 把 dsh-schedule 的 ScheduleInputError 翻译为闭包错误值。 */
+/**
+ * `ScheduleInputError.code` → 宿主字典键（issue #198）。
+ *
+ * ## 为什么必须接这一层
+ *
+ * 上游那些 message 是**英文**且**只给模型/开发者看**的（`The scheduled time must be
+ * strictly in the future.` 之类）。它们会经 `toInputError` 原样进工具回执——
+ * 于是德语用户提交一个过去的时刻，看到一句英文。8 门字典早就有这批 `err*` 键，
+ * 只是从来没人接上，「键在、引用 0」看起来像没用的死键。
+ *
+ * ## 为什么用一张表而不是 switch
+ *
+ * 表是可以被测试枚举的：`tests/error-code-superset.test.mjs` 从上游声明里取全部
+ * `ScheduleInputErrorCode`，缺一行就在这里少一个本地化分支。switch 只能靠人读。
+ *
+ * ## 哪些码**不**走本地化（取舍，别顺手补）
+ *
+ * - `quota_exceeded` → `errQuotaExceeded` 带 `{max}` 占位符，而上游 `ScheduleInputError`
+ *   的 message 里没有「上限是多少」这个数（那是 `ScheduleService` 才知道的额度）。
+ *   填一个猜来的数比英文原文更误导，所以这一条**保留上游文案**。本插件自己判额度时
+ *   走的是 `errToolQuotaFull`（带 `{maxSchedules}`），那条是真数。
+ * - 表里没有的码（上游将来新增，且本仓还没写文案）一律回落上游 message：宁可英文，
+ *   也不要一条对不上号的本地文案。表里**没有** `internal_error` 的兜底意义在此——
+ *   它由 {@link internalError} 自己渲染。
+ */
+const INPUT_ERROR_KEY: Partial<Record<UserScheduleErrorCode, HostUIKey>> = {
+  invalid_prompt: 'errEmptyPrompt',
+  invalid_selector: 'errInvalidSelector',
+  invalid_time_zone: 'errToolTimeZoneInvalid',
+  not_future: 'errNotFuture',
+  time_out_of_range: 'errTimeOutOfRange',
+  frequency_too_high: 'errFrequencyTooHigh',
+  invalid_rule: 'errInvalidRule',
+  subagent_session: 'errSubagentSession',
+  schedule_not_found: 'errScheduleNotFound',
+  already_overdue: 'errAlreadyOverdue',
+  unsupported_kind: 'errUnsupportedKind',
+  not_paused: 'errNotPaused',
+};
+
+/** 把 dsh-schedule 的 ScheduleInputError 翻译为闭包错误值（文案走本地字典）。 */
 export function toInputError(error: unknown, text?: HostText): UserScheduleError {
   if (error instanceof ScheduleInputError) {
+    // `code` 原样透出（`tests/upstream-compat.test.mjs` 钉着「翻译器不吞码」）。
+    const key = INPUT_ERROR_KEY[error.code];
+    if (key !== undefined) {
+      return { ok: false, code: error.code, message: (text?.dict ?? hostT())[key] };
+    }
     return { ok: false, code: error.code, message: error.message };
   }
   return internalError(text);

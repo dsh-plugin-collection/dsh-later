@@ -24,6 +24,8 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_MAX_SCHEDULES,
   enterHostLocale,
+  hostTextFor,
+  toInputError,
   resetHostLocaleForTest,
   userScheduleCreate,
   userScheduleDelete,
@@ -35,6 +37,7 @@ import {
   validatePrompt,
 } from '../lib/user-tools.js';
 import { hostDicts, hostDictFor, hostFormat } from '../lib/locales/host.js';
+import { ScheduleInputError } from '@deepseek-ai/dsh-schedule';
 import { LOCALE_IDS } from '../lib/locales/locale-id.js';
 import { freshOwnershipDir } from './helpers/ownership-state.mjs';
 
@@ -344,6 +347,73 @@ test('#197 跨事务边界：delete 折读失败的回执随 locale', async () =
   assert.equal(result.code, 'internal_error');
   assert.ok(!looksChinese(result.message), `delete 事务体内回执仍有中文：${result.message}`);
   assert.equal(result.message, hostDictFor('en').errToolLogUnreadable);
+});
+
+// ── 7. every_seconds 地板与 toInputError 本地化（issue #198）─────────────
+
+test('#198 every_seconds=90 被拒，且回执是本地语言（不是上游英文）', async () => {
+  freshOwnershipDir();
+  const agent = fakeAgent();
+  const result = await userScheduleCreate(
+    { prompt: 'x', every_seconds: 90 },
+    agent,
+    fakeCtx,
+    DEFAULT_MAX_SCHEDULES,
+    { locale: 'en' },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'frequency_too_high');
+  // 修复前这里要么放行（上游 0.2.x 地板是 60），要么透出上游英文
+  // `every_seconds must be at least 60.`；两种都不该出现。
+  assert.equal(result.message, hostDictFor('en').errFrequencyTooHigh);
+});
+
+test('#198 every_seconds=30 的 code 是 frequency_too_high（不是 invalid_rule）', async () => {
+  freshOwnershipDir();
+  // code 与文案是两件事：形状错一律 invalid_rule，而「间隔太短」有专属码，
+  // 调用方（GUI 高亮哪个字段）与模型（要不要改大一点）都靠它区分。
+  const api = await userScheduleCreate({ prompt: 'x', every_seconds: 30 }, fakeAgent(), fakeCtx);
+  assert.equal(api.ok, false, 'every_seconds=30 必须被拒');
+  assert.equal(api.code, 'frequency_too_high');
+  assert.equal(api.message, hostDictFor('zh').errFrequencyTooHigh, 'zh 回执走字典');
+});
+
+test('#198 toInputError 对 ScheduleInputError 走本地字典，code 原样透出', async () => {
+  const en = hostDictFor('en');
+  const cases = [
+    { code: 'not_future', key: 'errNotFuture' },
+    { code: 'time_out_of_range', key: 'errTimeOutOfRange' },
+    { code: 'frequency_too_high', key: 'errFrequencyTooHigh' },
+    { code: 'invalid_rule', key: 'errInvalidRule' },
+    { code: 'subagent_session', key: 'errSubagentSession' },
+    { code: 'invalid_prompt', key: 'errEmptyPrompt' },
+    { code: 'invalid_selector', key: 'errInvalidSelector' },
+    { code: 'invalid_time_zone', key: 'errToolTimeZoneInvalid' },
+  ];
+  for (const { code, key } of cases) {
+    const upstream = new ScheduleInputError(code, `upstream english for ${code}`);
+    const result = toInputError(upstream, hostTextFor('en'));
+    assert.equal(result.ok, false);
+    assert.equal(result.code, code, `${code}: code 必须原样透出（翻译器不吞码）`);
+    assert.equal(result.message, en[key], `${code}: 回执必须走本地字典（不是上游英文）`);
+  }
+  // 表里没有的码回落上游文案（宁可英文，也不要一条对不上号的本地文案）。
+  const unknown = new ScheduleInputError('brand_new_code', 'upstream english for brand_new_code');
+  const fallback = toInputError(unknown, hostTextFor('en'));
+  assert.equal(fallback.code, 'brand_new_code');
+  assert.equal(fallback.message, 'upstream english for brand_new_code', '未知码必须回落上游原文');
+});
+
+test('#198 死的 cmdScheduleDesc 已从 8 门键集里删除（/schedule 用 quickScheduleDesc）', () => {
+  // 键在字典里但零引用，是比死码更坏的「假现状」：读代码的人会以为还有一条命令面文案
+  // 挂在它上面。`/schedule` 的注册用的是 `quickScheduleDesc`（见 src/commands.ts）。
+  for (const locale of LOCALE_IDS) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(hostDicts[locale], 'cmdScheduleDesc'),
+      false,
+      `${locale}.cmdScheduleDesc 应已删除（该键零引用）`,
+    );
+  }
 });
 
 test('未收录的 locale id 回退 zh（不是回退 en，也不是抛）', () => {
