@@ -325,6 +325,14 @@ fold 通道同口径——`user-tools.ts` 的 `foldScheduleEventsCompat` 与 `pr
 ② 条目被正常消化（修复后的主路径）；③ 用户改动之后 `rearm(sessionId)` 显式解除（模块头一直写着
 「用户动了这条提醒才重新武装」，但接线侧此前只调 `reschedule()`，那是纯重排、不碰退避）。
 
+**代价的边界**（D2 的第 2 条取舍是「只标记、不出列」，代价因此必须是**有界**的）：条目投递后
+保留 `60s`，过了就由下一次 `mirrorDueIndex` 摘掉（issue #207）。60s 远大于同一次派发里
+「append dispatch → reconcileDueIndex → `rearmOneShot` 回读 uid/window/attachments」那一整段
+同步块，所以它既不会撞上回读，也不会像旧实现那样**永久**堆着（实测本机 454 条里 103 条是
+已投完的死重，而 `foldUserState` 把这些 id 全塞进 `owned`、`apply` 又对每个事件跑一次
+`owned.includes(...)` ⇒ 会话寿命内 fold 退化 O(n²)）。条目清空的 sidecar 文件同时被删：
+`listOwnershipSnapshots` 本来就会跳过空文件，但每一轮扫描仍要为它付一次 `statSync`。
+
 **遗留数据的边界**（必须说清，否则下一个读文档的人会以为修复追溯一切）：1.12.1 及以下写下的条目
 没有标记，冷会话又读不到日志，所以重启后**最多再白拉一次**；那一次唤醒里会话被附着，runtime 在
 `driveOnce` 开头对账补上标记，此后同一条目永不再叫。测试把这一面单独钉住（`验收②·遗留数据`），

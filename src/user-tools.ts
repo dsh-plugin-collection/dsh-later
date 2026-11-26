@@ -769,7 +769,13 @@ const foldCache = new WeakMap<object, FoldCacheEntry>();
  */
 export function foldUserState(session: Session): UserFoldState {
   const cursor = readLogCursor(session);
-  const generation = ownershipGeneration();
+  // 代数按**会话**取（issue #207）：`mirrorDueIndex` 让 sidecar 变成每次投递都写的东西，
+  // 全局那一枚于是变成"A 会话投递 ⇒ B 会话白折一遍全量日志"。拿不到 sessionId 时退回
+  // 全局计数（广播式失效，语义与旧实现一致）。
+  const sessionIdOf = session.header?.id;
+  const generation = ownershipGeneration(
+    typeof sessionIdOf === 'string' && sessionIdOf.length > 0 ? sessionIdOf : undefined,
+  );
   const cached = foldCache.get(session);
   if (
     cached !== undefined &&
@@ -789,7 +795,7 @@ export function foldUserState(session: Session): UserFoldState {
   const folded = asLegacySchedules(foldScheduleEventsCompat(events, inheritedEventCount) as never);
   // 所有权与投递形态：sidecar 为准（新写入），日志中的历史 OWNED 事件作底
   // （仅对已迁移的历史日志有效，见 #58：未迁移的旧日志会被宿主整份拒读）。
-  const sessionId = session.header?.id;
+  const sessionId = sessionIdOf;
   const owned = foldOwnedIds(events);
   const delivery = new Map(foldOwnedDelivery(events));
   if (typeof sessionId === 'string' && sessionId.length > 0) {

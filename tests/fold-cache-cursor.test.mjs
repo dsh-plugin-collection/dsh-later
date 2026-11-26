@@ -135,17 +135,47 @@ test('sidecar 单独改写（日志一条没加）也必须让 fold 失效', asy
   const before = foldUserState(session);
   assert.equal(before.delivery.get(created.id) ?? 'context', 'context');
   const readsBefore = session.ownEventsCalls;
-  const generationBefore = ownershipGeneration();
+  const generationBefore = ownershipGeneration(sessionId);
 
   // 只动 sidecar：把这条改成 /later 的「代发」形态。会话日志的 seq 完全不变。
   markOwnership(sessionId, created.id, 'user');
-  assert.ok(ownershipGeneration() > generationBefore, 'writeThrough 没拨代次');
+  // 代数按**会话**取（issue #207）：`mirrorDueIndex` 让 sidecar 变成每次投递都写的东西，
+  // 全局那一枚于是变成"A 会话投递 ⇒ B 会话白折一遍全量日志"。这里要断言的是**这个会话**
+  // 的代数前进了，而不是"某个全局计数器动了"。
+  assert.ok(
+    ownershipGeneration(sessionId) > generationBefore,
+    `writeThrough 没拨这个会话的代数（${ownershipGeneration(sessionId)} vs ${generationBefore}）`,
+  );
   assert.equal(session.seq, session.log.length);
 
   const after = foldUserState(session);
   assert.notEqual(after, before, 'sidecar 改了却命中旧缓存——所有权读到了过期值');
   assert.equal(after.delivery.get(created.id), 'user', 'delivery 未反映 sidecar');
   assert.ok(session.ownEventsCalls > readsBefore, '失效后本该重读日志');
+});
+
+test('A 会话写 sidecar 不得作废 B 会话的 fold 缓存（代数按会话，#207）', async () => {
+  // 修 #139 之后 `mirrorDueIndex` 让 sidecar 变成**每次投递都写**的东西，而代数原本是
+  // 进程全局的：任一会话投递一次，其它会话下一次 drive 的 fold 缓存必然 miss，白折一遍
+  // 全量日志（三个 fold 通道 × 全量事件）。代数改成按会话之后这条时序就断了。
+  freshOwnershipDir();
+  const a = await sessionWithOneSchedule(0);
+  const b = await sessionWithOneSchedule(0);
+  const sessionIdA = a.session.header.id;
+
+  const foldedB = foldUserState(b.session);
+  const readsBefore = b.session.ownEventsCalls;
+
+  // 只动 A 的 sidecar（等价于 A 投递一次后镜像）。B 的日志与 sidecar 一个字节都没变。
+  markOwnership(sessionIdA, a.created.id, 'user');
+
+  const again = foldUserState(b.session);
+  assert.equal(again, foldedB, 'A 的投递把 B 的 fold 缓存作废了（代数又退回进程全局）');
+  assert.equal(b.session.ownEventsCalls, readsBefore, 'B 不该因为 A 写盘而重读自己的日志');
+  // A 自己必须失效：这条断言防"改成按会话之后谁都不失效"的假绿。
+  const foldedABefore = foldUserState(a.session);
+  markOwnership(sessionIdA, a.created.id, 'user'); // 再一次写：仍是 A 的盘
+  assert.notEqual(foldUserState(a.session), foldedABefore, 'A 自己写盘之后 A 的缓存必须失效');
 });
 
 test('不同 Session 实例各自独立缓存（键是会话不是全局）', async () => {

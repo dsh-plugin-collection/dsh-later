@@ -42,7 +42,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Context } from '@deepseek-ai/cordis';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as plugin from '../lib/index.js';
 import { createExpirySweeper } from '../lib/expiry-sweeper.js';
@@ -312,6 +312,67 @@ test('recordOwnership：显式写新时刻就清消化标记（用户改动 = �
   const entry = getOwnership(sessionId, 'schedule-1');
   assert.equal(entry?.dispatchedAt, undefined, '写了新时刻必须解除消化状态');
   assert.equal(entry?.scheduledAt, now + 30_000);
+});
+
+// ── 1c. 有界清理：投完的条目有过期删除、空文件会消失（issue #207）──────────
+
+/**
+ * 条目投递后只打标记、永不摘除是 #139 修法的**刻意取舍**（`rearmOneShot` 在 dispatch 之后
+ * 还要按 id 回读 uid / windowSeconds / attachments），但它没有 TTL：一条长期会话每建一条
+ * 提醒就永久多一行。本机实测 `~/.dsh/plugin-state/later` 454 条里 103 条（22.7%）是这种
+ * 死重，而 `foldUserState` 把这些 id 全塞进 `owned`、投影 `init` 同样全收、`apply` 又对每个
+ * 事件跑一次 `owned.includes(...)` ⇒ 会话寿命内 fold 退化 O(n²)。
+ *
+ * 现在只摘「早已消化」的（`PRUNE_CONSUMED_AFTER_MS = 60s`，远大于同一次派发里
+ * 「append dispatch → reconcileDueIndex → rearmOneShot 回读」那一整段同步块）。
+ */
+test('mirrorDueIndex：早已消化的条目在下一次镜像时被摘除，该会话仍能建新提醒（#207）', () => {
+  freshOwnershipDir();
+  const sessionId = 'session-prune';
+  const now = Date.now();
+  // 三种条目摆在一份索引里：超期已消化（该摘）、刚消化（rearm 回读窗口内，该留）、
+  // 仍在 active 的 `every`（绝不能被当成死条目）。
+  writeSidecar(sessionId, {
+    version: 3,
+    entries: {
+      'schedule-old': { delivery: 'context', createdAt: now - 7200_000, uid: 'uid-old', scheduledAt: now - 7200_000, dispatchedAt: now - 61_000 },
+      'schedule-fresh': { delivery: 'context', createdAt: now - 1000, uid: 'uid-fresh', scheduledAt: now - 1000, dispatchedAt: now - 10 },
+      'schedule-every': { delivery: 'context', createdAt: now - 1000, uid: 'uid-every', scheduledAt: now + 120_000 },
+    },
+    paused: {},
+  });
+
+  // 一轮镜像：`targets` 只含仍在 active 的那条。清理跟着这一轮一起跑。
+  const changed = mirrorDueIndex(sessionId, new Map([['schedule-every', now + 120_000]]));
+  assert.equal(changed, 1, `本次镜像应当正好摘除一条超期条目，实测改动 ${changed}`);
+  assert.equal(getOwnership(sessionId, 'schedule-old'), undefined, '61s 前投完的条目必须被摘掉');
+  assert.equal(typeof getOwnership(sessionId, 'schedule-fresh')?.dispatchedAt, 'number', '刚投完的必须留着（rearm 回读窗口）');
+  assert.equal(typeof getOwnership(sessionId, 'schedule-every')?.scheduledAt, 'number', '仍在 active 的 every 绝不能被摘');
+  assert.equal(getOwnership(sessionId, 'schedule-every')?.dispatchedAt, undefined, 'every 不是"已消化"');
+
+  // 摘掉不等于这个会话语义受损：它仍然能建新提醒、新条目照常进索引。
+  recordOwnership(sessionId, 'schedule-next', 'context', 'uid-next', undefined, undefined, now - 1000);
+  assert.equal(typeof getOwnership(sessionId, 'schedule-next')?.scheduledAt, 'number', '清理之后该会话仍可正常建条目');
+  assert.equal(mirrorDueIndex(sessionId, new Map([['schedule-next', undefined]])), 1, '新条目仍能被正常镜像');
+});
+
+test('mirrorDueIndex：条目清空后 sidecar 文件本身被删除（空文件永不累积，#207）', () => {
+  freshOwnershipDir();
+  const sessionId = 'session-empty-file';
+  const now = Date.now();
+  const path = join(process.env.DSH_LATER_STATE_DIR, `${sessionId}.json`);
+  recordOwnership(sessionId, 'schedule-1', 'context', 'uid-1', undefined, undefined, now - 5000);
+  assert.equal(existsSync(path), true, '前置：文件先得在');
+  mirrorDueIndex(sessionId, new Map([['schedule-1', undefined]]));
+  // 把标记推回保留期之外，下一次镜像就会把它摘掉 ⇒ 文件里一条不剩 ⇒ 文件该消失。
+  const entry = getOwnership(sessionId, 'schedule-1');
+  writeSidecar(sessionId, { version: 3, entries: { 'schedule-1': { ...entry, dispatchedAt: now - 61_000 } }, paused: {} });
+  mirrorDueIndex(sessionId, new Map());
+  assert.equal(existsSync(path), false, '条目清空的 sidecar 文件必须被删掉（否则每轮扫描白付一次 statSync）');
+  assert.equal(getOwnership(sessionId, 'schedule-1'), undefined);
+  // 删掉之后仍可重建（清理不是单向门）。
+  recordOwnership(sessionId, 'schedule-2', 'context', 'uid-2', undefined, undefined, now + 60_000);
+  assert.equal(existsSync(path), true, '文件删掉之后该会话仍能重新落盘');
 });
 
 // ── 1b. 单会话读取（issue #199）────────────────────────────────────────────
