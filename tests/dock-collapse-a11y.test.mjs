@@ -52,9 +52,28 @@ test('折叠头与列表建立 ARIA 关联，列表常驻 DOM（#31）', () => {
   // 用 hidden 保 DOM（宿主同款），不是条件卸载——否则折叠时 aria-controls 指向空引用。
   assert.match(root, /hidden=\{!expanded\}/, '列表应常驻 DOM，用 hidden 控制可见性');
   assert.doesNotMatch(root, /\{expanded && <ul/, '不得退回「折叠即卸载列表」的旧写法');
-  // 相位补偿：进度条的相位在**挂载那一刻**冻结（组件头部 #13/#16 的结论），列表常驻 DOM 后
-  // 展开不再触发重挂载，所以随展开态换 key 强制重挂载——与旧的「收起即卸载」等价。
-  assert.match(root, /key=\{expanded \? 'open' : 'closed'\}/, '重展开需重挂载，否则相位停在第一次挂载时');
+  /*
+   * 相位补偿（issue #202 改写）。这条原先是**写法**断言——要求源码里有
+   * `key={expanded ? 'open' : 'closed'}`。它的问题不是判据太严，而是判据落在了错误的层面：
+   * 任何用别的机制达成同一效果的正确实现（比如显式的相位版本号）都会先被它判红，
+   * 于是「改守护测试」变成了修 bug 的前置条件，而它本该保护的行为反而没人测。
+   *
+   * 而且它对**注释**也生效：组件里解释「为什么不再用 key」的那段注释原样引用了旧写法，
+   * 一条只改注释的改动就能让它继续保持绿色。守护断言要经得起「实现换了、行为没变」。
+   *
+   * 现在分工：
+   *  - 这里只钉「代码里不再用 key 当重挂载命令」（key 是 React 的身份字段，拿它当命令会顺带
+   *    把每行的 DOM、滚动位置、正在跑的动画一起重建）；
+   *  - 行为断言在 `tests/dock-phase-nonce.test.mjs`：展开后进度条的 `--ss-bar-delay`
+   *    必须按当下时刻重取，而收起期间的 tick 不得改变它。
+   */
+  // 只看 `<ul …>` 这个开标签本身：切片用标签的起止，不牵扯环绕它的注释
+  // （组件里解释「为什么不再用 key」的注释会原样引用旧写法，整段扫描会打在注释上）。
+  const ulStart = root.indexOf('<ul');
+  assert.notEqual(ulStart, -1, '应能找到列表的开标签');
+  const ulTag = root.slice(ulStart, root.indexOf('>', ulStart) + 1);
+  assert.doesNotMatch(ulTag, /\bkey=/, '列表开标签不得再带 key：相位重取应由显式版本号负责');
+  assert.match(component, /phaseNonce/, '相位重取得走显式版本号（行为断言见 tests/dock-phase-nonce.test.mjs）');
 });
 
 test('编辑或命令在途时强制展开，并禁用折叠头（#31 根因）', () => {
