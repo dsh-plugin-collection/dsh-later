@@ -1,0 +1,110 @@
+name: kernels
+
+# 跨内核矩阵（issue #208 的 (a) 面）：main 上的 ci.yml 只测本仓 devDependencies 那一版内核，
+# 而 #75/#76 的故障只在**特定代次**上显形。这条工作流把「某代次到底支不支持」的那一面
+# 变成定期产出，而不是寄存在某台机器的手工结论里。
+#
+# 为什么不是每条 PR 都跑：真起 15 代内核要装包、要磁盘（每代一棵 ~200MB 的依赖树）、
+# 要能访问 registry。放在 PR 路径上会让每次改动都排一条十几分钟的长队，最后被绕过。
+# 定期跑 + 手动触发才有意义。
+#
+# ## 前置条件（真起内核才需要；缺了不会红 —— 会变成「未判定」，见 triage 那一步）
+#
+#  1. runner 上要有一棵铺好的内核树，默认 `~/dsh-versions/<代次>/`，每代一份完整
+#     `node_modules`（`@deepseek-ai/dsh*` 全套）。铺树就用本仓的 verify 脚本本身：
+#     本地跑一遍 `npm run verify:kernels`，它会把每一代装进这棵树再复用。
+#     `workflow_dispatch` 的 `kernel_root` 入参可以指到别的路径。
+#  2. 需要 registry 网络才能现场装代次；本工作流一律带 `--no-install`（只用现成树），
+#     因为「在 CI 里现装 15 代」既慢又会在 registry 抖动时制造一堆「未判定」。
+#  3. `--steps type` 会临时 `git worktree` + `pnpm install` 换依赖线，磁盘要留够
+#     （每代约 300MB，15 代串行跑完峰值更高）。所以默认只跑 mount,function，
+#     type/gate 由 dispatch 入参显式指定 —— 那是「有人要下结论」时才付的代价。
+on:
+  schedule:
+    # 每周一 03:17 UTC（避开整点：registry 与 runner 的整点高峰）。
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: '逗号分隔的代次子集（留空 = KERNEL_GENERATIONS 全量）'
+        required: false
+        default: ''
+      steps:
+        description: '面：mount / function / type / gate（默认 mount,function）'
+        required: false
+        default: 'mount,function'
+      kernel_root:
+        description: '内核树路径（留空 = ~/dsh-versions）'
+        required: false
+        default: ''
+
+jobs:
+  across:
+    runs-on: ubuntu-latest
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 构建（verify 读 lib/ 的产物：KERNEL_GENERATIONS 来自 lib/upstream-compat.js）
+        run: npm run build
+      - name: 前置条件自检（内核树在不在、steps 认不认）
+        # 这一条**不判红**：它只把环境事实打进日志。缺树时下一步会是「未判定」，
+        # 而不是一条看不出原因的常红 —— 红要留给真回归。
+        run: |
+          tree="${TREE_ROOT:-$HOME/dsh-versions}"
+          echo "内核树：$tree"
+          if [ -d "$tree" ]; then
+            echo "  ✔ 存在，代次目录 $(ls -1 "$tree" | wc -l) 个"
+          else
+            echo "  ⚠ 不存在：本次代次都会判「未判定」（不是插件回归）"
+          fi
+        env:
+          TREE_ROOT: ${{ inputs.kernel_root }}
+
+      - name: 跨内核回归（退出码先落盘，不在这里判红）
+        # 退出码是**三值**语义（0 绿 / 1 红 / 2 未判定），CI 只有两格。先原样落到文件里，
+        # 由下一步用 `scripts/triage-kernels.mjs` 翻成本作业的结论 —— 判据是代码，不是 shell。
+        # 也正因如此这一步刻意 `exit 0`：把 1 与 2 都折成「步骤失败」，就是那条常红噪声门禁。
+        run: |
+          set +e
+          mkdir -p .verify
+          ARGS=(--steps "$STEPS" --no-install)
+          # 两个可选轴只在**真的给了**时才追加：`--versions ""` 会把「全量」变成「一个代次都不跑」，
+          # 那种静默偏绿最坏（脚本对空串的兜底见 verify 里的 `given.length ? … : KERNEL_GENERATIONS`）。
+          [ -n "$VERSIONS" ] && ARGS+=(--versions "$VERSIONS")
+          [ -n "$TREE_ROOT" ] && ARGS+=(--kernel-root "$TREE_ROOT")
+          node scripts/verify-across-kernels.mjs "${ARGS[@]}" > .verify/kernels.log 2>&1
+          code=$?
+          echo "$code" > .verify/kernels-exit-code
+          cat .verify/kernels.log
+          exit 0
+        env:
+          STEPS: ${{ inputs.steps || 'mount,function' }}
+          VERSIONS: ${{ inputs.versions }}
+          TREE_ROOT: ${{ inputs.kernel_root }}
+
+      - name: 分诊：红 ≠ 未判定
+        # 唯一的判红点。`2`（未判定：代次装不出来 / 组合漂移）保持作业绿但打 `::warning::`；
+        # `1`（真回归）打 `::error::` 并让作业红；没拿到退出码（脚本崩了）同样判红 ——
+        # 「这一轮没产出结论」不是未判定，当绿就是又开一条空跑门禁。
+        run: node scripts/triage-kernels.mjs --code-file .verify/kernels-exit-code
+
+      - name: 上传明细（无论绿/红/未判定都要有）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: across-kernels
+          # 文件名带 UTC 时间戳（脚本自己拼的），所以用通配；include-hidden-files 是因为
+          # `.verify/` 以点开头，默认会被 upload-artifact 跳过。
+          path: |
+            .verify/across-kernels-*.json
+            .verify/kernels.log
+            .verify/kernels-exit-code
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 90
